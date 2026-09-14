@@ -245,3 +245,17 @@ export function cachedTimeRanges(cache: PreviewRamCache, fps: number): { start: 
   ranges.push({ start: a / fps, end: (prev + 1) / fps })
   return ranges
 }
+
+/** 独立时间轴窗没有节目监视器，用主窗广播的区间画绿条 */
+let remoteBarRanges: { start: number; end: number }[] = []
+
+export function setRemotePreviewBarRanges(ranges: { start: number; end: number }[]) {
+  remoteBarRanges = ranges
+  notifyPreviewCacheChanged(true)
+}
+
+export function getPreviewBarRanges(fps: number): { start: number; end: number }[] {
+  const local = cachedTimeRanges(sharedCache, fps)
+  return local.length ? local : remoteBarRanges
+}
+

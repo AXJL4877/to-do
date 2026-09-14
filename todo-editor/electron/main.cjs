@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, ipcMain, dialog, screen } = require('electron')
+const { app, BrowserWindow, shell, ipcMain, dialog, screen, Menu } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const { pathToFileURL } = require('url')
@@ -221,6 +221,9 @@ function userDataPaths() {
 }
 
 app.whenReady().then(() => {
+  // 去掉 Electron 默认 File/Edit/View/Window/Help 菜单栏
+  Menu.setApplicationMenu(null)
+
   ipcMain.handle('desktop:get-paths', () => userDataPaths())
 
   ipcMain.handle('desktop:save-project', async (_e, { defaultName, json }) => {

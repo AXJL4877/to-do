@@ -11,6 +11,7 @@ import {
   getCachedFrame,
   getProgramPreviewCache,
   previewFingerprint,
+  putCachedFrame,
   renderAndCacheFrame,
 } from '../lib/previewCache'
 import { useImageCache } from '../hooks/useImageCache'
@@ -327,13 +328,20 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program';
         return
       }
 
-      // 有视频时每帧实画（跳过可能过期的 RAM 缓存），避免闪占位/旧帧
+      // 有视频时每帧实画（不用可能过期的 RAM blit），但仍写入缓存供绿条/回 scrub
       if (clipUsesVideo(seq, t)) {
         lastShown = frame
         renderProgramFrame(
           canvas, seq, media, settings, t, imgCache.current, preview.w, preview.h,
           [], undefined, false,
         )
+        const { w: cw, h: ch } = cachePixelSize(preview.w, preview.h, st.prefs.previewCacheMaxEdge ?? 720)
+        if (seq !== lastSeq) {
+          lastSeq = seq
+          fp = previewFingerprint(seq, settings, cw, ch)
+          ensurePreviewFingerprint(cache, fp, cw, ch)
+        }
+        putCachedFrame(cache, frame, canvas, frame)
         raf = requestAnimationFrame(tick)
         return
       }

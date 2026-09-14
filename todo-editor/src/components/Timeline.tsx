@@ -8,9 +8,8 @@ import { parseMediaFiles, filesFromDataTransfer } from '../lib/importFiles'
 import { acceptMediaDrop, readMediaDrag } from '../lib/mediaDrag'
 import { desktop } from '../lib/desktop'
 import {
-  cachedTimeRanges,
+  getPreviewBarRanges,
   getPreviewCacheRev,
-  getProgramPreviewCache,
   subscribePreviewCache,
 } from '../lib/previewCache'
 import { getLivePlayhead, setLivePlayhead, subscribeLivePlayhead } from '../lib/livePlayhead'
@@ -40,7 +39,7 @@ export function Timeline({
   const fps = useApp((s) => s.settings.fps)
   const previewCacheRev = useSyncExternalStore(subscribePreviewCache, getPreviewCacheRev, getPreviewCacheRev)
   const cacheRanges = useMemo(
-    () => cachedTimeRanges(getProgramPreviewCache(), Math.max(1, fps)),
+    () => getPreviewBarRanges(Math.max(1, fps)),
     [previewCacheRev, fps],
   )
   const snap = useApp((s) => s.settings.snap)

@@ -1,6 +1,12 @@
 import { useApp } from '../store'
 import { desktop } from './desktop'
 import { setLivePlayhead } from './livePlayhead'
+import {
+  cachedTimeRanges,
+  getProgramPreviewCache,
+  setRemotePreviewBarRanges,
+  subscribePreviewCache,
+} from './previewCache'
 
 const CHANNEL = 'todo-editor-store-sync'
 
@@ -35,11 +41,22 @@ type SyncMsg =
   | { type: 'live'; origin: string; t: number }
   | { type: 'seek'; origin: string; t: number }
   | { type: 'request-capture'; origin: string }
+  | { type: 'preview-cache'; origin: string; ranges: { start: number; end: number }[] }
 
 function pickSync(state: Record<string, unknown>): SyncPatch {
   const patch: SyncPatch = {}
   for (const k of SYNC_KEYS) patch[k] = state[k]
   return patch
+}
+
+function currentPreviewRanges() {
+  const fps = Math.max(1, useApp.getState().settings.fps)
+  return cachedTimeRanges(getProgramPreviewCache(), fps)
+}
+
+function broadcastPreviewRanges() {
+  if (!started || isAnyPopout()) return
+  postOutgoing({ type: 'preview-cache', origin, ranges: currentPreviewRanges() })
 }
 
 let started = false
@@ -54,6 +71,7 @@ function handleIncoming(data: SyncMsg) {
   if (!data || data.origin === origin) return
   if (data.type === 'hello') {
     postOutgoing({ type: 'patch', origin, patch: pickSync(useApp.getState() as unknown as Record<string, unknown>) })
+    broadcastPreviewRanges()
     return
   }
   if (data.type === 'live') {
@@ -72,6 +90,11 @@ function handleIncoming(data: SyncMsg) {
     // 仅主窗（有节目画布）执行截帧
     if (isAnyPopout()) return
     useApp.getState().captureFrame()
+    return
+  }
+  if (data.type === 'preview-cache') {
+    if (!isTimelinePopout()) return
+    setRemotePreviewBarRanges(data.ranges ?? [])
     return
   }
   if (data.type === 'patch' && data.patch) {
@@ -136,6 +159,10 @@ export function initStoreSync() {
     }
   })
   cleanups.push(unsub)
+
+  if (!isAnyPopout()) {
+    cleanups.push(subscribePreviewCache(() => broadcastPreviewRanges()))
+  }
 
   if (isTimelinePopout() || isAiPopout()) {
     postOutgoing({ type: 'hello', origin })
