@@ -11,7 +11,9 @@ import { spawn } from 'node:child_process'
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const DATA_DIR = path.join(ROOT, '.data')
 const AI_OUT = path.join(ROOT, 'public/ai-generated')
-const MISHI = 'd:\\Desktop\\密匙\\run.py'
+// 协作者可设 MISHI_ROOT；默认本机桌面「密匙」
+const MISHI_ROOT = process.env.MISHI_ROOT || 'd:\\Desktop\\密匙'
+const MISHI = path.join(MISHI_ROOT, 'run.py')
 
 mkdirSync(DATA_DIR, { recursive: true })
 mkdirSync(AI_OUT, { recursive: true })
