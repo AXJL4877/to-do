@@ -1,0 +1,65 @@
+{
+  "name": "todo-editor",
+  "private": true,
+  "version": "1.0.0",
+  "description": "TO DO — 简约专业剪辑软件",
+  "author": "TO DO",
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "electron:dev": "concurrently -k \"vite\" \"wait-on http://127.0.0.1:5173 && electron .\"",
+    "electron:only": "electron .",
+    "dist:win": "npm run build && electron-builder --win nsis --x64",
+    "pack": "npm run dist:win"
+  },
+  "build": {
+    "appId": "com.todo.editor",
+    "productName": "TO DO",
+    "directories": {
+      "output": "C:/todo-editor-release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "artifactName": "TO-DO-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "shortcutName": "TO DO",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  },
+  "dependencies": {
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.511.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "three": "^0.186.0",
+    "zustand": "^5.0.5"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.8",
+    "@types/react": "^19.1.6",
+    "@types/react-dom": "^19.1.5",
+    "@types/three": "^0.186.0",
+    "@vitejs/plugin-react": "^4.5.2",
+    "concurrently": "^10.0.5",
+    "electron": "^36.9.5",
+    "electron-builder": "^26.15.3",
+    "typescript": "~5.8.3",
+    "vite": "^6.3.5",
+    "wait-on": "^9.1.0"
+  }
+}

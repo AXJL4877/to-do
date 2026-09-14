@@ -1,0 +1,41 @@
+# Dependencies & build
+**/node_modules/
+**/dist/
+**/dist-ssr/
+*.local
+
+# AI local data & generated media
+**/.data/
+**/public/ai-generated/
+!**/public/ai-generated/.gitkeep
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Logs & OS
+logs
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/*
+!.vscode/extensions.json
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Electron release / installers
+**/todo-editor-release/
+**/release/
+*.exe
+*.msi
+*.dmg
+*.AppImage
+C:/todo-editor-release/

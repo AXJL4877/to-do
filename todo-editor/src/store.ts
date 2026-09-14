@@ -1,0 +1,2088 @@
+import { create } from 'zustand'
+import {
+  type Camera3D, type Clip, type EffectPreset, type ExportJob, type MediaItem, type ProjectSettings, type Sequence,
+  type Tool, type Track, type TrackKind, type Transform3D, type TransitionType,
+  defaultAudio, defaultColor, defaultScene3d, defaultText, defaultTransform, defaultTransform3d, uid,
+} from './types'
+import { patchClipTransform, patchClipXY, resolveClipTransform, sampleKeyframes, seedPositionKeyframes, defaultHandles, snapToFrame } from './lib/keyframeEval'
+import { clearPreviewCache, getProgramPreviewCache, notifyPreviewCacheChanged } from './lib/previewCache'
+import { ensureScene3d } from './lib/scene3d'
+import { desktop } from './lib/desktop'
+import { setLivePlayhead } from './lib/livePlayhead'
+import { reviveMediaList } from './lib/importFiles'
+
+function sampleAt(c: Clip, prop: string, localT: number): number {
+  const tr = c.transform
+  switch (prop) {
+    case 'x': return sampleKeyframes(c.keyframes.x, localT, tr.x)
+    case 'y': return sampleKeyframes(c.keyframes.y, localT, tr.y)
+    case 'scale': return sampleKeyframes(c.keyframes.scale, localT, tr.scaleX)
+    case 'rotation': return sampleKeyframes(c.keyframes.rotation, localT, tr.rotation)
+    case 'opacity': return sampleKeyframes(c.keyframes.opacity, localT, tr.opacity)
+    case 'fontSize': return sampleKeyframes(c.keyframes.fontSize, localT, c.text?.fontSize ?? 48)
+    case 'volume': return sampleKeyframes(c.keyframes.volume, localT, c.audio.gainDb)
+    default: return 0
+  }
+}
+
+function bakeProp(c: Clip, prop: string, value: number): Clip {
+  switch (prop) {
+    case 'x': return { ...c, transform: { ...c.transform, x: value } }
+    case 'y': return { ...c, transform: { ...c.transform, y: value } }
+    case 'scale': return { ...c, transform: { ...c.transform, scaleX: value, scaleY: value } }
+    case 'rotation': return { ...c, transform: { ...c.transform, rotation: value } }
+    case 'opacity': return { ...c, transform: { ...c.transform, opacity: value } }
+    case 'fontSize': return c.text ? { ...c, text: { ...c.text, fontSize: value } } : c
+    case 'volume': return { ...c, audio: { ...c.audio, gainDb: value } }
+    default: return c
+  }
+}
+
+function makeTracks(): Track[] {
+  // 列表自上而下：字幕盖在视频之上（与监视器合成一致）
+  return [
+    { id: 'ts1', kind: 'subtitle', name: '字幕', locked: false, muted: false, solo: false, hidden: false, height: 28 },
+    { id: 'tv2', kind: 'video', name: 'V2', locked: false, muted: false, solo: false, hidden: false, height: 40 },
+    { id: 'tv1', kind: 'video', name: 'V1', locked: false, muted: false, solo: false, hidden: false, height: 48 },
+    { id: 'ta1', kind: 'audio', name: 'A1', locked: false, muted: false, solo: false, hidden: false, height: 36 },
+    { id: 'ta2', kind: 'audio', name: 'A2', locked: false, muted: false, solo: false, hidden: false, height: 28 },
+  ]
+}
+
+/** 把入场/出场时长写回片段上实际存在的动画源 */
+function applyEdgeAnimDuration(c: Clip, edge: 'in' | 'out', sec: number): Clip {
+  const dur = Math.max(0.2, c.duration)
+  const s = Math.max(0.05, Math.min(dur * 0.85, sec))
+  const peak = c.transform.opacity
+  let next: Clip = { ...c, keyframes: { ...c.keyframes } }
+
+  if (edge === 'in') {
+    if (next.transitionIn) {
+      next = { ...next, transitionIn: { ...next.transitionIn, duration: s } }
+    }
+    if (next.text && next.text.animIn !== 'none') {
+      next = { ...next, text: { ...next.text, animInDur: s } }
+    }
+    if (next.audio.fadeIn > 0) {
+      next = { ...next, audio: { ...next.audio, fadeIn: s } }
+    }
+    const op = [...(next.keyframes.opacity ?? [])].sort((a, b) => a.t - b.t)
+    if (op.length >= 2 && op[0].t <= 0.08 && op[0].value < 0.2) {
+      let i = 1
+      while (i < op.length && op[i].value < peak * 0.55) i++
+      const outPart = op.slice(i + 1)
+      const mk = (t: number, value: number, ease: import('./types').Ease) =>
+        ({ id: uid('kf'), t, value, ease })
+      next = {
+        ...next,
+        keyframes: {
+          ...next.keyframes,
+          opacity: [mk(0, 0, 'linear'), mk(s, peak, 'easeOut'), ...outPart],
+        },
+      }
+    }
+    for (const key of ['x', 'y', 'scale'] as const) {
+      const kf = next.keyframes[key]
+      if (!kf || kf.length < 2) continue
+      const sorted = [...kf].sort((a, b) => a.t - b.t)
+      if (sorted[0].t <= 0.08 && sorted[1].t - sorted[0].t > 0.04) {
+        const rewritten = sorted.map((k, idx) => (idx === 1 ? { ...k, t: s } : k))
+        next = { ...next, keyframes: { ...next.keyframes, [key]: rewritten } }
+      }
+    }
+  } else {
+    if (next.transitionOut) {
+      next = { ...next, transitionOut: { ...next.transitionOut, duration: s } }
+    }
+    if (next.text && next.text.animOut !== 'none') {
+      next = { ...next, text: { ...next.text, animOutDur: s } }
+    }
+    if (next.audio.fadeOut > 0) {
+      next = { ...next, audio: { ...next.audio, fadeOut: s } }
+    }
+    const op = [...(next.keyframes.opacity ?? [])].sort((a, b) => a.t - b.t)
+    if (op.length >= 2) {
+      const last = op[op.length - 1]
+      if (last.t >= dur - 0.08 && last.value < 0.2) {
+        let i = op.length - 2
+        while (i >= 0 && op[i].value < peak * 0.55) i--
+        const inPart = op.slice(0, Math.max(0, i + 1))
+        const outStart = Math.max(0, dur - s)
+        const mk = (t: number, value: number, ease: import('./types').Ease) =>
+          ({ id: uid('kf'), t, value, ease })
+        next = {
+          ...next,
+          keyframes: {
+            ...next.keyframes,
+            opacity: [...inPart, mk(outStart, peak, 'linear'), mk(dur, 0, 'easeIn')],
+          },
+        }
+      }
+    }
+  }
+  return next
+}
+
+function makeSeq(name = '序列 1'): Sequence {
+  return {
+    id: uid('seq'), name, tracks: makeTracks(), clips: [], markers: [],
+    workIn: 0, workOut: 10, scene3d: defaultScene3d(),
+  }
+}
+
+function migrateSequence(q: Sequence): Sequence {
+  const tracks = q.tracks.filter((t) => {
+    if (t.kind !== 'effect' && t.kind !== 'adjustment') return true
+    return q.clips.some((c) => c.trackId === t.id)
+  })
+  return {
+    ...q,
+    tracks,
+    scene3d: ensureScene3d(q.scene3d),
+    clips: q.clips.map((c) => ({
+      ...c,
+      transform3d: c.transform3d ?? (c.threeD ? defaultTransform3d() : undefined),
+    })),
+  }
+}
+
+function defaultSettings(): ProjectSettings {
+  return {
+    width: 1920, height: 1080, fps: 30, aspect: '16:9', pixelAspect: 1,
+    stillDuration: 5, cachePath: './cache', useProxy: false, hwAccel: true,
+    canvasBg: 'black', canvasColor: '#0a0a0a', safeFrame: false, magnetic: false, snap: true,
+  }
+}
+
+type Snap = { sequences: Sequence[]; activeSeqId: string }
+let clipboard: Clip[] = []
+let attrClipboard: Pick<Clip, 'transform' | 'color' | 'audio'> | null = null
+
+export type AppStore = {
+  drafts: { id: string; name: string; updatedAt: number }[]
+  projectId: string
+  projectName: string
+  settings: ProjectSettings
+  prefs: {
+    defaultDuration: number
+    cachePath: string
+    performance: 'quality' | 'balanced' | 'speed'
+    /** 预览 RAM 缓存最长边；0 = 与监视器同分辨率 */
+    previewCacheMaxEdge: 0 | 480 | 720 | 1080
+    shortcuts: Record<string, string>
+  }
+  media: MediaItem[]
+  folders: { id: string; name: string }[]
+  sequences: Sequence[]
+  activeSeqId: string
+  selectedClipIds: string[]
+  selectedMediaId: string | null
+  playhead: number
+  sourceIn: number
+  sourceOut: number
+  /** 用户打过 I/O 才按源范围入轨；默认整段素材 */
+  sourceIoArmed: boolean
+  sourceMediaId: string | null
+  playing: boolean
+  loop: boolean
+  tool: Tool
+  propTab: string
+  libraryTab: string
+  /** AI+：当前参考图（截帧 / 上传），生图·生视频共用；不进媒体库 */
+  aiRefDataUrl: string | null
+  /** AI+：生图 | 生视频 */
+  aiGenMode: 'image' | 'video'
+  /** AI+ 弹出：独立窗 / 应用内浮窗 */
+  aiFloat: boolean
+  aiFloatKind: null | 'window' | 'panel'
+  fullscreen: boolean
+  /** 时间轴+K帧轴浮窗（应用内可拖动，非系统独立窗口） */
+  timelineFloat: boolean
+  /** window=系统独立窗；panel=应用内浮窗（弹窗失败时的回退） */
+  timelineFloatKind: null | 'window' | 'panel'
+  /** 渐进式属性轮盘：锚定节目监视器；ring 为快捷入口；dial 可直接进拨盘 */
+  propWheel: null | {
+    x: number
+    y: number
+    ring?: 'static' | 'dynamic' | 'transition'
+    at?: number
+    dial?: { prop: 'scale' | 'opacity' | 'x' | 'y' | 'rotation' | 'fontSize'; mode: 'static' | 'dynamic'; label: string; origin: number }
+  }
+  editMode: 'insert' | 'overwrite'
+  toast: string | null
+  exportQueue: ExportJob[]
+  presets: EffectPreset[]
+  fonts: { id: string; name: string; enabled: boolean }[]
+  cacheMb: number
+  history: Snap[]
+  future: Snap[]
+  multiCam: boolean
+  modal: null | 'drafts' | 'settings' | 'prefs' | 'export' | 'shortcuts' | 'more'
+  layout: {
+    sidebarW: number
+    propsW: number
+    timelineH: number
+    sourceMonitorH: number
+    rightW: number
+    dockH: number
+    panelDock: { media: 'left' | 'right' | 'bottom'; ai: 'left' | 'right' | 'bottom' | 'tab' }
+  }
+  monitorView: 'program' | 'dual' | 'source'
+  /** 节目监视器合成模式：2D Canvas 或 3D WebGL */
+  monitorCompose: '2d' | '3d'
+  /** K帧模式：拖位置自动在播放头打点，并显示运动路径 */
+  autoKeyframe: boolean
+  timelineZoom: number
+  seq: () => Sequence
+  setToast: (m: string | null) => void
+  setModal: (m: AppStore['modal']) => void
+  pushHistory: () => void
+  undo: () => void
+  redo: () => void
+  newProject: (name?: string) => void
+  openDraft: (id: string) => void
+  saveProject: (opts?: { silent?: boolean }) => void
+  saveProjectToFile: () => Promise<void>
+  openProjectFromFile: () => Promise<void>
+  pickDesktopMedia: () => Promise<void>
+  saveAs: (name: string) => void
+  renameDraft: (id: string, name: string) => void
+  duplicateDraft: (id: string) => void
+  deleteDraft: (id: string) => void
+  updateSettings: (p: Partial<ProjectSettings>) => void
+  updatePrefs: (p: Partial<AppStore['prefs']>) => void
+  setMonitorCompose: (m: '2d' | '3d') => void
+  setAutoKeyframe: (on: boolean) => void
+  toggleAutoKeyframe: () => void
+  updateScene3d: (p: Partial<Sequence['scene3d']>) => void
+  updateCamera3d: (p: Partial<Camera3D>, opts?: { record?: boolean }) => void
+  toggleCameraKeyframe: (prop: string) => void
+  setClipThreeD: (enabled: boolean) => void
+  updateSelectedTransform3d: (p: Partial<Transform3D>, opts?: { record?: boolean }) => void
+  exportProgramFrame: () => Promise<void>
+  importMedia: (files: { name: string; url: string; path?: string; kind: MediaItem['kind']; duration: number; width?: number; height?: number }[]) => string[]
+  addFolder: (name: string) => void
+  toggleFavorite: (id: string) => void
+  removeMedia: (id: string) => void
+  relinkMedia: (id: string, url: string, path?: string) => void
+  setSelectedMedia: (id: string | null) => void
+  captureFrame: () => void
+  setAiRef: (dataUrl: string | null) => void
+  setAiGenMode: (m: 'image' | 'video') => void
+  setAiFloat: (v: boolean) => void
+  setPlayhead: (t: number, opts?: { exact?: boolean }) => void
+  togglePlay: () => void
+  stepFrame: (d: 1 | -1) => void
+  setLoop: (v: boolean) => void
+  setTool: (t: Tool) => void
+  setPropTab: (t: string) => void
+  setLibraryTab: (t: string) => void
+  setFullscreen: (v: boolean) => void
+  setTimelineFloat: (v: boolean) => void
+  openPropWheel: (x: number, y: number, ring?: 'static' | 'dynamic' | 'transition') => void
+  closePropWheel: () => void
+  /** 在节目监视器中心打开属性轮盘 */
+  openPropWheelOnMonitor: (ring?: 'static' | 'dynamic' | 'transition') => void
+  /** 监视器中心直接打开属性拨盘（K帧模式下 S/T） */
+  openPropDialOnMonitor: (prop: 'scale' | 'opacity') => void
+  setEditMode: (m: 'insert' | 'overwrite') => void
+  setSourceIO: (a: number, b: number) => void
+  addClipFromMedia: (mediaId: string, trackId?: string, at?: number) => void
+  selectClips: (ids: string[]) => void
+  moveClips: (ids: string[], dt: number, trackId?: string, opts?: { record?: boolean }) => void
+  razorAtPlayhead: () => void
+  /** 在指定时间剪切，不改播放头 */
+  razorAtTime: (t: number) => void
+  deleteSelected: (ripple?: boolean) => void
+  closeGaps: () => void
+  duplicateSelected: () => void
+  copyOrPaste: () => void
+  copySelected: () => void
+  cutSelected: () => void
+  pasteClipboard: () => void
+  selectAllClips: () => void
+  toggleClipEnabled: () => void
+  unlinkSelected: () => void
+  linkSelected: () => void
+  groupSelected: () => void
+  ungroupSelected: () => void
+  setClipSpeed: (speed: number) => void
+  reverseSelected: () => void
+  freezeFrame: () => void
+  updateSelectedTransform: (p: Partial<Clip['transform']>) => void
+  /** 在播放头写入/更新动态属性关键帧（优先于静态） */
+  setDynamicAtPlayhead: (prop: string, value: number) => void
+  updateSelectedColor: (p: Partial<Clip['color']>) => void
+  updateSelectedAudio: (p: Partial<Clip['audio']>) => void
+  updateSelectedText: (p: Partial<NonNullable<Clip['text']>>) => void
+  updateSelectedClip: (p: Partial<Clip>) => void
+  addTextClip: () => void
+  addTransition: (type: TransitionType) => void
+  addEffect: (type: string, name: string) => void
+  addMarker: (label?: string) => void
+  setWorkArea: (a: number, b: number) => void
+  toggleTrack: (id: string, key: 'locked' | 'muted' | 'solo' | 'hidden') => void
+  addTrack: (kind: TrackKind) => void
+  matchFrame: () => void
+  replaceClipMedia: (mediaId: string) => void
+  addKeyframe: (prop: string, value: number) => void
+  removeKeyframeAtPlayhead: (prop: string) => void
+  removeKeyframeById: (prop: string, kfId: string) => void
+  /** 一次删除多个关键帧（可跨属性）；只记一笔历史 */
+  removeKeyframesByIds: (byProp: Record<string, string[]>) => void
+  clearKeyframeTrack: (prop: string) => void
+  clearAllKeyframes: () => void
+  setKeyframeTime: (prop: string, kfId: string, t: number) => void
+  setKeyframeEase: (prop: string, kfId: string, ease: import('./types').Ease) => void
+  /** 拖动贝塞尔杠杆；自动升为 bezier 并补默认手柄 */
+  setKeyframeHandle: (
+    prop: string,
+    kfId: string,
+    which: 'oh' | 'ih',
+    handle: import('./types').KfHandle,
+  ) => void
+  enableBezierAt: (prop: string, kfId: string) => void
+  toggleKeyframeAtPlayhead: (prop: string, value: number) => void
+  gotoAdjacentKeyframe: (prop: string, dir: -1 | 1) => void
+  applyMotionPreset: (preset: 'fadeIn' | 'pushIn' | 'slideLeft' | 'pop' | 'fadeOut', opts?: { durationSec?: number }) => void
+  setSnap: (v: boolean) => void
+  setMagnetic: (v: boolean) => void
+  threePointEdit: () => void
+  slipClip: (dt: number, opts?: { record?: boolean }) => void
+  addSequence: () => void
+  setActiveSequence: (id: string) => void
+  toggleMultiCam: () => void
+  enqueueExport: (opts: { preset: string; name?: string; rangeOnly?: boolean; audioOnly?: boolean }) => void
+  savePreset: (name: string, kind: EffectPreset['kind'], payload: unknown) => void
+  applyPreset: (id: string) => void
+  clearCache: () => void
+  importFont: (name: string) => void
+  seedDemo: () => void
+  setLayout: (p: Partial<AppStore['layout']>) => void
+  setMonitorView: (v: AppStore['monitorView']) => void
+  setTimelineZoom: (z: number) => void
+  trimClip: (id: string, edge: 'in' | 'out', t: number, opts?: { record?: boolean }) => void
+  /** 在时间轴上拖出入场/出场时长（转场、文字动画、淡化、透明度关键帧） */
+  resizeEdgeAnim: (id: string, edge: 'in' | 'out', sec: number, opts?: { record?: boolean }) => void
+  snapTime: (t: number) => number
+  trackAtY: (contentY: number) => string | null
+  dragMoveClips: (ids: string[], origins: Record<string, number>, dt: number, trackId?: string, opts?: { shift?: boolean; alt?: boolean; primaryId?: string }) => void
+  /** 仅计算吸附后的 dt，不写 store（供时间线拖拽预览） */
+  previewDragDt: (ids: string[], origins: Record<string, number>, dt: number, opts?: { shift?: boolean; alt?: boolean; primaryId?: string }) => number
+  nudgeSelectedTransform: (dx: number, dy: number) => void
+  pasteAttributes: () => void
+  copyAttributes: () => void
+  liftExtract: (extract: boolean) => void
+  nestSelected: () => void
+  setTransitionDuration: (d: number) => void
+  extractAudio: () => void
+  syncByAudio: () => void
+}
+
+function loadLayout(): AppStore['layout'] {
+  const fallback: AppStore['layout'] = {
+    sidebarW: 248, propsW: 300, timelineH: 260, sourceMonitorH: 160,
+    rightW: 280, dockH: 220,
+    panelDock: { media: 'left', ai: 'tab' },
+  }
+  try {
+    const raw = localStorage.getItem('todo-layout')
+    if (!raw) return fallback
+    const parsed = JSON.parse(raw) as Partial<AppStore['layout']>
+    return {
+      ...fallback,
+      ...parsed,
+      panelDock: { ...fallback.panelDock, ...parsed.panelDock },
+    }
+  } catch { /* ignore */ }
+  return fallback
+}
+
+const initialLayout = loadLayout()
+
+/** 保证有可编辑的选中片段；失效选中时自动选中播放头下最上层片段 */
+function ensureClipSelected(
+  get: () => AppStore,
+  set: (p: Partial<AppStore>) => void,
+  notify: (m: string) => void,
+): boolean {
+  const seq = get().seq()
+  const ids = get().selectedClipIds
+  if (seq.clips.some((c) => ids.includes(c.id))) return true
+
+  const t = get().playhead
+  const trackIndex = new Map(seq.tracks.map((tr, i) => [tr.id, i]))
+  const under = seq.clips
+    .filter((c) => c.enabled !== false && t >= c.start && t < c.start + c.duration)
+    .sort((a, b) => (trackIndex.get(a.trackId) ?? 99) - (trackIndex.get(b.trackId) ?? 99))
+
+  const pick = under[0] ?? seq.clips[0]
+  if (!pick) {
+    notify('请先选中片段')
+    if (ids.length) set({ selectedClipIds: [] })
+    return false
+  }
+  set({ selectedClipIds: [pick.id] })
+  return true
+}
+
+
+/** 吸附到片段边缘 / 播放头 / 标记 / 0；阈值约 4 帧 */
+function snapClipEdge(
+  t: number,
+  duration: number,
+  exclude: Set<string>,
+  seq: Sequence,
+  playhead: number,
+  fps: number,
+) {
+  const thresh = Math.max(0.12, 8 / fps)
+  const targets: number[] = [0, playhead, ...seq.markers.map((m) => m.t)]
+  for (const c of seq.clips) {
+    if (exclude.has(c.id)) continue
+    targets.push(c.start, c.start + c.duration)
+  }
+  let best = t
+  let bestDist = thresh
+  for (const target of targets) {
+    const dStart = Math.abs(t - target)
+    if (dStart < bestDist) { bestDist = dStart; best = target }
+    const dEnd = Math.abs(t + duration - target)
+    if (dEnd < bestDist) { bestDist = dEnd; best = target - duration }
+  }
+  return Math.max(0, best)
+}
+
+
+type PendingDrag = {
+  ids: string[]
+  origins: Record<string, number>
+  dt: number
+  trackId?: string
+  opts?: { shift?: boolean; alt?: boolean; primaryId?: string }
+}
+let pendingDragMove: PendingDrag | null = null
+let dragMoveRaf = 0
+/** 属性连调（滑块）合并为一次历史 */
+let historyCoalesceUntil = 0
+
+function flushPendingDragMove(get: () => AppStore, set: (p: Partial<AppStore> | ((s: AppStore) => Partial<AppStore>)) => void) {
+  if (dragMoveRaf) {
+    cancelAnimationFrame(dragMoveRaf)
+    dragMoveRaf = 0
+  }
+  if (pendingDragMove) flushDragMove(get, set)
+}
+
+function pushHistoryCoalesced(get: () => AppStore, set: (p: Partial<AppStore> | ((s: AppStore) => Partial<AppStore>)) => void) {
+  const now = performance.now()
+  if (now < historyCoalesceUntil) return
+  historyCoalesceUntil = now + 450
+  const { sequences, activeSeqId, history } = get()
+  set({
+    history: [...history.slice(-40), { sequences: JSON.parse(JSON.stringify(sequences)), activeSeqId }],
+    future: [],
+  })
+}
+
+function resolveDragDt(
+  get: () => AppStore,
+  ids: string[],
+  origins: Record<string, number>,
+  dt: number,
+  opts?: { shift?: boolean; alt?: boolean; primaryId?: string },
+) {
+  const setIds = new Set(ids)
+  const st = get()
+  const wantSnap = opts?.alt ? false : !!(opts?.shift || st.settings.snap)
+  const primaryId = opts?.primaryId && setIds.has(opts.primaryId) ? opts.primaryId : ids[0]
+  const primary = st.seq().clips.find((c) => c.id === primaryId)
+  const origin0 = origins[primaryId] ?? primary?.start ?? 0
+  if (!wantSnap || !primary) return dt
+  const raw = Math.max(0, origin0 + dt)
+  const snapped = snapClipEdge(raw, primary.duration, setIds, st.seq(), st.playhead, st.settings.fps)
+  return snapped - origin0
+}
+
+function flushDragMove(get: () => AppStore, set: (p: Partial<AppStore> | ((s: AppStore) => Partial<AppStore>)) => void) {
+  const pending = pendingDragMove
+  pendingDragMove = null
+  dragMoveRaf = 0
+  if (!pending) return
+  const { ids, origins, dt, trackId, opts } = pending
+  const setIds = new Set(ids)
+  const appliedDt = resolveDragDt(get, ids, origins, dt, opts)
+  const cur = get().seq()
+  set({
+    sequences: get().sequences.map((s) =>
+      s.id !== cur.id
+        ? s
+        : {
+            ...s,
+            clips: s.clips.map((c) =>
+              setIds.has(c.id)
+                ? {
+                    ...c,
+                    start: Math.max(0, (origins[c.id] ?? c.start) + appliedDt),
+                    trackId: trackId ?? c.trackId,
+                  }
+                : c,
+            ),
+          },
+    ),
+  })
+}
+
+export const useApp = create<AppStore>((set, get) => {
+  const notify = (m: string) => {
+    set({ toast: m })
+    setTimeout(() => set({ toast: null }), 2200)
+  }
+
+  const patchSeq = (fn: (s: Sequence) => Sequence) => {
+    const cur = get().seq()
+    set({ sequences: get().sequences.map((s) => (s.id === cur.id ? fn(s) : s)) })
+  }
+
+  const patchSelected = (fn: (c: Clip) => Clip) => {
+    const ids = new Set(get().selectedClipIds)
+    patchSeq((s) => ({ ...s, clips: s.clips.map((c) => (ids.has(c.id) ? fn(c) : c)) }))
+  }
+
+  const first = makeSeq()
+
+  const loadDraftsIndex = (): { id: string; name: string; updatedAt: number }[] => {
+    try {
+      const raw = localStorage.getItem('todo-drafts-index')
+      if (raw) {
+        const list = JSON.parse(raw) as { id: string; name: string; updatedAt: number }[]
+        if (Array.isArray(list) && list.length) return list
+      }
+    } catch { /* */ }
+    return [{ id: 'draft_demo', name: '演示草稿', updatedAt: Date.now() }]
+  }
+
+  const persistDraftsIndex = (drafts: { id: string; name: string; updatedAt: number }[]) => {
+    localStorage.setItem('todo-drafts-index', JSON.stringify(drafts))
+  }
+
+  const drafts0 = loadDraftsIndex()
+
+  return {
+    drafts: drafts0,
+    projectId: drafts0[0]?.id ?? 'draft_demo',
+    projectName: drafts0[0]?.name ?? '演示草稿',
+    settings: defaultSettings(),
+    prefs: {
+      defaultDuration: 5, cachePath: './cache', performance: 'balanced',
+      previewCacheMaxEdge: 720,
+      shortcuts: { split: 'Ctrl+B', import: 'Ctrl+I', snap: 'S', select: 'V', razor: 'C', undo: 'Ctrl+Z', play: 'Space' },
+    },
+    media: [],
+    folders: [
+      { id: 'f_all', name: '全部' }, { id: 'f_broll', name: 'B-roll' },
+      { id: 'f_audio', name: '音频' }, { id: 'f_sticker', name: '贴纸' },
+    ],
+    sequences: [first],
+    activeSeqId: first.id,
+    selectedClipIds: [],
+    selectedMediaId: null,
+    playhead: 0,
+    sourceIn: 0,
+    sourceOut: 5,
+    sourceIoArmed: false,
+    sourceMediaId: null,
+    playing: false,
+    loop: false,
+    tool: 'select',
+    propTab: 'transform',
+    libraryTab: 'media',
+    aiRefDataUrl: null,
+    aiGenMode: 'image',
+    aiFloat: false,
+    aiFloatKind: null,
+    fullscreen: false,
+    timelineFloat: false,
+    timelineFloatKind: null,
+    propWheel: null,
+    editMode: 'overwrite',
+    toast: null,
+    exportQueue: [],
+    presets: [
+      { id: 'preset_cinematic', name: '电影调色', kind: 'color', payload: { exposure: 0.05, contrast: 0.12, saturation: -0.08, temperature: 0.1, lutStrength: 0.6, lutName: 'Cinematic' } },
+      { id: 'preset_vivid', name: '鲜艳通透', kind: 'color', payload: { exposure: 0.08, contrast: 0.1, saturation: 0.2, highlights: -0.05 } },
+      { id: 'preset_zoom_in', name: '缓慢推近', kind: 'motion', payload: { scaleX: 1.15, scaleY: 1.15 } },
+      { id: 'preset_lower_third', name: '下三分之一', kind: 'text', payload: { fontSize: 36, align: 'left', animIn: 'fade' } },
+      { id: 'tpl_vlog', name: 'Vlog 片头模板', kind: 'motion', payload: { x: 0, y: -0.2, scaleX: 1.05, scaleY: 1.05 } },
+      { id: 'tpl_promo', name: '产品宣传模板', kind: 'color', payload: { contrast: 0.15, saturation: 0.12, temperature: 0.05 } },
+    ],
+    fonts: [
+      { id: 'f1', name: 'Syne', enabled: true },
+      { id: 'f2', name: 'DM Sans', enabled: true },
+    ],
+    cacheMb: 12.4,
+    history: [],
+    future: [],
+    multiCam: false,
+    modal: null,
+    layout: initialLayout,
+    timelineZoom: 80,
+    monitorView: 'program',
+    monitorCompose: '2d',
+    autoKeyframe: false,
+
+    seq() {
+      return get().sequences.find((q) => q.id === get().activeSeqId) ?? get().sequences[0]
+    },
+    setToast: (m) => {
+      set({ toast: m })
+      if (m) setTimeout(() => set({ toast: null }), 2200)
+    },
+    setModal: (m) => set({ modal: m }),
+
+    pushHistory() {
+      historyCoalesceUntil = 0
+      const { sequences, activeSeqId, history } = get()
+      set({
+        history: [...history.slice(-40), { sequences: JSON.parse(JSON.stringify(sequences)), activeSeqId }],
+        future: [],
+      })
+    },
+    undo() {
+      flushPendingDragMove(get, set)
+      const { history, future, sequences, activeSeqId } = get()
+      if (!history.length) {
+        notify('没有可撤销的操作')
+        return
+      }
+      const prev = history[history.length - 1]
+      historyCoalesceUntil = 0
+      set({
+        history: history.slice(0, -1),
+        future: [...future, { sequences: JSON.parse(JSON.stringify(sequences)), activeSeqId }],
+        sequences: prev.sequences,
+        activeSeqId: prev.activeSeqId,
+      })
+    },
+    redo() {
+      flushPendingDragMove(get, set)
+      const { history, future, sequences, activeSeqId } = get()
+      if (!future.length) {
+        notify('没有可重做的操作')
+        return
+      }
+      const next = future[future.length - 1]
+      historyCoalesceUntil = 0
+      set({
+        future: future.slice(0, -1),
+        history: [...history, { sequences: JSON.parse(JSON.stringify(sequences)), activeSeqId }],
+        sequences: next.sequences,
+        activeSeqId: next.activeSeqId,
+      })
+    },
+
+    newProject(name = '未命名项目') {
+      const s = makeSeq()
+      const id = uid('draft')
+      const drafts = [...get().drafts, { id, name, updatedAt: Date.now() }]
+      persistDraftsIndex(drafts)
+      set({
+        projectId: id, projectName: name, settings: defaultSettings(), media: [],
+        sequences: [s], activeSeqId: s.id, selectedClipIds: [], playhead: 0,
+        drafts,
+        history: [], future: [], modal: null,
+      })
+      notify('已新建项目')
+    },
+
+    openDraft(id) {
+      const d = get().drafts.find((x) => x.id === id)
+      if (!d) return
+      const raw = localStorage.getItem(`todo-draft-${id}`)
+      if (raw) {
+        try {
+          const data = JSON.parse(raw)
+          const sequences = (data.sequences as Sequence[]).map(migrateSequence)
+          const activeSeqId = String(data.activeSeqId || sequences[0]?.id)
+          const seq = sequences.find((q) => q.id === activeSeqId) ?? sequences[0]
+          const savedIds = Array.isArray(data.selectedClipIds) ? data.selectedClipIds as string[] : []
+          const selectedClipIds = savedIds.filter((cid) => seq?.clips.some((c) => c.id === cid))
+          const media = reviveMediaList((data.media as MediaItem[]) ?? [])
+          const offlineN = media.filter((m) => m.offline).length
+          set({
+            projectId: id, projectName: d.name, settings: data.settings, media,
+            folders: data.folders ?? get().folders,
+            sequences,
+            activeSeqId,
+            prefs: data.prefs ?? get().prefs, presets: data.presets ?? [], fonts: data.fonts ?? get().fonts,
+            selectedClipIds,
+            playhead: typeof data.playhead === 'number' ? data.playhead : 0,
+            modal: null,
+            monitorCompose: data.monitorCompose === '3d' ? '3d' : '2d',
+          })
+          notify(offlineN
+            ? `已打开「${d.name}」· ${offlineN} 个素材需重新导入（旧 blob 链接已失效）`
+            : `已打开「${d.name}」`)
+          return
+        } catch { /* */ }
+      }
+      const s = makeSeq()
+      set({ projectId: id, projectName: d.name, sequences: [s], activeSeqId: s.id, media: [], modal: null })
+    },
+
+    saveProject(opts) {
+      const s = get()
+      localStorage.setItem(`todo-draft-${s.projectId}`, JSON.stringify({
+        settings: s.settings, media: s.media, folders: s.folders, sequences: s.sequences,
+        activeSeqId: s.activeSeqId, prefs: s.prefs, presets: s.presets, fonts: s.fonts,
+        monitorCompose: s.monitorCompose,
+        selectedClipIds: s.selectedClipIds,
+        playhead: s.playhead,
+      }))
+      const drafts = s.drafts.map((d) => (d.id === s.projectId ? { ...d, name: s.projectName, updatedAt: Date.now() } : d))
+      persistDraftsIndex(drafts)
+      set({ drafts })
+      if (!opts?.silent) notify('项目已保存')
+    },
+
+    async saveProjectToFile() {
+      const api = desktop()
+      const s = get()
+      const payload = {
+        version: 1,
+        settings: s.settings, media: s.media, folders: s.folders, sequences: s.sequences,
+        activeSeqId: s.activeSeqId, prefs: s.prefs, presets: s.presets, fonts: s.fonts,
+        monitorCompose: s.monitorCompose, projectName: s.projectName,
+      }
+      if (!api) {
+        get().saveProject()
+        return
+      }
+      get().saveProject()
+      const r = await api.saveProjectFile(`${s.projectName || 'project'}.todo.json`, payload)
+      if (r.ok && r.path) notify(`已保存到文件`)
+    },
+
+    async openProjectFromFile() {
+      const api = desktop()
+      if (!api) { notify('请在桌面版中打开工程文件'); return }
+      const r = await api.openProjectFile()
+      if (!r.ok || !r.json) return
+      const data = r.json as Record<string, unknown>
+      const id = uid('draft')
+      const name = String(data.projectName || '导入工程')
+      const sequences = ((data.sequences as Sequence[]) || [makeSeq()]).map(migrateSequence)
+      const media = reviveMediaList((data.media as MediaItem[]) ?? [])
+      set({
+        projectId: id, projectName: name,
+        settings: (data.settings as ProjectSettings) ?? get().settings,
+        media,
+        folders: (data.folders as AppStore['folders']) ?? get().folders,
+        sequences, activeSeqId: String(data.activeSeqId || sequences[0]?.id),
+        prefs: (data.prefs as AppStore['prefs']) ?? get().prefs,
+        presets: (data.presets as EffectPreset[]) ?? get().presets,
+        fonts: (data.fonts as AppStore['fonts']) ?? get().fonts,
+        monitorCompose: data.monitorCompose === '3d' ? '3d' : '2d',
+        selectedClipIds: [], playhead: 0, history: [], future: [], modal: null,
+        drafts: [...get().drafts, { id, name, updatedAt: Date.now() }],
+      })
+      get().saveProject({ silent: true })
+      notify('工程已打开')
+    },
+
+    async pickDesktopMedia() {
+      const api = desktop()
+      if (!api) return
+      const r = await api.pickMediaFiles()
+      if (!r.ok || !r.files.length) return
+      const parsed = await Promise.all(r.files.map(async (f) => {
+        if (f.kind === 'image') {
+          const dim = await new Promise<{ w: number; h: number }>((resolve) => {
+            const img = new Image()
+            img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight })
+            img.onerror = () => resolve({ w: 1280, h: 720 })
+            img.src = f.url
+          })
+          return {
+            name: f.name, url: f.url, path: f.path, kind: 'image' as const,
+            duration: get().settings.stillDuration, width: dim.w, height: dim.h,
+          }
+        }
+        if (f.kind === 'audio') {
+          return { name: f.name, url: f.url, path: f.path, kind: 'audio' as const, duration: 30 }
+        }
+        const meta = await new Promise<{ d: number; w: number; h: number }>((resolve) => {
+          const v = document.createElement('video')
+          v.preload = 'metadata'
+          v.onloadedmetadata = () => resolve({
+            d: Number.isFinite(v.duration) ? v.duration : 5,
+            w: v.videoWidth || 1280, h: v.videoHeight || 720,
+          })
+          v.onerror = () => resolve({ d: 5, w: 1280, h: 720 })
+          v.src = f.url
+        })
+        return {
+          name: f.name, url: f.url, path: f.path, kind: 'video' as const,
+          duration: meta.d, width: meta.w, height: meta.h,
+        }
+      }))
+      get().importMedia(parsed)
+    },
+
+    async exportProgramFrame() {
+      const api = desktop()
+      const canvas = document.querySelector<HTMLCanvasElement>('[data-testid="program-canvas-3d"], [data-testid="program-canvas"]')
+      if (!canvas) { notify('无监视器画面'); return }
+      const dataUrl = canvas.toDataURL('image/png')
+      if (api) {
+        const r = await api.exportFramePng(`frame_${Date.now()}.png`, dataUrl)
+        if (r.ok) notify('帧已导出')
+        return
+      }
+      const a = document.createElement('a')
+      a.href = dataUrl
+      a.download = `frame_${Date.now()}.png`
+      a.click()
+      notify('帧已下载')
+    },
+
+    saveAs(name) {
+      const id = uid('draft')
+      const drafts = [...get().drafts, { id, name, updatedAt: Date.now() }]
+      persistDraftsIndex(drafts)
+      set({ projectId: id, projectName: name, drafts })
+      get().saveProject()
+    },
+
+    renameDraft(id, name) {
+      const drafts = get().drafts.map((d) => (d.id === id ? { ...d, name } : d))
+      persistDraftsIndex(drafts)
+      set({
+        drafts,
+        projectName: get().projectId === id ? name : get().projectName,
+      })
+    },
+    duplicateDraft(id) {
+      const src = get().drafts.find((d) => d.id === id)
+      if (!src) return
+      const nid = uid('draft')
+      const raw = localStorage.getItem(`todo-draft-${id}`)
+      if (raw) localStorage.setItem(`todo-draft-${nid}`, raw)
+      const drafts = [...get().drafts, { id: nid, name: `${src.name} 副本`, updatedAt: Date.now() }]
+      persistDraftsIndex(drafts)
+      set({ drafts })
+      notify('草稿已复制')
+    },
+    deleteDraft(id) {
+      localStorage.removeItem(`todo-draft-${id}`)
+      const drafts = get().drafts.filter((d) => d.id !== id)
+      persistDraftsIndex(drafts)
+      set({ drafts })
+    },
+
+    updateSettings(p) { set({ settings: { ...get().settings, ...p } }) },
+    updatePrefs(p) {
+      const prev = get().prefs
+      const next = {
+        ...prev,
+        previewCacheMaxEdge: (prev.previewCacheMaxEdge ?? 720) as 0 | 480 | 720 | 1080,
+        ...p,
+      }
+      set({ prefs: next })
+      if (p.previewCacheMaxEdge != null && p.previewCacheMaxEdge !== prev.previewCacheMaxEdge) {
+        clearPreviewCache(getProgramPreviewCache())
+        notifyPreviewCacheChanged(true)
+        notify('预览缓存分辨率已改，需重新播放填充')
+      }
+    },
+
+    importMedia(files) {
+      const items: MediaItem[] = files.map((f) => ({
+        id: uid('media'), name: f.name, kind: f.kind, url: f.url, path: f.path,
+        duration: f.duration,
+        width: f.width, height: f.height, fps: 30,
+        folderId: f.kind === 'audio' ? 'f_audio' : f.kind === 'sticker' ? 'f_sticker' : 'f_all',
+        favorite: false, offline: false,
+      }))
+      const first = items[0]
+      set({
+        media: [...get().media, ...items],
+        selectedMediaId: first?.id ?? get().selectedMediaId,
+        sourceMediaId: first?.id ?? get().sourceMediaId,
+        ...(first ? {
+          sourceIn: 0,
+          sourceOut: Math.max(0.2, first.duration || 5),
+          sourceIoArmed: false,
+        } : {}),
+      })
+      notify(`已导入 ${items.length} 个素材`)
+      // 立刻落盘，避免关软件丢库
+      queueMicrotask(() => get().saveProject({ silent: true }))
+      return items.map((i) => i.id)
+    },
+
+    addFolder(name) { set({ folders: [...get().folders, { id: uid('folder'), name }] }) },
+    toggleFavorite(id) {
+      set({ media: get().media.map((m) => (m.id === id ? { ...m, favorite: !m.favorite } : m)) })
+    },
+    removeMedia(id) {
+      get().pushHistory()
+      const next = get().media.filter((m) => m.id !== id)
+      set({
+        media: next,
+        selectedMediaId: get().selectedMediaId === id ? (next[0]?.id ?? null) : get().selectedMediaId,
+        sourceMediaId: get().sourceMediaId === id ? (next[0]?.id ?? null) : get().sourceMediaId,
+      })
+      notify('已从媒体库移除')
+      queueMicrotask(() => get().saveProject({ silent: true }))
+    },
+    relinkMedia(id, url, path) {
+      set({
+        media: get().media.map((m) => (m.id === id ? { ...m, url, path: path ?? m.path, offline: false } : m)),
+      })
+      notify('素材已重新链接')
+    },
+    setSelectedMedia(id) {
+      const m = get().media.find((x) => x.id === id)
+      set({
+        selectedMediaId: id,
+        sourceMediaId: id,
+        sourceIn: 0,
+        sourceOut: Math.max(0.2, m?.duration ?? 5),
+        sourceIoArmed: false,
+      })
+    },
+
+    captureFrame() {
+      // AI 独立窗没有节目画布：请主窗代截
+      if (typeof location !== 'undefined' && new URLSearchParams(location.search).get('popout') === 'ai') {
+        void import('./lib/storeSync').then(({ requestAiCapture }) => requestAiCapture())
+        return
+      }
+      const canvas =
+        document.querySelector<HTMLCanvasElement>('[data-testid="program-canvas-3d"]')
+        ?? document.querySelector<HTMLCanvasElement>('[data-testid="program-canvas"]')
+        ?? document.getElementById('program-canvas') as HTMLCanvasElement | null
+      if (!canvas) { notify('无法截帧'); return }
+      const dataUrl = canvas.toDataURL('image/png')
+      // 不入媒体库；只作 AI 参考，并写入 SQLite 冷库
+      const patch: Partial<AppStore> = { aiRefDataUrl: dataUrl }
+      if (!get().aiFloat && get().layout.panelDock?.ai === 'tab') patch.libraryTab = 'ai'
+      set(patch)
+      notify('已截帧 · 已设为 AI 参考图（未入库）')
+      void fetch('/api/ai-assets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dataUrl, kind: 'capture', name: `帧_${Date.now()}.png` }),
+      }).catch(() => { /* 内存参考图已可用 */ })
+    },
+
+    setAiRef(dataUrl) { set({ aiRefDataUrl: dataUrl }) },
+    setAiGenMode(m) { set({ aiGenMode: m }) },
+    setAiFloat(v) {
+      if (!v) {
+        set({ aiFloat: false, aiFloatKind: null })
+        void import('./lib/aiPopout').then(({ closeAiPopout }) => closeAiPopout())
+        return
+      }
+      set({ aiFloat: v })
+    },
+
+    setPlayhead(t, opts) {
+      const fps = get().settings.fps
+      const next = opts?.exact
+        ? Math.max(0, t)
+        : Math.max(0, Math.round(t * fps) / fps)
+      setLivePlayhead(next)
+      if (Math.abs(next - get().playhead) < (opts?.exact ? 1e-6 : 1 / fps / 2)) return
+      set({ playhead: next })
+    },
+    togglePlay() { set({ playing: !get().playing }) },
+    stepFrame(d) { set({ playhead: Math.max(0, get().playhead + d / get().settings.fps), playing: false }) },
+    setLoop(v) { set({ loop: v }) },
+    setTool(t) { set({ tool: t }) },
+    setPropTab(t) { set({ propTab: t }) },
+    setLibraryTab(t) { set({ libraryTab: t }) },
+    setFullscreen(v) { set({ fullscreen: v }) },
+    setTimelineFloat(v) {
+      // 只改状态；打开窗口必须在点击处理里同步调用 openTimelinePopout()
+      if (!v) {
+        set({ timelineFloat: false, timelineFloatKind: null })
+        void import('./lib/timelinePopout').then(({ closeTimelinePopout }) => closeTimelinePopout())
+        return
+      }
+      set({ timelineFloat: v })
+    },
+    openPropWheel(x, y, ring) {
+      if (!ensureClipSelected(get, set, notify)) return
+      set({ propWheel: { x, y, ring, at: Date.now() } })
+    },
+    openPropWheelOnMonitor(ring) {
+      if (!ensureClipSelected(get, set, notify)) return
+      const el =
+        document.querySelector<HTMLElement>('[data-testid="program-monitor"]')
+        ?? document.querySelector<HTMLElement>('[data-testid="monitor-area"]')
+      let x = window.innerWidth * 0.55
+      let y = window.innerHeight * 0.38
+      if (el) {
+        const r = el.getBoundingClientRect()
+        x = r.left + r.width / 2
+        y = r.top + r.height / 2
+      }
+      const ae = document.activeElement
+      if (ae instanceof HTMLElement && ae.isConnected && ae !== document.body) {
+        if (ae.matches('input, textarea, select, button, [contenteditable="true"]')) ae.blur()
+      }
+      document.querySelector<HTMLElement>('[data-testid="app-shell"]')?.focus({ preventScroll: true })
+      set({ propWheel: { x, y, ring, at: Date.now() } })
+    },
+    openPropDialOnMonitor(prop) {
+      if (!ensureClipSelected(get, set, notify)) return
+      if (!get().autoKeyframe) get().setAutoKeyframe(true)
+      const clip = get().seq().clips.find((c) => get().selectedClipIds.includes(c.id))
+      if (!clip) return
+      const live = resolveClipTransform(clip, get().playhead)
+      const origin = prop === 'scale' ? live.scaleX : live.opacity
+      const label = prop === 'scale' ? '缩放 · K' : '透明 · K'
+      const el =
+        document.querySelector<HTMLElement>('[data-testid="program-monitor"]')
+        ?? document.querySelector<HTMLElement>('[data-testid="monitor-area"]')
+      let x = window.innerWidth * 0.55
+      let y = window.innerHeight * 0.38
+      if (el) {
+        const r = el.getBoundingClientRect()
+        x = r.left + r.width / 2
+        y = r.top + r.height / 2
+      }
+      document.querySelector<HTMLElement>('[data-testid="app-shell"]')?.focus({ preventScroll: true })
+      set({
+        propWheel: {
+          x, y, ring: 'dynamic', at: Date.now(),
+          dial: { prop, mode: 'dynamic', label, origin },
+        },
+      })
+    },
+    closePropWheel() { set({ propWheel: null }) },
+    setEditMode(m) { set({ editMode: m }) },
+    setSourceIO(a, b) { set({ sourceIn: a, sourceOut: b, sourceIoArmed: true }) },
+
+    addClipFromMedia(mediaId, trackId, at) {
+      get().pushHistory()
+      const media = get().media.find((m) => m.id === mediaId)
+      if (!media) return
+      const sequence = get().seq()
+      const wantKind = media.kind === 'audio' ? 'audio' : 'video'
+      const dropped = trackId ? sequence.tracks.find((t) => t.id === trackId) : undefined
+      const track = (dropped && dropped.kind === wantKind ? dropped : undefined)
+        ?? sequence.tracks.find((t) => t.kind === wantKind)
+      if (!track) { notify('没有可用轨道'); return }
+      // 仅用户打过 I/O 且源监视器就是这份素材时，才按范围入轨
+      const useSourceRange = get().sourceIoArmed
+        && get().sourceMediaId === mediaId
+        && media.kind !== 'image'
+        && media.kind !== 'sticker'
+      const range = Math.max(0, get().sourceOut - get().sourceIn)
+      const duration = media.kind === 'image' || media.kind === 'sticker'
+        ? get().settings.stillDuration
+        : useSourceRange && range > 0.05
+          ? Math.max(0.2, Math.min(media.duration, range))
+          : Math.max(0.2, media.duration || get().settings.stillDuration)
+      const inPoint = useSourceRange ? get().sourceIn : 0
+      let start = at ?? get().playhead
+      // 拖放到指定时间时尊重落点；仅双击/入点入轨时走磁性吸附
+      if (at == null && get().settings.magnetic) {
+        start = sequence.clips.filter((c) => c.trackId === track.id)
+          .reduce((e, c) => Math.max(e, c.start + c.duration), 0)
+      }
+      const clip: Clip = {
+        id: uid('clip'), trackId: track.id, mediaId, name: media.name,
+        start, duration, inPoint, outPoint: inPoint + duration,
+        enabled: true, speed: 1, reverse: false, speedKeyframes: [],
+        transform: defaultTransform(), color: defaultColor(), audio: defaultAudio(),
+        effects: [], blend: 'normal', keyframes: {},
+      }
+      patchSeq((s) => ({
+        ...s, clips: [...s.clips, clip],
+        workOut: Math.max(s.workOut, clip.start + clip.duration),
+      }))
+      set({ selectedClipIds: [clip.id], sourceMediaId: mediaId })
+    },
+
+    selectClips(ids) {
+      const seq = get().seq()
+      const clip = seq.clips.find((c) => ids.includes(c.id))
+      let propTab = get().propTab
+      if (clip) {
+        const track = seq.tracks.find((t) => t.id === clip.trackId)
+        if (clip.text || track?.kind === 'subtitle') propTab = 'text'
+        else if (track?.kind === 'audio') propTab = 'audio'
+        else propTab = 'transform'
+      }
+      set({ selectedClipIds: ids, propTab })
+    },
+
+    moveClips(ids, dt, trackId, opts) {
+      if (opts?.record !== false) get().pushHistory()
+      const setIds = new Set(ids)
+      const snap = (t: number) => get().snapTime(t)
+      patchSeq((s) => ({
+        ...s,
+        clips: s.clips.map((c) =>
+          setIds.has(c.id)
+            ? { ...c, start: Math.max(0, snap(c.start + dt)), trackId: trackId ?? c.trackId }
+            : c,
+        ),
+      }))
+    },
+
+    snapTime(t) {
+      const { settings } = get()
+      return settings.snap ? Math.round(t * settings.fps) / settings.fps : t
+    },
+
+    nudgeSelectedTransform(dx, dy) {
+      pushHistoryCoalesced(get, set)
+      const playhead = get().playhead
+      const forceKf = get().autoKeyframe
+      patchSelected((c) => {
+        const live = forceKf
+          ? {
+              x: Math.max(-1, Math.min(1, sampleAt(c, 'x', Math.max(0, playhead - c.start)) + dx)),
+              y: Math.max(-1, Math.min(1, sampleAt(c, 'y', Math.max(0, playhead - c.start)) + dy)),
+            }
+          : {
+              x: Math.max(-1, Math.min(1, c.transform.x + dx)),
+              y: Math.max(-1, Math.min(1, c.transform.y + dy)),
+            }
+        if (forceKf) {
+          return patchClipXY(c, playhead, live.x, live.y, { forceKf: true })
+        }
+        return patchClipTransform(c, playhead, live)
+      })
+    },
+
+    trimClip(id, edge, t, opts) {
+      if (opts?.record !== false) get().pushHistory()
+      const snapped = get().snapTime(t)
+      patchSeq((s) => ({
+        ...s,
+        clips: s.clips.map((c) => {
+          if (c.id !== id) return c
+          if (edge === 'in') {
+            const delta = snapped - c.start
+            return { ...c, start: snapped, duration: Math.max(0.1, c.duration - delta), inPoint: c.inPoint + delta }
+          }
+          return { ...c, duration: Math.max(0.1, snapped - c.start), outPoint: c.inPoint + Math.max(0.1, snapped - c.start) }
+        }),
+      }))
+    },
+
+    resizeEdgeAnim(id, edge, sec, opts) {
+      if (opts?.record !== false) get().pushHistory()
+      patchSeq((s) => ({
+        ...s,
+        clips: s.clips.map((c) => (c.id === id ? applyEdgeAnimDuration(c, edge, sec) : c)),
+      }))
+    },
+
+    dragMoveClips(ids, origins, dt, trackId, opts) {
+      pendingDragMove = { ids, origins, dt, trackId, opts }
+      if (!dragMoveRaf) {
+        dragMoveRaf = requestAnimationFrame(() => flushDragMove(get, set))
+      }
+    },
+
+    previewDragDt(ids, origins, dt, opts) {
+      return resolveDragDt(get, ids, origins, dt, opts)
+    },
+
+    trackAtY(contentY) {
+      // bodyRef 内容坐标：顶部 CAM 占 22px，不接素材
+      const CAM_H = 22
+      if (contentY < CAM_H) return null
+      let acc = CAM_H
+      for (const tr of get().seq().tracks) {
+        if (contentY >= acc && contentY < acc + tr.height) return tr.id
+        acc += tr.height
+      }
+      return null
+    },
+
+    setLayout(p) {
+      const prev = get().layout
+      const layout = {
+        ...prev,
+        ...p,
+        panelDock: p.panelDock ? { ...prev.panelDock, ...p.panelDock } : prev.panelDock,
+      }
+      set({ layout })
+      document.documentElement.style.setProperty('--sidebar-w', `${layout.sidebarW}px`)
+      document.documentElement.style.setProperty('--props-w', `${layout.propsW}px`)
+      document.documentElement.style.setProperty('--timeline-h', `${layout.timelineH}px`)
+      document.documentElement.style.setProperty('--source-mon-h', `${layout.sourceMonitorH ?? 168}px`)
+      document.documentElement.style.setProperty('--right-w', `${layout.rightW ?? 280}px`)
+      document.documentElement.style.setProperty('--dock-h', `${layout.dockH ?? 220}px`)
+      localStorage.setItem('todo-layout', JSON.stringify(layout))
+    },
+
+    setMonitorView(v) { set({ monitorView: v }) },
+    setMonitorCompose(m) {
+      set({ monitorCompose: m })
+      if (m === '3d') {
+        patchSeq((q) => ({ ...q, scene3d: { ...ensureScene3d(q.scene3d), enabled: true } }))
+        notify('已切换 3D 摄像机合成')
+      }
+    },
+    setAutoKeyframe(on) {
+      if (!on) {
+        if (!get().autoKeyframe) return
+        set({ autoKeyframe: false })
+        notify('K帧模式已关')
+        return
+      }
+      if (get().autoKeyframe) return
+      if (!get().selectedClipIds.length) {
+        notify('请先选中片段')
+        return
+      }
+      get().pushHistory()
+      const t = get().playhead
+      patchSelected((c) => seedPositionKeyframes(c, t))
+      set({ autoKeyframe: true })
+      notify('K帧模式 · S缩放 · T透明 · 拖位置打点')
+    },
+    toggleAutoKeyframe() {
+      get().setAutoKeyframe(!get().autoKeyframe)
+    },
+
+    updateScene3d(p) {
+      get().pushHistory()
+      patchSeq((q) => ({ ...q, scene3d: { ...ensureScene3d(q.scene3d), ...p } }))
+    },
+
+    updateCamera3d(p, opts) {
+      if (opts?.record !== false) pushHistoryCoalesced(get, set)
+      patchSeq((q) => {
+        const scene = ensureScene3d(q.scene3d)
+        return { ...q, scene3d: { ...scene, camera: { ...scene.camera, ...p } } }
+      })
+    },
+
+    toggleCameraKeyframe(prop) {
+      get().pushHistory()
+      const t = get().playhead
+      patchSeq((q) => {
+        const scene = ensureScene3d(q.scene3d)
+        const cam = scene.camera
+        const list = [...(cam.keyframes[prop] ?? [])]
+        const near = list.findIndex((k) => Math.abs(k.t - t) < 0.08)
+        if (near >= 0) list.splice(near, 1)
+        else {
+          const map: Record<string, number> = {
+            camX: cam.x, camY: cam.y, camZ: cam.z,
+            camRotX: cam.rotationX, camRotY: cam.rotationY, camRotZ: cam.rotationZ,
+            fov: cam.fov, focusDistance: cam.focusDistance,
+          }
+          list.push({ id: uid('kf'), t, value: map[prop] ?? 0, ease: 'linear' })
+        }
+        return {
+          ...q,
+          scene3d: { ...scene, camera: { ...cam, keyframes: { ...cam.keyframes, [prop]: list } } },
+        }
+      })
+    },
+
+    setClipThreeD(enabled) {
+      get().pushHistory()
+      patchSelected((c) => ({
+        ...c,
+        threeD: enabled,
+        transform3d: enabled ? (c.transform3d ?? {
+          ...defaultTransform3d(),
+          x: c.transform.x, y: c.transform.y,
+          scaleX: c.transform.scaleX, scaleY: c.transform.scaleY,
+          rotationZ: c.transform.rotation, opacity: c.transform.opacity,
+        }) : c.transform3d,
+      }))
+      if (enabled) {
+        patchSeq((q) => ({ ...q, scene3d: { ...ensureScene3d(q.scene3d), enabled: true } }))
+        set({ monitorCompose: '3d' })
+      }
+    },
+
+    updateSelectedTransform3d(p, opts) {
+      if (opts?.record !== false) pushHistoryCoalesced(get, set)
+      patchSelected((c) => ({
+        ...c,
+        threeD: true,
+        transform3d: { ...(c.transform3d ?? defaultTransform3d()), ...p },
+      }))
+    },
+
+    setTimelineZoom(z) {
+      set({ timelineZoom: Math.min(200, Math.max(20, z)) })
+    },
+
+    razorAtPlayhead() {
+      // 按当前选中帧切开（对齐工程帧网格），不改播放头
+      const fps = Math.max(1, get().settings.fps)
+      const t = Math.round(get().playhead * fps) / fps
+      get().razorAtTime(t)
+    },
+
+    razorAtTime(ph) {
+      const fps = Math.max(1, get().settings.fps)
+      const t = Math.round(Math.max(0, ph) * fps) / fps
+      const hits = get().seq().clips.filter(
+        (c) => t > c.start + 1 / fps / 2 && t < c.start + c.duration - 1 / fps / 2,
+      )
+      if (!hits.length) { notify('当前帧处无可分割片段'); return }
+      get().pushHistory()
+      patchSeq((s) => {
+        const next: Clip[] = []
+        for (const c of s.clips) {
+          const hit = t > c.start + 1 / fps / 2 && t < c.start + c.duration - 1 / fps / 2
+          if (!hit) { next.push(c); continue }
+          const left = t - c.start
+          next.push({ ...c, duration: left, outPoint: c.inPoint + left })
+          next.push({
+            ...c, id: uid('clip'), start: t, duration: c.duration - left, inPoint: c.inPoint + left,
+          })
+        }
+        return { ...s, clips: next }
+      })
+      notify(`已在 ${formatTime(t, fps)} 分割 ${hits.length} 个片段`)
+    },
+
+    deleteSelected(ripple = false) {
+      get().pushHistory()
+      const ids = new Set(get().selectedClipIds)
+      const removed = get().seq().clips.filter((c) => ids.has(c.id))
+      patchSeq((s) => {
+        let clips = s.clips.filter((c) => !ids.has(c.id))
+        if (ripple) {
+          for (const r of removed) {
+            clips = clips.map((c) =>
+              c.trackId === r.trackId && c.start >= r.start + r.duration
+                ? { ...c, start: c.start - r.duration } : c,
+            )
+          }
+        }
+        return { ...s, clips }
+      })
+      set({ selectedClipIds: [] })
+    },
+
+    closeGaps() {
+      get().pushHistory()
+      patchSeq((s) => {
+        const by = new Map<string, Clip[]>()
+        for (const c of s.clips) {
+          const arr = by.get(c.trackId) ?? []
+          arr.push(c)
+          by.set(c.trackId, arr)
+        }
+        const clips: Clip[] = []
+        for (const [, arr] of by) {
+          arr.sort((a, b) => a.start - b.start)
+          let t = 0
+          for (const c of arr) { clips.push({ ...c, start: t }); t += c.duration }
+        }
+        return { ...s, clips }
+      })
+      notify('已关闭空隙')
+    },
+
+    duplicateSelected() {
+      get().pushHistory()
+      const ids = new Set(get().selectedClipIds)
+      const copies = get().seq().clips.filter((c) => ids.has(c.id)).map((c) => ({
+        ...(JSON.parse(JSON.stringify(c)) as Clip), id: uid('clip'), start: c.start + c.duration,
+      }))
+      patchSeq((s) => ({ ...s, clips: [...s.clips, ...copies] }))
+      set({ selectedClipIds: copies.map((c) => c.id) })
+    },
+
+    copyOrPaste() {
+      if (!clipboard.length) {
+        clipboard = get().seq().clips.filter((c) => get().selectedClipIds.includes(c.id))
+          .map((c) => JSON.parse(JSON.stringify(c)))
+        notify(`已复制 ${clipboard.length} 个`)
+        return
+      }
+      get().pushHistory()
+      const base = Math.min(...clipboard.map((c) => c.start))
+      const copies = clipboard.map((c) => ({
+        ...(JSON.parse(JSON.stringify(c)) as Clip),
+        id: uid('clip'), start: get().playhead + (c.start - base),
+      }))
+      patchSeq((s) => ({ ...s, clips: [...s.clips, ...copies] }))
+      set({ selectedClipIds: copies.map((c) => c.id) })
+    },
+    copySelected() {
+      clipboard = get().seq().clips
+        .filter((c) => get().selectedClipIds.includes(c.id))
+        .map((c) => JSON.parse(JSON.stringify(c)))
+      notify(clipboard.length ? `已复制 ${clipboard.length} 个` : '未选中片段')
+    },
+    cutSelected() {
+      get().copySelected()
+      if (clipboard.length) get().deleteSelected(false)
+    },
+    pasteClipboard() {
+      if (!clipboard.length) { notify('剪贴板为空'); return }
+      get().pushHistory()
+      const base = Math.min(...clipboard.map((c) => c.start))
+      const copies = clipboard.map((c) => ({
+        ...(JSON.parse(JSON.stringify(c)) as Clip),
+        id: uid('clip'), start: get().playhead + (c.start - base),
+      }))
+      patchSeq((s) => ({ ...s, clips: [...s.clips, ...copies] }))
+      set({ selectedClipIds: copies.map((c) => c.id) })
+    },
+    selectAllClips() {
+      set({ selectedClipIds: get().seq().clips.map((c) => c.id) })
+    },
+
+
+    toggleClipEnabled() { get().pushHistory(); patchSelected((c) => ({ ...c, enabled: !c.enabled })) },
+    unlinkSelected() {
+      get().pushHistory()
+      patchSelected((c) => ({ ...c, linkedId: undefined }))
+      notify('已解链')
+    },
+    linkSelected() {
+      if (get().selectedClipIds.length < 2) return
+      get().pushHistory()
+      const lid = uid('link')
+      patchSelected((c) => ({ ...c, linkedId: lid }))
+      notify('已链接')
+    },
+    groupSelected() {
+      get().pushHistory()
+      const gid = uid('group')
+      patchSelected((c) => ({ ...c, groupId: gid }))
+    },
+    ungroupSelected() {
+      get().pushHistory()
+      patchSelected((c) => ({ ...c, groupId: undefined }))
+    },
+    setClipSpeed(speed) {
+      get().pushHistory()
+      patchSelected((c) => ({ ...c, duration: c.duration * (c.speed / speed), speed }))
+    },
+    reverseSelected() {
+      get().pushHistory()
+      patchSelected((c) => ({ ...c, reverse: !c.reverse }))
+    },
+    freezeFrame() {
+      get().pushHistory()
+      const c = get().seq().clips.find((x) => get().selectedClipIds.includes(x.id))
+      if (!c) return
+      const freeze: Clip = {
+        ...(JSON.parse(JSON.stringify(c)) as Clip),
+        id: uid('clip'), start: get().playhead, duration: 2,
+        freeze: get().playhead - c.start + c.inPoint, name: `${c.name} 定格`,
+      }
+      patchSeq((s) => ({ ...s, clips: [...s.clips, freeze] }))
+      set({ selectedClipIds: [freeze.id] })
+    },
+
+    updateSelectedTransform(p) {
+      // 静态属性：只改底层 transform，不碰关键帧（动态优先）
+      pushHistoryCoalesced(get, set)
+      patchSelected((c) => ({ ...c, transform: { ...c.transform, ...p } }))
+    },
+    setDynamicAtPlayhead(prop, value) {
+      if (!get().selectedClipIds.length) return
+      pushHistoryCoalesced(get, set)
+      const t = get().playhead
+      const staticVal = (c: Clip) => {
+        switch (prop) {
+          case 'x': return c.transform.x
+          case 'y': return c.transform.y
+          case 'scale': return c.transform.scaleX
+          case 'rotation': return c.transform.rotation
+          case 'opacity': return c.transform.opacity
+          case 'volume': return c.audio.gainDb
+          case 'fontSize': return c.text?.fontSize ?? 48
+          default: return value
+        }
+      }
+      patchSelected((c) => {
+        const fps = get().settings.fps
+        const localT = snapToFrame(Math.max(0, t - c.start), fps)
+        const near = 0.51 / fps
+        let list = [...(c.keyframes[prop] ?? [])]
+        // 首条关键帧且不在起点：先钉住起点静态值，避免整段瞬间跳到新值
+        if (list.length === 0 && localT > near) {
+          list.push({ id: uid('kf'), t: 0, value: staticVal(c), ease: 'linear' })
+        }
+        const idx = list.findIndex((k) => Math.abs(k.t - localT) < near)
+        if (idx >= 0) list[idx] = { ...list[idx], value, t: localT }
+        else list.push({ id: uid('kf'), t: localT, value, ease: 'linear' })
+        list.sort((a, b) => a.t - b.t)
+        return { ...c, keyframes: { ...c.keyframes, [prop]: list } }
+      })
+    },
+    updateSelectedColor(p) {
+      pushHistoryCoalesced(get, set)
+      patchSelected((c) => ({ ...c, color: { ...c.color, ...p } }))
+    },
+    updateSelectedAudio(p) {
+      pushHistoryCoalesced(get, set)
+      patchSelected((c) => ({ ...c, audio: { ...c.audio, ...p } }))
+    },
+    updateSelectedText(p) {
+      // 静态文字属性；字号关键帧走 setDynamicAtPlayhead('fontSize')
+      pushHistoryCoalesced(get, set)
+      patchSelected((c) => (c.text ? { ...c, text: { ...c.text, ...p } } : c))
+    },
+    updateSelectedClip(p) {
+      pushHistoryCoalesced(get, set)
+      patchSelected((c) => ({ ...c, ...p }))
+    },
+
+    addTextClip() {
+      get().pushHistory()
+      const track = get().seq().tracks.find((t) => t.kind === 'subtitle')!
+      const clip: Clip = {
+        id: uid('clip'), trackId: track.id, name: '文本',
+        start: get().playhead, duration: 3, inPoint: 0, outPoint: 3,
+        enabled: true, speed: 1, reverse: false, speedKeyframes: [],
+        transform: defaultTransform(), color: defaultColor(), audio: defaultAudio(),
+        text: defaultText(), effects: [], blend: 'normal', keyframes: {},
+      }
+      patchSeq((s) => ({ ...s, clips: [...s.clips, clip] }))
+      set({ selectedClipIds: [clip.id], propTab: 'text' })
+    },
+
+    addTransition(type) {
+      get().pushHistory()
+      patchSelected((c) => ({ ...c, transitionOut: { type, duration: 0.5 } }))
+      notify('已添加转场')
+    },
+
+    addEffect(type, name) {
+      get().pushHistory()
+      patchSelected((c) => ({
+        ...c,
+        effects: [...c.effects, {
+          id: uid('fx'), type: type as Clip['effects'][0]['type'], name,
+          strength: 0.5, enabled: true, start: 0, end: c.duration,
+        }],
+      }))
+    },
+
+    addMarker(label = '标记') {
+      patchSeq((s) => ({
+        ...s,
+        markers: [...s.markers, { id: uid('mk'), t: get().playhead, color: '#E26A2C', label }],
+      }))
+    },
+
+    setWorkArea(a, b) { patchSeq((s) => ({ ...s, workIn: a, workOut: b })) },
+
+    toggleTrack(id, key) {
+      patchSeq((s) => ({
+        ...s, tracks: s.tracks.map((t) => (t.id === id ? { ...t, [key]: !t[key] } : t)),
+      }))
+    },
+
+    addTrack(kind) {
+      get().pushHistory()
+      const n = get().seq().tracks.filter((t) => t.kind === kind).length + 1
+      const track: Track = {
+        id: uid('track'), kind,
+        name: kind === 'video' ? `V${n}` : kind === 'audio' ? `A${n}` : String(kind),
+        locked: false, muted: false, solo: false, hidden: false, height: 40,
+      }
+      patchSeq((s) => ({ ...s, tracks: [track, ...s.tracks] }))
+    },
+
+    matchFrame() {
+      const c = get().seq().clips.find(
+        (x) => get().playhead >= x.start && get().playhead < x.start + x.duration && x.mediaId,
+      )
+      if (c?.mediaId) {
+        set({
+          selectedMediaId: c.mediaId, sourceMediaId: c.mediaId,
+          sourceIn: c.inPoint + (get().playhead - c.start),
+        })
+        notify('已匹配源帧')
+      }
+    },
+
+    replaceClipMedia(mediaId) {
+      get().pushHistory()
+      const media = get().media.find((m) => m.id === mediaId)
+      if (!media) return
+      patchSelected((c) => ({ ...c, mediaId, name: media.name }))
+    },
+
+    addKeyframe(prop, value) {
+      if (!get().selectedClipIds.length) return
+      get().pushHistory()
+      const t = get().playhead
+      const staticVal = (c: Clip) => {
+        switch (prop) {
+          case 'x': return c.transform.x
+          case 'y': return c.transform.y
+          case 'scale': return c.transform.scaleX
+          case 'rotation': return c.transform.rotation
+          case 'opacity': return c.transform.opacity
+          case 'volume': return c.audio.gainDb
+          case 'fontSize': return c.text?.fontSize ?? 48
+          default: return value
+        }
+      }
+      patchSelected((c) => {
+        const fps = get().settings.fps
+        const localT = snapToFrame(Math.max(0, t - c.start), fps)
+        const near = 0.51 / fps
+        let list = [...(c.keyframes[prop] ?? [])]
+        if (list.length === 0 && localT > near) {
+          list.push({ id: uid('kf'), t: 0, value: staticVal(c), ease: 'linear' })
+        }
+        const idx = list.findIndex((k) => Math.abs(k.t - localT) < near)
+        if (idx >= 0) list[idx] = { ...list[idx], value, t: localT }
+        else list.push({ id: uid('kf'), t: localT, value, ease: 'linear' })
+        list.sort((a, b) => a.t - b.t)
+        return { ...c, keyframes: { ...c.keyframes, [prop]: list } }
+      })
+      notify(`已添加关键帧 · ${prop}`)
+    },
+
+    removeKeyframeAtPlayhead(prop) {
+      const t = get().playhead
+      get().pushHistory()
+      patchSelected((c) => {
+        const localT = Math.max(0, t - c.start)
+        const prev = c.keyframes[prop] ?? []
+        const list = prev.filter((k) => Math.abs(k.t - localT) >= 0.08)
+        const next = { ...c.keyframes }
+        if (list.length) {
+          next[prop] = list
+          return { ...c, keyframes: next }
+        }
+        delete next[prop]
+        // 删光后把当前插值烘焙进静态值，避免画面跳变（PR 行为）
+        const baked = sampleAt(c, prop, localT)
+        return { ...bakeProp(c, prop, baked), keyframes: next }
+      })
+    },
+
+    removeKeyframeById(prop, kfId) {
+      get().removeKeyframesByIds({ [prop]: [kfId] })
+    },
+
+    removeKeyframesByIds(byProp) {
+      const entries = Object.entries(byProp).filter(([, ids]) => ids.length)
+      if (!entries.length) return
+      get().pushHistory()
+      patchSelected((c) => {
+        let nextKf = { ...c.keyframes }
+        let nextClip: Clip = c
+        let changed = false
+        const localT = Math.max(0, get().playhead - c.start)
+        for (const [prop, ids] of entries) {
+          const idSet = new Set(ids)
+          const prev = nextKf[prop] ?? []
+          const list = prev.filter((k) => !idSet.has(k.id))
+          if (list.length === prev.length) continue
+          changed = true
+          if (list.length) {
+            nextKf = { ...nextKf, [prop]: list }
+          } else {
+            nextKf = { ...nextKf }
+            delete nextKf[prop]
+            nextClip = bakeProp(nextClip, prop, sampleAt(c, prop, localT))
+          }
+        }
+        if (!changed) return c
+        return { ...nextClip, keyframes: nextKf }
+      })
+    },
+
+    clearKeyframeTrack(prop) {
+      get().pushHistory()
+      const t = get().playhead
+      patchSelected((c) => {
+        const localT = Math.max(0, t - c.start)
+        const baked = sampleAt(c, prop, localT)
+        const next = { ...c.keyframes }
+        delete next[prop]
+        return { ...bakeProp(c, prop, baked), keyframes: next }
+      })
+      notify(`已清除「${prop}」动画轨`)
+    },
+
+    clearAllKeyframes() {
+      get().pushHistory()
+      const t = get().playhead
+      patchSelected((c) => {
+        const localT = Math.max(0, t - c.start)
+        let out = c
+        for (const prop of Object.keys(c.keyframes)) {
+          out = bakeProp(out, prop, sampleAt(out, prop, localT))
+        }
+        return { ...out, keyframes: {} }
+      })
+      notify('已清除全部关键帧动画')
+    },
+
+    setKeyframeTime(prop, kfId, t) {
+      pushHistoryCoalesced(get, set)
+      const fps = get().settings.fps
+      patchSelected((c) => {
+        const dur = c.duration
+        const clamped = snapToFrame(Math.max(0, Math.min(dur, t)), fps)
+        const list = (c.keyframes[prop] ?? []).map((k) =>
+          k.id === kfId ? { ...k, t: clamped } : k,
+        ).sort((a, b) => a.t - b.t)
+        return { ...c, keyframes: { ...c.keyframes, [prop]: list } }
+      })
+    },
+
+    setKeyframeEase(prop, kfId, ease) {
+      get().pushHistory()
+      patchSelected((c) => {
+        const list = (c.keyframes[prop] ?? []).map((k) => {
+          if (k.id !== kfId) return k
+          if (ease === 'bezier') {
+            const d = defaultHandles(k.ease === 'bezier' ? 'linear' : k.ease)
+            return { ...k, ease, oh: k.oh ?? d.oh, ih: k.ih ?? d.ih }
+          }
+          // 切回线性等预设：清掉手柄，避免残留曲线数据
+          const { oh: _o, ih: _i, ...rest } = k
+          return { ...rest, ease }
+        })
+        return { ...c, keyframes: { ...c.keyframes, [prop]: list } }
+      })
+      notify(ease === 'linear' ? '线性' : ease === 'bezier' ? '自定义曲线' : `缓动 → ${ease}`)
+    },
+
+    setKeyframeHandle(prop, kfId, which, handle) {
+      pushHistoryCoalesced(get, set)
+      patchSelected((c) => {
+        const sorted = [...(c.keyframes[prop] ?? [])].sort((a, b) => a.t - b.t)
+        const idx = sorted.findIndex((k) => k.id === kfId)
+        if (idx < 0) return c
+        const list = sorted.map((k, i) => {
+          if (i !== idx) return k
+          const d = defaultHandles(k.ease === 'bezier' ? 'easeInOut' : k.ease)
+          const next = {
+            ...k,
+            ease: 'bezier' as const,
+            oh: k.oh ?? d.oh,
+            ih: k.ih ?? d.ih,
+            [which]: handle,
+          }
+          return next
+        })
+        // 拉出杠杆时，邻居段也标成 bezier，保证采样走曲线
+        if (which === 'oh' && idx + 1 < list.length && list[idx + 1].ease !== 'bezier') {
+          const n = list[idx + 1]
+          const d = defaultHandles(n.ease)
+          list[idx + 1] = { ...n, ease: 'bezier', oh: n.oh ?? d.oh, ih: n.ih ?? d.ih }
+        }
+        if (which === 'ih' && idx > 0 && list[idx - 1].ease !== 'bezier') {
+          const p = list[idx - 1]
+          const d = defaultHandles(p.ease)
+          list[idx - 1] = { ...p, ease: 'bezier', oh: p.oh ?? d.oh, ih: p.ih ?? d.ih }
+        }
+        return { ...c, keyframes: { ...c.keyframes, [prop]: list } }
+      })
+    },
+
+    enableBezierAt(prop, kfId) {
+      get().setKeyframeEase(prop, kfId, 'bezier')
+    },
+
+    toggleKeyframeAtPlayhead(prop, value) {
+      const t = get().playhead
+      const c0 = get().seq().clips.find((x) => get().selectedClipIds.includes(x.id))
+      if (!c0) return
+      const localT = Math.max(0, t - c0.start)
+      const near = (c0.keyframes[prop] ?? []).some((k) => Math.abs(k.t - localT) < 0.08)
+      if (near) get().removeKeyframeAtPlayhead(prop)
+      else get().addKeyframe(prop, value)
+    },
+
+    gotoAdjacentKeyframe(prop, dir) {
+      const c = get().seq().clips.find((x) => get().selectedClipIds.includes(x.id))
+      if (!c) return
+      const list = [...(c.keyframes[prop] ?? [])].sort((a, b) => a.t - b.t)
+      if (!list.length) return
+      const localT = Math.max(0, get().playhead - c.start)
+      if (dir < 0) {
+        const prev = [...list].reverse().find((k) => k.t < localT - 1e-4)
+        if (prev) get().setPlayhead(c.start + prev.t, { exact: true })
+      } else {
+        const next = list.find((k) => k.t > localT + 1e-4)
+        if (next) get().setPlayhead(c.start + next.t, { exact: true })
+      }
+    },
+
+    applyMotionPreset(preset, opts) {
+      if (!get().selectedClipIds.length) return
+      get().pushHistory()
+      const ref = get().seq().clips.find((c) => get().selectedClipIds.includes(c.id))
+      const refDur = ref?.duration ?? 3
+      const animDur = Math.min(refDur, Math.max(0.15, opts?.durationSec ?? refDur * 0.55))
+      patchSelected((c) => {
+        const dur = Math.max(0.2, c.duration)
+        const end = Math.min(dur, animDur)
+        const kf = { ...c.keyframes }
+        const mk = (t: number, value: number, ease: import('./types').Ease = 'easeInOut') =>
+          ({ id: uid('kf'), t, value, ease })
+        const peak = c.transform.opacity
+        /** 拆出已有淡入/淡出段，避免后点的预设把前一段清掉 */
+        const splitOpacity = () => {
+          const sorted = [...(kf.opacity ?? [])].sort((a, b) => a.t - b.t)
+          let inPart: typeof sorted = []
+          let outPart: typeof sorted = []
+          let rest = sorted
+          if (rest.length >= 2 && rest[0].t <= 0.08 && rest[0].value < 0.2) {
+            let i = 1
+            while (i < rest.length && rest[i].value < peak * 0.55) i++
+            inPart = rest.slice(0, Math.min(rest.length, i + 1))
+            rest = rest.slice(inPart.length)
+          }
+          if (rest.length >= 2) {
+            const last = rest[rest.length - 1]
+            if (last.t >= dur - 0.08 && last.value < 0.2) {
+              let i = rest.length - 2
+              while (i >= 0 && rest[i].value < peak * 0.55) i--
+              outPart = rest.slice(Math.max(0, i))
+              rest = rest.slice(0, Math.max(0, i))
+            }
+          }
+          return { inPart, midPart: rest, outPart }
+        }
+        switch (preset) {
+          case 'fadeIn': {
+            const { outPart } = splitOpacity()
+            const maxIn = outPart.length ? Math.max(0.08, outPart[0].t - 0.05) : end
+            const inEnd = Math.min(end, maxIn)
+            kf.opacity = [mk(0, 0, 'linear'), mk(inEnd, peak, 'easeOut'), ...outPart]
+            break
+          }
+          case 'fadeOut': {
+            const { inPart } = splitOpacity()
+            const minOut = inPart.length ? inPart[inPart.length - 1].t + 0.05 : 0
+            const outStart = Math.max(minOut, dur - end)
+            kf.opacity = [...inPart, mk(outStart, peak, 'linear'), mk(dur, 0, 'easeIn')]
+            break
+          }
+          case 'pushIn': {
+            // 推近 = 画外/远处 → 画内：从小到大逼近（勿做成 1.4→1 的推远）
+            const sEnd = c.transform.scaleX
+            kf.scale = [mk(0, sEnd * 0.62, 'linear'), mk(end, sEnd, 'easeOut')]
+            break
+          }
+          case 'slideLeft':
+            kf.x = [mk(0, c.transform.x + 0.65, 'linear'), mk(end, c.transform.x, 'easeOut')]
+            break
+          case 'pop':
+            kf.scale = [mk(0, c.transform.scaleX * 0.72, 'linear'), mk(end, c.transform.scaleX, 'easeOut')]
+            break
+        }
+        return { ...c, keyframes: kf }
+      })
+      notify(`已应用动画 · ${animDur.toFixed(1)} 秒`)
+    },
+
+    setSnap(v) { set({ settings: { ...get().settings, snap: v } }) },
+    setMagnetic(v) { set({ settings: { ...get().settings, magnetic: v } }) },
+
+    threePointEdit() {
+      const mid = get().sourceMediaId ?? get().selectedMediaId
+      if (!mid) { notify('请先选择源素材'); return }
+      get().addClipFromMedia(mid)
+      notify(get().editMode === 'insert' ? '三点插入' : '三点覆盖')
+    },
+
+    slipClip(dt: number, opts?: { record?: boolean }) {
+      if (opts?.record !== false) get().pushHistory()
+      patchSelected((c) => ({
+        ...c, inPoint: Math.max(0, c.inPoint + dt), outPoint: c.outPoint + dt,
+      }))
+    },
+
+    addSequence() {
+      const s = makeSeq(`序列 ${get().sequences.length + 1}`)
+      set({ sequences: [...get().sequences, s], activeSeqId: s.id })
+    },
+    setActiveSequence(id) { set({ activeSeqId: id, selectedClipIds: [], playhead: 0 }) },
+
+    toggleMultiCam() {
+      const next = !get().multiCam
+      set({ multiCam: next })
+      notify(next ? '多机位开启' : '多机位关闭')
+    },
+
+    enqueueExport(opts) {
+      const job: ExportJob = {
+        id: uid('exp'), name: opts.name ?? `导出_${Date.now()}`,
+        status: 'queued', progress: 0, preset: opts.preset,
+        rangeOnly: opts.rangeOnly ?? false, audioOnly: opts.audioOnly ?? false,
+      }
+      set({ exportQueue: [...get().exportQueue, job] })
+      notify(get().monitorCompose === '3d' ? '3D 合成导出已加入队列' : '已加入导出队列')
+
+      const runFake = () => {
+        const tick = () => {
+          const q = get().exportQueue.map((j) => {
+            if (j.id !== job.id || j.status === 'done') return j
+            const progress = Math.min(100, j.progress + 14 + Math.random() * 16)
+            return { ...j, status: (progress >= 100 ? 'done' : 'running') as ExportJob['status'], progress }
+          })
+          set({ exportQueue: q })
+          const cur = q.find((j) => j.id === job.id)
+          if (cur && cur.status !== 'done') setTimeout(tick, 260)
+          else if (cur?.status === 'done') {
+            if (get().monitorCompose === '3d') void get().exportProgramFrame()
+            notify('导出完成')
+          }
+        }
+        setTimeout(tick, 180)
+      }
+      runFake()
+    },
+
+    savePreset(name, kind, payload) {
+      set({ presets: [...get().presets, { id: uid('preset'), name, kind, payload }] })
+      notify('预设已保存')
+    },
+    applyPreset(id) {
+      const p = get().presets.find((x) => x.id === id)
+      if (!p) return
+      if (p.kind === 'color') get().updateSelectedColor(p.payload as never)
+      if (p.kind === 'motion') get().updateSelectedTransform(p.payload as never)
+      if (p.kind === 'text') get().updateSelectedText(p.payload as never)
+      notify(`已应用「${p.name}」`)
+    },
+    clearCache() {
+      clearPreviewCache(getProgramPreviewCache())
+      notifyPreviewCacheChanged(true)
+      set({ cacheMb: 0 })
+      notify('缓存已清理')
+    },
+    importFont(name) {
+      set({ fonts: [...get().fonts, { id: uid('font'), name, enabled: true }] })
+      notify(`字体 ${name} 已导入`)
+    },
+
+    copyAttributes() {
+      const c = get().seq().clips.find((x) => get().selectedClipIds.includes(x.id))
+      if (!c) return
+      attrClipboard = { transform: { ...c.transform }, color: { ...c.color }, audio: { ...c.audio } }
+      notify('已复制属性')
+    },
+
+    pasteAttributes() {
+      if (!attrClipboard) { notify('无已复制属性'); return }
+      get().pushHistory()
+      patchSelected((c) => ({
+        ...c,
+        transform: { ...c.transform, ...attrClipboard!.transform },
+        color: { ...c.color, ...attrClipboard!.color },
+        audio: { ...c.audio, ...attrClipboard!.audio },
+      }))
+      notify('已粘贴属性')
+    },
+
+    liftExtract(extract) {
+      get().deleteSelected(extract)
+      notify(extract ? '已抽出' : '已提升')
+    },
+
+    nestSelected() {
+      const ids = get().selectedClipIds
+      if (ids.length < 2) { notify('请选择多个片段'); return }
+      get().pushHistory()
+      const gid = uid('nest')
+      patchSelected((c) => ({ ...c, groupId: gid, name: `${c.name} [嵌套]` }))
+      notify('已创建复合片段')
+    },
+
+    setTransitionDuration(d) {
+      patchSelected((c) => (
+        c.transitionOut ? { ...c, transitionOut: { ...c.transitionOut, duration: d } } : c
+      ))
+    },
+
+    extractAudio() {
+      const c = get().seq().clips.find((x) => get().selectedClipIds.includes(x.id) && x.mediaId)
+      if (!c?.mediaId) { notify('请选择含音频的片段'); return }
+      get().pushHistory()
+      const track = get().seq().tracks.find((t) => t.kind === 'audio')!
+      const audioClip: Clip = {
+        ...JSON.parse(JSON.stringify(c)) as Clip,
+        id: uid('clip'), trackId: track.id, name: `${c.name} 音频`,
+        start: c.start, duration: c.duration,
+      }
+      patchSeq((s) => ({ ...s, clips: [...s.clips, audioClip] }))
+      notify('已提取音频到 A 轨')
+    },
+
+    syncByAudio() {
+      notify('已按波形同步多段素材')
+    },
+
+    seedDemo() {
+      const hasDemo = get().media.some((m) => m.name === 'demo_plate.svg')
+      const hasClips = get().seq().clips.length > 0
+      if (hasDemo && hasClips) return
+
+      const url = 'data:image/svg+xml,' + encodeURIComponent(
+        `<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720">
+          <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+            <stop stop-color="#2a3a4e"/><stop offset="1" stop-color="#5a6f88"/></linearGradient></defs>
+          <rect width="100%" height="100%" fill="url(#g)"/>
+          <circle cx="640" cy="360" r="120" fill="#E26A2C" opacity="0.9"/>
+          <text x="50%" y="54%" fill="#F5F2EC" font-size="84" font-family="Georgia, serif" text-anchor="middle" font-weight="700">TO DO</text>
+        </svg>`,
+      )
+
+      if (!hasDemo) {
+        const ids = get().importMedia([
+          { name: 'demo_plate.svg', url, kind: 'image', duration: 5, width: 1280, height: 720 },
+          { name: 'broll_city.svg', url, kind: 'image', duration: 4, width: 1280, height: 720 },
+        ])
+        const place = () => {
+          const st = useApp.getState()
+          if (st.seq().clips.length > 0) return
+          const mid = ids[0] ?? st.media.find((m) => m.name === 'demo_plate.svg')?.id
+          if (!mid) return
+          st.addClipFromMedia(mid)
+          st.addTextClip()
+          st.setPlayhead(0.5)
+        }
+        place()
+        return
+      }
+
+      const place = () => {
+        const st = useApp.getState()
+        if (st.seq().clips.length > 0) return
+        const mid = st.media.find((m) => m.name === 'demo_plate.svg')?.id ?? st.media[0]?.id
+        if (!mid) return
+        st.addClipFromMedia(mid)
+        st.addTextClip()
+        st.setPlayhead(0.5)
+      }
+      place()
+    },
+  }
+})
+
+export function formatTime(t: number, fps = 30) {
+  const f = Math.floor((t % 1) * fps)
+  const s = Math.floor(t) % 60
+  const m = Math.floor(t / 60) % 60
+  const h = Math.floor(t / 3600)
+  const pad = (n: number, w = 2) => String(n).padStart(w, '0')
+  return `${pad(h)}:${pad(m)}:${pad(s)}:${pad(f)}`
+}
