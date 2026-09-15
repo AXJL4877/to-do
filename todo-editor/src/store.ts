@@ -391,6 +391,7 @@ export type AppStore = {
   addMarker: (label?: string) => void
   setWorkArea: (a: number, b: number) => void
   toggleTrack: (id: string, key: 'locked' | 'muted' | 'solo' | 'hidden') => void
+  setTrackHeight: (id: string, height: number) => void
   addTrack: (kind: TrackKind) => void
   matchFrame: () => void
   replaceClipMedia: (mediaId: string) => void
@@ -1776,6 +1777,14 @@ export const useApp = create<AppStore>((set, get) => {
     toggleTrack(id, key) {
       patchSeq((s) => ({
         ...s, tracks: s.tracks.map((t) => (t.id === id ? { ...t, [key]: !t[key] } : t)),
+      }))
+    },
+
+    setTrackHeight(id, height) {
+      const h = Math.max(20, Math.min(160, Math.round(height)))
+      patchSeq((s) => ({
+        ...s,
+        tracks: s.tracks.map((t) => (t.id === id ? { ...t, height: h } : t)),
       }))
     },
 
