@@ -134,6 +134,16 @@ export type DesktopApi = {
     duration?: number
     error?: string
   }>
+  /** blob / 无 path：把文件字节交给主进程抽峰值 */
+  waveformPeaksBuffer?: (
+    data: ArrayBuffer,
+    opts?: { bins?: number; ext?: string },
+  ) => Promise<{
+    ok: boolean
+    peaks?: number[]
+    duration?: number
+    error?: string
+  }>
 }
 
 declare global {

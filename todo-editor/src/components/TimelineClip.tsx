@@ -15,41 +15,55 @@ function AudioWaveform({
   outPoint: number
   widthPx: number
 }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null)
   const [set, setPeaks] = useState<{ peaks: Float32Array; duration: number } | null>(null)
+
   useEffect(() => {
     let alive = true
+    setPeaks(null)
     void loadWaveformPeaks(mediaId, url, { path: mediaPath, durationHint }).then((p) => {
       if (alive) setPeaks(p)
     })
     return () => { alive = false }
   }, [mediaId, url, mediaPath, durationHint])
 
-  // 约每 3px 一根，随缩放变密，与片段像素宽对齐
-  const bars = Math.max(8, Math.min(480, Math.round(widthPx / 3)))
+  const bars = Math.max(8, Math.min(640, Math.round(widthPx / 2)))
   const heights = useMemo(() => {
-    if (!set) {
-      return Array.from({ length: bars }, (_, i) => 0.14 + 0.06 * Math.sin(i * 0.55))
-    }
+    if (!set) return null
     return slicePeaks(set, inPoint, outPoint, bars)
   }, [set, inPoint, outPoint, bars])
 
+  useEffect(() => {
+    const c = canvasRef.current
+    if (!c) return
+    const w = Math.max(1, Math.floor(widthPx))
+    const h = Math.max(1, c.clientHeight || 28)
+    const dpr = Math.min(2, window.devicePixelRatio || 1)
+    c.width = Math.floor(w * dpr)
+    c.height = Math.floor(h * dpr)
+    c.style.width = `${w}px`
+    c.style.height = '100%'
+    const ctx = c.getContext('2d')
+    if (!ctx) return
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    ctx.clearRect(0, 0, w, h)
+    const col = getComputedStyle(c).color || 'hsl(158 45% 30%)'
+    ctx.fillStyle = col
+    const data = heights ?? Array.from({ length: bars }, (_, i) => 0.1 + 0.04 * Math.sin(i * 0.5))
+    const bw = w / Math.max(1, data.length)
+    // 画布本身只占片段下半，再乘高度系数，避免贴顶
+    for (let i = 0; i < data.length; i++) {
+      const bh = Math.max(1, (data[i] ?? 0) * h * 0.92)
+      ctx.fillRect(i * bw, h - bh, Math.max(1, bw * 0.8), bh)
+    }
+  }, [heights, bars, widthPx])
+
   return (
-    <svg
-      className="absolute inset-x-0 bottom-0 h-[60%] opacity-60 pointer-events-none"
-      preserveAspectRatio="none"
-      viewBox={`0 0 ${Math.max(1, bars)} 10`}
-    >
-      {heights.map((h, i) => (
-        <rect
-          key={i}
-          x={i}
-          y={10 - Math.max(0.25, h * 10)}
-          width={0.9}
-          height={Math.max(0.25, h * 10)}
-          fill="currentColor"
-        />
-      ))}
-    </svg>
+    <canvas
+      ref={canvasRef}
+      className="absolute inset-x-0 bottom-0 h-[55%] opacity-55 pointer-events-none"
+      aria-hidden
+    />
   )
 }
 
@@ -263,7 +277,11 @@ export const TimelineClip = memo(function TimelineClip({
           mediaId={media.id}
           url={media.url}
           mediaPath={media.path}
-          durationHint={Math.max(media.duration || 0, clip.outPoint, clip.duration)}
+          durationHint={Math.max(
+            media.duration || 0,
+            clip.outPoint || 0,
+            (clip.inPoint || 0) + (clip.duration || 0),
+          )}
           inPoint={clip.inPoint}
           outPoint={clip.outPoint}
           widthPx={w}

@@ -67,4 +67,9 @@ contextBridge.exposeInMainWorld('todoDesktop', {
     return () => ipcRenderer.removeListener('desktop:media-drop', handler)
   },
   waveformPeaks: (filePath, bins) => ipcRenderer.invoke('desktop:waveform-peaks', { filePath, bins }),
+  waveformPeaksBuffer: (data, opts) => ipcRenderer.invoke('desktop:waveform-peaks-buffer', {
+    data,
+    bins: opts?.bins,
+    ext: opts?.ext,
+  }),
 })

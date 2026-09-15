@@ -49,6 +49,7 @@ export function Timeline({
   const setPlayhead = useApp((s) => s.setPlayhead)
   const selectClips = useApp((s) => s.selectClips)
   const toggleTrack = useApp((s) => s.toggleTrack)
+  const setTrackHeight = useApp((s) => s.setTrackHeight)
   const setSnap = useApp((s) => s.setSnap)
   const razorAtPlayhead = useApp((s) => s.razorAtPlayhead)
   const deleteSelected = useApp((s) => s.deleteSelected)
@@ -666,13 +667,44 @@ export function Timeline({
           {seq.tracks.map((t) => (
             <div
               key={t.id}
-              className="flex items-center justify-center gap-0.5 px-1 border-b"
+              className="relative flex items-center justify-center gap-0.5 px-1 border-b"
               style={{ height: t.height, borderColor: 'var(--border)' }}
-              title={t.name}
+              title={`${t.name} · 拖底边调高度`}
+              data-testid={`track-header-${t.id}`}
             >
+              <span className="absolute left-0.5 top-0 text-[8px] leading-none pointer-events-none" style={{ color: 'var(--text-muted)' }}>{t.name}</span>
               <button className={clsx('icon-btn', t.locked && 'active')} style={{ width: 22, height: 22 }} data-testid={`track-lock-${t.id}`} onClick={() => toggleTrack(t.id, 'locked')} title={`${t.name} · 锁定`}><Lock size={11} /></button>
               <button className={clsx('icon-btn', t.muted && 'active')} style={{ width: 22, height: 22 }} data-testid={`track-mute-${t.id}`} onClick={() => toggleTrack(t.id, 'muted')} title={`${t.name} · 静音`}><VolumeX size={11} /></button>
               <button className={clsx('icon-btn', t.hidden && 'active')} style={{ width: 22, height: 22 }} data-testid={`track-hide-${t.id}`} onClick={() => toggleTrack(t.id, 'hidden')} title={`${t.name} · 隐藏`}><EyeOff size={11} /></button>
+              <div
+                className="absolute left-0 right-0 bottom-0 h-1.5 cursor-ns-resize z-10 hover:bg-[var(--accent)]/35"
+                data-testid={`track-resize-${t.id}`}
+                title="拖动调节轨道高度"
+                onPointerDown={(e) => {
+                  if (e.button !== 0) return
+                  e.preventDefault()
+                  e.stopPropagation()
+                  const startY = e.clientY
+                  const origin = t.height
+                  const el = e.currentTarget
+                  el.setPointerCapture(e.pointerId)
+                  const onMove = (ev: PointerEvent) => {
+                    setTrackHeight(t.id, origin + (ev.clientY - startY))
+                  }
+                  const onUp = () => {
+                    el.removeEventListener('pointermove', onMove)
+                    el.removeEventListener('pointerup', onUp)
+                    try { el.releasePointerCapture(e.pointerId) } catch { /* */ }
+                  }
+                  el.addEventListener('pointermove', onMove)
+                  el.addEventListener('pointerup', onUp)
+                }}
+                onDoubleClick={(e) => {
+                  e.stopPropagation()
+                  const def = t.kind === 'audio' ? 40 : t.kind === 'subtitle' ? 28 : 48
+                  setTrackHeight(t.id, def)
+                }}
+              />
             </div>
           ))}
         </div>
@@ -770,6 +802,35 @@ export function Timeline({
                     }}
                   />
                 ))}
+                <div
+                  className="absolute left-0 right-0 bottom-0 h-1 cursor-ns-resize z-20"
+                  data-testid={`track-row-resize-${track.id}`}
+                  title="拖动调节轨道高度"
+                  onPointerDown={(e) => {
+                    if (e.button !== 0) return
+                    e.preventDefault()
+                    e.stopPropagation()
+                    const startY = e.clientY
+                    const origin = track.height
+                    const el = e.currentTarget
+                    el.setPointerCapture(e.pointerId)
+                    const onMove = (ev: PointerEvent) => {
+                      setTrackHeight(track.id, origin + (ev.clientY - startY))
+                    }
+                    const onUp = () => {
+                      el.removeEventListener('pointermove', onMove)
+                      el.removeEventListener('pointerup', onUp)
+                      try { el.releasePointerCapture(e.pointerId) } catch { /* */ }
+                    }
+                    el.addEventListener('pointermove', onMove)
+                    el.addEventListener('pointerup', onUp)
+                  }}
+                  onDoubleClick={(e) => {
+                    e.stopPropagation()
+                    const def = track.kind === 'audio' ? 40 : track.kind === 'subtitle' ? 28 : 48
+                    setTrackHeight(track.id, def)
+                  }}
+                />
               </div>
             ))}
 

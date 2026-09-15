@@ -642,10 +642,14 @@ app.whenReady().then(async () => {
   ipcMain.handle('desktop:open-ai-window', async () => openAiWindow())
   ipcMain.handle('desktop:close-ai-window', () => closeAiWindow())
 
-  const { extractWaveformPeaks } = require('./waveformPeaks.cjs')
+  const { extractWaveformPeaks, extractWaveformPeaksFromBuffer } = require('./waveformPeaks.cjs')
   ipcMain.handle('desktop:waveform-peaks', async (_e, payload = {}) => {
     const { filePath, bins } = payload || {}
     return extractWaveformPeaks({ filePath, bins, nativeBin })
+  })
+  ipcMain.handle('desktop:waveform-peaks-buffer', async (_e, payload = {}) => {
+    const { data, bins, ext } = payload || {}
+    return extractWaveformPeaksFromBuffer({ data, bins, ext, nativeBin })
   })
 
   // Windows 上 BrowserWindow 之间 HTML5 拖放经常丢；松手时看光标是否在时间轴窗里
