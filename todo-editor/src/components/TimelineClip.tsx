@@ -1,18 +1,53 @@
-import { memo, useMemo, useRef } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import clsx from 'clsx'
 import type { Clip, Track } from '../types'
 import { useApp } from '../store'
+import { loadWaveformPeaks, slicePeaks } from '../lib/waveform'
 
-function Waveform({ seed }: { seed: string }) {
-  const bars = Array.from({ length: 24 }, (_, i) => {
-    let h = 0.3
-    for (let j = 0; j < seed.length; j++) h += (seed.charCodeAt(j) * (i + 1) * (j + 3)) % 17 / 34
-    return Math.min(0.95, 0.2 + (h % 0.75))
-  })
+function AudioWaveform({
+  mediaId, url, mediaPath, durationHint, inPoint, outPoint, widthPx,
+}: {
+  mediaId: string
+  url: string
+  mediaPath?: string
+  durationHint?: number
+  inPoint: number
+  outPoint: number
+  widthPx: number
+}) {
+  const [set, setPeaks] = useState<{ peaks: Float32Array; duration: number } | null>(null)
+  useEffect(() => {
+    let alive = true
+    void loadWaveformPeaks(mediaId, url, { path: mediaPath, durationHint }).then((p) => {
+      if (alive) setPeaks(p)
+    })
+    return () => { alive = false }
+  }, [mediaId, url, mediaPath, durationHint])
+
+  // 约每 3px 一根，随缩放变密，与片段像素宽对齐
+  const bars = Math.max(8, Math.min(480, Math.round(widthPx / 3)))
+  const heights = useMemo(() => {
+    if (!set) {
+      return Array.from({ length: bars }, (_, i) => 0.14 + 0.06 * Math.sin(i * 0.55))
+    }
+    return slicePeaks(set, inPoint, outPoint, bars)
+  }, [set, inPoint, outPoint, bars])
+
   return (
-    <svg className="absolute inset-x-0 bottom-0 h-[55%] opacity-50 pointer-events-none" preserveAspectRatio="none" viewBox="0 0 24 10">
-      {bars.map((h, i) => (
-        <rect key={i} x={i} y={10 - h * 10} width={0.85} height={h * 10} fill="currentColor" />
+    <svg
+      className="absolute inset-x-0 bottom-0 h-[60%] opacity-60 pointer-events-none"
+      preserveAspectRatio="none"
+      viewBox={`0 0 ${Math.max(1, bars)} 10`}
+    >
+      {heights.map((h, i) => (
+        <rect
+          key={i}
+          x={i}
+          y={10 - Math.max(0.25, h * 10)}
+          width={0.9}
+          height={Math.max(0.25, h * 10)}
+          fill="currentColor"
+        />
       ))}
     </svg>
   )
@@ -112,6 +147,7 @@ export const TimelineClip = memo(function TimelineClip({
   onPointerDown, onTrimIn, onTrimOut, onContextMenu,
 }: Props) {
   const resizeEdgeAnim = useApp((s) => s.resizeEdgeAnim)
+  const media = useApp((s) => (clip.mediaId ? s.media.find((m) => m.id === clip.mediaId) : undefined))
   const drag = useRef<{ edge: 'in' | 'out'; startX: number; originSec: number } | null>(null)
 
   const bg = clip.text
@@ -222,7 +258,17 @@ export const TimelineClip = memo(function TimelineClip({
         </div>
       )}
 
-      {track.kind === 'audio' && <Waveform seed={clip.id} />}
+      {track.kind === 'audio' && media?.url && (
+        <AudioWaveform
+          mediaId={media.id}
+          url={media.url}
+          mediaPath={media.path}
+          durationHint={Math.max(media.duration || 0, clip.outPoint, clip.duration)}
+          inPoint={clip.inPoint}
+          outPoint={clip.outPoint}
+          widthPx={w}
+        />
+      )}
       <span className="text-[10px] font-medium truncate block px-1.5 pt-0.5 pointer-events-none relative z-[2]">{clip.name}</span>
     </div>
   )

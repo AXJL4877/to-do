@@ -240,6 +240,10 @@ export function Modals() {
               {exportQueue.map((j) => (
                 <div key={j.id} className="text-[12px]" data-testid={`export-job-${j.id}`}>
                   {j.name} — {j.status} {Math.round(j.progress)}%
+                  {j.error ? <div style={{ color: 'var(--danger, #c44)' }}>{j.error}</div> : null}
+                  {j.path && j.status === 'done' ? (
+                    <div className="truncate" style={{ color: 'var(--text-muted)' }} title={j.path}>{j.path}</div>
+                  ) : null}
                   <div className="h-1.5 rounded-full mt-1" style={{ background: 'var(--surface-2)' }}>
                     <div className="h-full rounded-full" style={{ width: `${j.progress}%`, background: 'var(--accent)' }} />
                   </div>

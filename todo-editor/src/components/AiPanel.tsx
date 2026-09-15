@@ -3,6 +3,7 @@ import { Camera, ImagePlus, Loader2, Plus, Sparkles, Trash2, Video, Wand2, X } f
 import { useApp } from '../store'
 import { AiFloatLaunch } from './AiFloat'
 import { isAiPopout } from '../lib/storeSync'
+import { aiFetch, aiUrl } from '../lib/aiFetch'
 import clsx from 'clsx'
 
 const SIZES = ['3840x2160', '1024x1024'] as const
@@ -47,7 +48,7 @@ function friendlyAiError(raw: string): string {
 
 async function persistColdRef(dataUrl: string, kind: 'capture' | 'upload', name?: string) {
   try {
-    await fetch('/api/ai-assets', {
+    await aiFetch('/api/ai-assets', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ dataUrl, kind, name }),
@@ -93,15 +94,17 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
 
   async function refreshCold() {
     try {
-      const r = await fetch('/api/ai-assets?limit=16')
+      const r = await aiFetch('/api/ai-assets?limit=16')
       const data = await r.json()
-      if (data.ok) setCold(data.items as ColdAsset[])
+      if (data.ok) {
+        setCold((data.items as ColdAsset[]).map((a) => ({ ...a, url: aiUrl(a.url) })))
+      }
     } catch { /* */ }
   }
 
   async function refreshJobs() {
     try {
-      const r = await fetch('/api/ai-jobs?limit=30')
+      const r = await aiFetch('/api/ai-jobs?limit=30')
       const data = await r.json()
       if (!data.ok) return
       const items = data.items as AiJob[]
@@ -117,7 +120,7 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
 
   async function importDoneJob(j: AiJob) {
     try {
-      const ack = await fetch(`/api/ai-jobs/${j.id}/ack`, { method: 'POST' })
+      const ack = await aiFetch(`/api/ai-jobs/${j.id}/ack`, { method: 'POST' })
       const ackData = await ack.json()
       if (!ackData.ok) return // 其它窗已入库
 
@@ -125,7 +128,7 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
       const [w, h] = String(j.params.size || '3840x2160').split('x').map(Number)
       importMedia([{
         name: j.resultName || `AI_${j.id}.${kind === 'video' ? 'mp4' : 'png'}`,
-        url: j.resultUrl!,
+        url: aiUrl(j.resultUrl!),
         kind,
         duration: kind === 'video'
           ? (j.duration || j.params.duration || 5)
@@ -178,7 +181,7 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
 
   async function pickCold(id: string) {
     try {
-      const r = await fetch(`/api/ai-assets/${id}`)
+      const r = await aiFetch(`/api/ai-assets/${id}`)
       const data = await r.json()
       if (data.ok && data.dataUrl) setAiRef(data.dataUrl)
     } catch {
@@ -192,7 +195,7 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
     setSubmitting(true)
     setError(null)
     try {
-      const res = await fetch('/api/ai-jobs', {
+      const res = await aiFetch('/api/ai-jobs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -219,7 +222,7 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
   }
 
   async function removeJob(id: string) {
-    await fetch(`/api/ai-jobs/${id}`, { method: 'DELETE' })
+    await aiFetch(`/api/ai-jobs/${id}`, { method: 'DELETE' })
     void refreshJobs()
   }
 

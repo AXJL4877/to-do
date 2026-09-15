@@ -70,7 +70,10 @@ export function renderProgramFrame(
       if (!c.enabled) return false
       if (playhead < c.start || playhead >= c.start + c.duration) return false
       const tr = seq.tracks.find((t) => t.id === c.trackId)
-      return !tr?.hidden
+      if (!tr || tr.hidden) return false
+      // 音轨只出声，不进节目画面
+      if (tr.kind === 'audio') return false
+      return true
     })
     .sort((a, b) => layerOf(a) - layerOf(b))
 
@@ -108,6 +111,51 @@ export function renderProgramFrame(
     ctx.fillText('时间线此处无画面', w / 2, h / 2)
   }
 
+  if (settings.safeFrame) {
+    ctx.strokeStyle = 'rgba(255,220,100,0.4)'
+    ctx.lineWidth = 2
+    ctx.strokeRect(w * 0.05, h * 0.05, w * 0.9, h * 0.9)
+  }
+}
+
+/** compose 底图之上：选中框 / 运动路径 / 安全框（不再重绘媒体） */
+export function renderProgramOverlay(
+  canvas: HTMLCanvasElement,
+  seq: Sequence,
+  settings: ProjectSettings,
+  playhead: number,
+  rw: number,
+  rh: number,
+  selectedIds: string[] = [],
+  showMotionPath = false,
+  snapGuides?: SnapGuide[],
+) {
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+  const w = rw
+  const h = rh
+  if (canvas.width !== w || canvas.height !== h) {
+    canvas.width = w
+    canvas.height = h
+  }
+  const visible = seq.clips.filter((c) => {
+    if (!c.enabled) return false
+    if (playhead < c.start || playhead >= c.start + c.duration) return false
+    const tr = seq.tracks.find((t) => t.id === c.trackId)
+    if (!tr || tr.hidden || tr.kind === 'audio') return false
+    return true
+  })
+  for (const clip of visible) {
+    if (!selectedIds.includes(clip.id)) continue
+    drawSelection(ctx, clip, w, h, playhead)
+  }
+  if (showMotionPath) {
+    for (const clip of seq.clips) {
+      if (!selectedIds.includes(clip.id)) continue
+      drawMotionPath(ctx, clip, w, h)
+    }
+  }
+  if (snapGuides?.length) drawSnapGuides(ctx, w, h, snapGuides)
   if (settings.safeFrame) {
     ctx.strokeStyle = 'rgba(255,220,100,0.4)'
     ctx.lineWidth = 2
@@ -263,7 +311,8 @@ export function hitTestProgramClips(
     if (!c.enabled) return false
     if (playhead < c.start || playhead >= c.start + c.duration) return false
     const tr = seq.tracks.find((t) => t.id === c.trackId)
-    return !tr?.hidden
+    if (!tr || tr.hidden || tr.kind === 'audio') return false
+    return true
   })
   const ordered = [...visible].reverse() // 顶层优先
   const prefer = new Set(preferIds)

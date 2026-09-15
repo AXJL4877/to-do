@@ -31,17 +31,59 @@ const SYNC_KEYS = [
   'timelineFloatKind',
   'aiRefDataUrl',
   'aiGenMode',
+  'folders',
+  'presets',
+  'fonts',
+  'selectedMediaId',
+  'layout',
+  'exportQueue',
+  'sourceMediaId',
+  'sourceIn',
+  'sourceOut',
+  'editMode',
+] as const
+
+/** 仅主窗可权威写入；弹窗改这些字段时发 authority-request，由主窗落盘再广播 */
+const AUTHORITY_KEYS = [
+  'sequences',
+  'activeSeqId',
+  'selectedClipIds',
+  'media',
+  'settings',
+  'projectId',
+  'projectName',
+  'prefs',
+  'autoKeyframe',
+  'monitorCompose',
+  'aiRefDataUrl',
+  'aiGenMode',
+  'folders',
+  'presets',
+  'fonts',
+  'selectedMediaId',
+  'layout',
+  'exportQueue',
+  'sourceMediaId',
+  'sourceIn',
+  'sourceOut',
+  'editMode',
 ] as const
 
 type SyncKey = (typeof SYNC_KEYS)[number]
+type AuthorityKey = (typeof AUTHORITY_KEYS)[number]
 type SyncPatch = Partial<Record<SyncKey, unknown>>
 type SyncMsg =
   | { type: 'hello'; origin: string }
   | { type: 'patch'; origin: string; patch: SyncPatch }
+  | { type: 'authority-request'; origin: string; patch: SyncPatch }
   | { type: 'live'; origin: string; t: number }
   | { type: 'seek'; origin: string; t: number }
   | { type: 'request-capture'; origin: string }
   | { type: 'preview-cache'; origin: string; ranges: { start: number; end: number }[] }
+
+function isAuthorityKey(k: string): k is AuthorityKey {
+  return (AUTHORITY_KEYS as readonly string[]).includes(k)
+}
 
 function pickSync(state: Record<string, unknown>): SyncPatch {
   const patch: SyncPatch = {}
@@ -70,6 +112,8 @@ let postOutgoing: (msg: SyncMsg) => void = () => {}
 function handleIncoming(data: SyncMsg) {
   if (!data || data.origin === origin) return
   if (data.type === 'hello') {
+    // 仅权威窗回答全量快照
+    if (isAnyPopout()) return
     postOutgoing({ type: 'patch', origin, patch: pickSync(useApp.getState() as unknown as Record<string, unknown>) })
     broadcastPreviewRanges()
     return
@@ -87,7 +131,6 @@ function handleIncoming(data: SyncMsg) {
     return
   }
   if (data.type === 'request-capture') {
-    // 仅主窗（有节目画布）执行截帧
     if (isAnyPopout()) return
     useApp.getState().captureFrame()
     return
@@ -97,12 +140,33 @@ function handleIncoming(data: SyncMsg) {
     setRemotePreviewBarRanges(data.ranges ?? [])
     return
   }
-  if (data.type === 'patch' && data.patch) {
+  if (data.type === 'authority-request') {
+    // 只有主窗受理工程权威写入
+    if (isAnyPopout() || !data.patch) return
     applying = true
     useApp.setState(data.patch as Parameters<typeof useApp.setState>[0])
     applying = false
-    if (typeof data.patch.playhead === 'number' && !localScrubbing) {
-      setLivePlayhead(data.patch.playhead)
+    // 主动广播权威结果（subscribe 在 applying 期间被抑制）
+    postOutgoing({ type: 'patch', origin, patch: data.patch })
+    return
+  }
+  if (data.type === 'patch' && data.patch) {
+    // 弹窗不接受另一弹窗的权威字段；主窗可收工具类字段
+    const patch = { ...data.patch } as SyncPatch
+    if (isAnyPopout()) {
+      // 弹窗全量接受主窗 patch
+    } else {
+      // 主窗忽略从弹窗误发的权威字段（应走 authority-request）
+      for (const k of Object.keys(patch)) {
+        if (isAuthorityKey(k)) delete (patch as Record<string, unknown>)[k]
+      }
+      if (!Object.keys(patch).length) return
+    }
+    applying = true
+    useApp.setState(patch as Parameters<typeof useApp.setState>[0])
+    applying = false
+    if (typeof patch.playhead === 'number' && !localScrubbing) {
+      setLivePlayhead(patch.playhead)
     }
   }
 }
@@ -150,10 +214,23 @@ export function initStoreSync() {
 
   const unsub = useApp.subscribe((state, previous) => {
     if (applying) return
-    const patch: SyncPatch = {}
+    const authPatch: SyncPatch = {}
+    const mirrorPatch: SyncPatch = {}
     for (const key of SYNC_KEYS) {
-      if (state[key] !== previous[key]) patch[key] = state[key]
+      if (state[key] === previous[key]) continue
+      if (isAuthorityKey(key)) authPatch[key] = state[key]
+      else mirrorPatch[key] = state[key]
     }
+    if (isAnyPopout()) {
+      if (Object.keys(authPatch).length) {
+        postOutgoing({ type: 'authority-request', origin, patch: authPatch })
+      }
+      if (Object.keys(mirrorPatch).length) {
+        postOutgoing({ type: 'patch', origin, patch: mirrorPatch })
+      }
+      return
+    }
+    const patch = { ...authPatch, ...mirrorPatch }
     if (Object.keys(patch).length) {
       postOutgoing({ type: 'patch', origin, patch })
     }
@@ -193,6 +270,10 @@ export function isAiPopout() {
 
 export function isAnyPopout() {
   return isTimelinePopout() || isAiPopout()
+}
+
+export function isStoreAuthority() {
+  return !isAnyPopout()
 }
 
 export function popoutUrl() {

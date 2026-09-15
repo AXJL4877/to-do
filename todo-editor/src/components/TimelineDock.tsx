@@ -8,7 +8,7 @@ export function TimelineDock({ fill = false }: { fill?: boolean }) {
   const scrollRef = useRef<HTMLDivElement>(null)
   return (
     <div
-      className={clsx('flex flex-col min-h-0', fill ? 'flex-1 h-full' : 'shrink-0')}
+      className={clsx('flex flex-col min-h-0 min-w-0 w-full overflow-hidden', fill ? 'flex-1 h-full' : 'shrink-0')}
       data-testid="timeline-dock"
     >
       <KeyframeEditor scrollRef={scrollRef} />

@@ -60,6 +60,10 @@ export interface MediaItem {
   favorite: boolean; offline: boolean; proxyUrl?: string
   /** 本机文件路径（桌面版持久化；blob URL 重启会失效） */
   path?: string
+  /** 低分辨率代理文件（userData/cache/proxies；useProxy 时预览优先） */
+  proxyPath?: string
+  /** 探测结果：是否含音轨（视频入轨时自动带 A 轨） */
+  hasAudio?: boolean
 }
 
 export interface MediaFolder { id: string; name: string }
@@ -152,6 +156,8 @@ export interface Prefs {
 export interface ExportJob {
   id: string; name: string; status: 'queued' | 'running' | 'done' | 'error'
   progress: number; preset: string; rangeOnly: boolean; audioOnly: boolean
+  path?: string
+  error?: string
 }
 
 export interface EffectPreset {

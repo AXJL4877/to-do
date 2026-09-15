@@ -36,6 +36,10 @@ export default function App() {
     return initStoreSync()
   }, [])
 
+  useEffect(() => {
+    useApp.getState().syncVideoAudioLinks()
+  }, [])
+
   // 独立窗：停播跟 store；播放跟主窗 broadcast 的 live（见 Monitor）
   const playing = useApp((s) => s.playing)
   const playhead = useApp((s) => s.playhead)
@@ -254,32 +258,7 @@ export default function App() {
         data-testid="timeline-popout-shell"
         tabIndex={-1}
       >
-        <div
-          className="shrink-0 h-7 flex items-center gap-2 px-2 border-b"
-          style={{ borderColor: 'var(--border)', background: 'var(--surface-2)' }}
-        >
-          <span className="text-[11px] font-medium" style={{ color: 'var(--text-secondary)' }}>
-            时间轴 / K帧 · 独立窗口
-          </span>
-          <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>可拖到副屏</span>
-          <div className="flex-1" />
-          <button
-            type="button"
-            className="icon-btn"
-            style={{ width: 24, height: 24 }}
-            data-testid="timeline-popout-close"
-            title="关闭并还原到主窗口"
-            onClick={() => {
-              useApp.setState({ timelineFloat: false })
-              window.close()
-            }}
-          >
-            <PanelBottomClose size={13} />
-          </button>
-        </div>
-        <div className="flex-1 min-h-0 flex flex-col">
-          <TimelineDock fill />
-        </div>
+        <TimelineDock fill />
       </div>
     )
   }
@@ -326,26 +305,42 @@ export default function App() {
 
   if (fullscreen) {
     return (
-      <div className="fixed inset-0 z-50 bg-black grid place-items-center" data-testid="fullscreen">
-        <div className="w-full h-full max-w-[1600px] p-4">
-          <Monitor mode="program" />
+      <>
+        <div className="fixed inset-0 z-50 bg-black grid place-items-center" data-testid="fullscreen">
+          <div className="w-full h-full max-w-[1600px] p-4">
+            <Monitor mode="program" />
+          </div>
+          <button
+            className="absolute top-4 right-4 btn btn-ink"
+            data-testid="btn-exit-fullscreen"
+            onClick={() => useApp.getState().setFullscreen(false)}
+          >
+            退出全屏
+          </button>
         </div>
-        <button
-          className="absolute top-4 right-4 btn btn-ink"
-          data-testid="btn-exit-fullscreen"
-          onClick={() => useApp.getState().setFullscreen(false)}
-        >
-          退出全屏
-        </button>
-      </div>
+        {/* 弹出时间轴始终盖在节目监视器前面（含全屏） */}
+        {timelineFloat && timelineFloatKind === 'panel' && <TimelineFloatWindow />}
+        {timelineFloat && timelineFloatKind === 'window' && (
+          <button
+            type="button"
+            className="fixed bottom-3 right-3 z-[70] btn btn-ink text-[11px] h-8"
+            data-testid="btn-timeline-float-restore"
+            onClick={() => setTimelineFloat(false)}
+          >
+            还原时间轴
+          </button>
+        )}
+        {toast && <div className="toast" data-testid="toast">{toast}</div>}
+      </>
     )
   }
 
   return (
     <div
-      className="h-full min-h-[720px] min-w-[1280px] grid overflow-hidden outline-none"
+      className="h-full w-full min-w-0 min-h-0 grid overflow-hidden outline-none"
       style={{
-        gridTemplateRows: timelineFloat ? '1fr' : '1fr 6px auto',
+        gridTemplateRows: timelineFloat ? '1fr' : 'minmax(0, 1fr) 6px auto',
+        gridTemplateColumns: 'minmax(0, 1fr)',
         background: 'var(--surface-0)',
       }}
       data-testid="app-shell"
@@ -362,7 +357,7 @@ export default function App() {
       {timelineFloat && timelineFloatKind === 'window' && (
         <button
           type="button"
-          className="fixed bottom-3 right-3 z-30 btn btn-ink text-[11px] h-8"
+          className="fixed bottom-3 right-3 z-[70] btn btn-ink text-[11px] h-8"
           data-testid="btn-timeline-float-restore"
           onClick={() => setTimelineFloat(false)}
         >

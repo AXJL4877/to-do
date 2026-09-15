@@ -7,12 +7,20 @@
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
+    "native:setup": "node scripts/setup-native.mjs",
+    "native:build": "node scripts/build-native.mjs",
+    "native:test": "node scripts/test-native.mjs",
+    "proxy:test": "node scripts/test-proxy.mjs",
+    "export:test": "node scripts/test-export.mjs",
+    "probe:test": "node scripts/test-probe-transition.mjs",
+    "pack:paths": "node scripts/test-pack-paths.mjs",
+    "pack:smoke": "node scripts/test-pack-smoke.mjs",
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "electron:dev": "concurrently -k \"vite\" \"wait-on http://127.0.0.1:5173 && electron .\"",
     "electron:only": "electron .",
-    "dist:win": "npm run build && electron-builder --win nsis --x64",
+    "dist:win": "npm run native:build && npm run build && electron-builder --win nsis --x64",
     "pack": "npm run dist:win"
   },
   "build": {
@@ -24,8 +32,13 @@
     "files": [
       "dist/**/*",
       "electron/**/*",
+      "server/**/*",
       "package.json"
     ],
+    "asarUnpack": [
+      "server/**/*"
+    ],
+    "extraResources": [{ "from": "native/bin", "to": "native", "filter": ["**/*"] }],
     "win": {
       "target": [
         "nsis"
