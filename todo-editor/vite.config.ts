@@ -17,6 +17,8 @@ import {
   kickWorker,
   listAiJobs,
 } from './server/aiJobs.mjs'
+import { readAiConfig, writeAiConfig } from './server/paipuConfig.mjs'
+import { listImageModels } from './server/paipuClient.mjs'
 
 function readBody(req: { [Symbol.asyncIterator](): AsyncIterator<Buffer> }): Promise<string> {
   return (async () => {
@@ -170,6 +172,43 @@ function aiApi(): Plugin {
           sendJson(res, 405, { ok: false, error: 'method not allowed' })
         } catch (e) {
           sendJson(res, 500, { ok: false, error: String(e) })
+        }
+      })
+
+      server.middlewares.use(async (req, res, next) => {
+        const url = req.url || ''
+        if (!url.startsWith('/api/ai-config')) return next()
+
+        try {
+          if (req.method === 'GET') {
+            sendJson(res, 200, { ok: true, config: readAiConfig() })
+            return
+          }
+          if (req.method === 'POST') {
+            const body = JSON.parse((await readBody(req)) || '{}')
+            sendJson(res, 200, { ok: true, config: writeAiConfig(body) })
+            return
+          }
+          sendJson(res, 405, { ok: false, error: 'method not allowed' })
+        } catch (e) {
+          sendJson(res, 500, { ok: false, error: String(e instanceof Error ? e.message : e) })
+        }
+      })
+
+      server.middlewares.use(async (req, res, next) => {
+        const url = req.url || ''
+        if (!url.startsWith('/api/ai-models')) return next()
+
+        try {
+          if (req.method !== 'GET') {
+            sendJson(res, 405, { ok: false, error: 'method not allowed' })
+            return
+          }
+          const config = readAiConfig({ revealKey: true })
+          const models = await listImageModels(config)
+          sendJson(res, 200, { ok: true, models })
+        } catch (e) {
+          sendJson(res, 400, { ok: false, error: String(e instanceof Error ? e.message : e) })
         }
       })
 

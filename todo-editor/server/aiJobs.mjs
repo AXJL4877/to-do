@@ -7,6 +7,12 @@ import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawn } from 'node:child_process'
+import { readAiConfig } from './paipuConfig.mjs'
+import {
+  pollImageGeneration,
+  saveImageResult,
+  submitImageGeneration,
+} from './paipuClient.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const DATA_DIR = path.join(ROOT, '.data')
@@ -122,8 +128,9 @@ export function enqueueAiJob(body) {
   const id = `${kind === 'video' ? 'v' : 'i'}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`
   const now = Date.now()
   const params = {
-    size: body.size || '3840x2160',
+    size: body.size || '',
     model: body.model || '',
+    quality: body.quality || '',
     duration: Math.min(10, Math.max(3, Number(body.duration) || 5)),
     autoTimeline: !!body.autoTimeline,
     width: body.width || null,
@@ -206,32 +213,30 @@ async function runImageJob(job) {
   const filePath = path.join(AI_OUT, `${job.id}.png`)
   const params = job.params
   setPhase.run('提交生图…', Date.now(), job.id)
-
-  const args = [
-    'image', '--prompt', job.prompt, '--out', filePath,
-    '--size', params.size || '3840x2160', '--name', job.id, '--no-wait',
-  ]
-  if (params.model) args.push('--model', params.model)
+  const config = readAiConfig({ revealKey: true })
   const row = getJob.get(job.id)
+  let imageDataUrl = ''
   if (row?.ref_path && existsSync(row.ref_path)) {
-    // 密匙 image 可吃 data URL；从文件转 data URL 更稳
     const buf = readFileSync(row.ref_path)
-    args.push('--image', `data:image/png;base64,${buf.toString('base64')}`)
+    imageDataUrl = `data:image/png;base64,${buf.toString('base64')}`
   }
 
-  const submitted = await runPy(args)
-  if (submitted.ok === false && submitted.error) {
-    updateJob.run('error', '提交失败', null, null, null, null, String(submitted.error).slice(0, 400), Date.now(), job.id)
-    return
-  }
+  const submitted = await submitImageGeneration(config, {
+    prompt: job.prompt,
+    model: params.model || 'gpt-image-2',
+    size: params.size || '',
+    quality: params.quality || '',
+    imageDataUrl,
+  })
 
-  setPhase.run('生成中…', Date.now(), job.id)
-  const polled = await runPy(['image', '--poll', job.id])
-  if (!polled.ok) {
-    updateJob.run('error', '生成失败', null, null, null, null, String(polled.error || '生图失败').slice(0, 400), Date.now(), job.id)
-    return
-  }
-  const file = String(polled.file || filePath)
+  const result = submitted.kind === 'task'
+    ? await pollImageGeneration(config, submitted.taskId, (phase) => {
+        setPhase.run(phase, Date.now(), job.id)
+      })
+    : submitted
+
+  setPhase.run('下载图片…', Date.now(), job.id)
+  const file = await saveImageResult(config, result, filePath)
   const name = path.basename(file)
   updateJob.run(
     'done', '完成', name, `/ai-generated/${name}`, 'image',
