@@ -226,16 +226,17 @@ export function renderAndCacheFrame(
   return false
 }
 
-/** 连续帧合并为时间段，供时间线缓存条绘制 */
+/** 连续帧合并为时间段；允许 ≤4 帧空隙（播放时降频写缓存仍画成实心绿条） */
 export function cachedTimeRanges(cache: PreviewRamCache, fps: number): { start: number; end: number }[] {
   if (!cache.frames.size || fps <= 0) return []
   const frames = [...cache.frames.keys()].sort((a, b) => a - b)
+  const gapOk = 4
   const ranges: { start: number; end: number }[] = []
   let a = frames[0]
   let prev = frames[0]
   for (let i = 1; i < frames.length; i++) {
     const f = frames[i]
-    if (f === prev + 1) {
+    if (f <= prev + gapOk) {
       prev = f
       continue
     }

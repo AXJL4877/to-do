@@ -13,7 +13,7 @@ function sampleFontSize(clip: Clip, playhead: number) {
   return sampleKeyframes(clip.keyframes.fontSize, localT, clip.text?.fontSize ?? 48)
 }
 
-type RingId = 'root' | 'static' | 'dynamic' | 'transition' | 'color' | 'effect' | 'scene3d'
+type RingId = 'root' | 'static' | 'dynamic' | 'transition' | 'color' | 'effect' | 'mask' | 'scene3d'
 type DialProp = 'scale' | 'x' | 'y' | 'rotation' | 'opacity' | 'fontSize' | 'camZ' | 'exposure' | 'transDur'
 type DialMode = 'static' | 'dynamic'
 
@@ -42,7 +42,11 @@ function ringTitle(ring: RingId) {
   if (ring === 'static') return '静态'
   if (ring === 'dynamic') return '动态'
   if (ring === 'transition') return '转场'
-  return ''
+  if (ring === 'color') return '调色'
+  if (ring === 'effect') return '特效'
+  if (ring === 'mask') return '蒙版'
+  if (ring === 'scene3d') return '3D'
+  return '属性'
 }
 
 /** 渐进式属性轮盘：1 静态 · 2 动态(K帧) · 3 转场 */
@@ -62,6 +66,9 @@ export function PropWheel() {
   const addTransition = useApp((s) => s.addTransition)
   const setTransitionDuration = useApp((s) => s.setTransitionDuration)
   const addEffect = useApp((s) => s.addEffect)
+  const setClipMask = useApp((s) => s.setClipMask)
+  const toggleMaskInvert = useApp((s) => s.toggleMaskInvert)
+  const setChromaKey = useApp((s) => s.setChromaKey)
   const setMonitorCompose = useApp((s) => s.setMonitorCompose)
   const updateCamera3d = useApp((s) => s.updateCamera3d)
   const setClipThreeD = useApp((s) => s.setClipThreeD)
@@ -258,6 +265,7 @@ export function PropWheel() {
       if (!clip.text) {
         list.push({ id: 'co', label: '调色', Icon: Palette, action: () => { setRing('color'); setEntryShortcut(false) } })
         list.push({ id: 'fx', label: '特效', Icon: Sparkles, action: () => { setRing('effect'); setEntryShortcut(false) } })
+        list.push({ id: 'mk', label: '蒙版', Icon: Aperture, action: () => { setRing('mask'); setEntryShortcut(false) } })
       }
       return list
     }
@@ -314,6 +322,18 @@ export function PropWheel() {
         { id: 'bl', label: '模糊', Icon: Sparkles, action: () => { addEffect('blur', '模糊'); closePropWheel() } },
         { id: 'vg', label: '暗角', Icon: Aperture, action: () => { addEffect('vignette', '暗角'); closePropWheel() } },
         { id: 'sh', label: '锐化', Icon: Maximize2, action: () => { addEffect('sharpen', '锐化'); closePropWheel() } },
+      ]
+    }
+    if (ring === 'mask') {
+      return [
+        { id: 'mask-rect', label: '矩形', Icon: Maximize2, action: () => { setClipMask('rect'); closePropWheel() } },
+        { id: 'mask-ellipse', label: '圆形', Icon: Aperture, action: () => { setClipMask('ellipse'); closePropWheel() } },
+        { id: 'mask-linear', label: '线性', Icon: ArrowUpDown, action: () => { setClipMask('linear'); closePropWheel() } },
+        { id: 'mask-pen', label: '钢笔', Icon: Move, action: () => { setClipMask('pen'); closePropWheel() } },
+        { id: 'mask-text', label: '文字', Icon: Type, action: () => { setClipMask('text'); closePropWheel() } },
+        { id: 'mask-invert', label: '反转', Icon: RotateCw, action: () => { toggleMaskInvert(); closePropWheel() } },
+        { id: 'btn-chroma', label: '抠像', Icon: Sparkles, action: () => { setChromaKey(!(clip.chromaKey?.enabled)); closePropWheel() } },
+        { id: 'mask-clear', label: '清除', Icon: X, action: () => { setClipMask(null); setChromaKey(false); closePropWheel() } },
       ]
     }
     if (ring === 'scene3d') {

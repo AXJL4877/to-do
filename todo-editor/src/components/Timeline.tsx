@@ -87,6 +87,19 @@ export function Timeline({
   const lastAnchorId = useRef<string | null>(null)
 
   const localScrollRef = useRef<HTMLDivElement>(null)
+  // 选中含音轨片段时滚到可见，避免 A 轨在折叠区「看起来没入轨」
+  useEffect(() => {
+    const audioId = selectedClipIds.find((id) => {
+      const c = seq.clips.find((x) => x.id === id)
+      if (!c) return false
+      return seq.tracks.find((t) => t.id === c.trackId)?.kind === 'audio'
+    })
+    if (!audioId) return
+    const clip = seq.clips.find((c) => c.id === audioId)
+    if (!clip) return
+    const row = document.querySelector(`[data-testid="track-row-${clip.trackId}"]`)
+    row?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }, [selectedClipIds, seq.clips, seq.tracks])
   const scrollRef = scrollRefProp ?? localScrollRef
   const headersRef = useRef<HTMLDivElement>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
@@ -231,7 +244,8 @@ export function Timeline({
         const dx = e.clientX - d.startX
         if (Math.abs(dx) > 2) d.moved = true
         const dt = dx / pxPerSec
-        const ids = st.selectedClipIds.length ? st.selectedClipIds : [d.clipId]
+        // 用按下时锁定的 moveIds，勿跟 selectedClipIds 漂移
+        const ids = d.moveIds?.length ? d.moveIds : (st.selectedClipIds.length ? st.selectedClipIds : [d.clipId])
         const trackId = trackFromEvent(e.clientY) ?? undefined
         const appliedDt = st.previewDragDt(ids, d.originStarts, dt, {
           shift: e.shiftKey,
@@ -271,7 +285,8 @@ export function Timeline({
         const bottom = Math.max(y0, y1)
         const cur = st.sequences.find((s) => s.id === st.activeSeqId) ?? st.sequences[0]
         const hits: string[] = []
-        let y = 0
+        // 与 trackAtY / 轨行布局一致：顶部 CAM 占 22px
+        let y = 22
         for (const track of cur.tracks) {
           for (const clip of cur.clips.filter((c) => c.trackId === track.id)) {
             const cx0 = clip.start * pxPerSec
@@ -366,7 +381,8 @@ export function Timeline({
   }
 
   function onClipPointerDown(e: React.PointerEvent, clipId: string, trackLocked: boolean) {
-    if (e.button === 1 || (e.button === 0 && e.altKey)) {
+    // 中键或 Alt+左键：平移时间线（Alt 不再占用「只选当前」）
+    if (e.button === 1) {
       e.preventDefault()
       e.stopPropagation()
       drag.current = {
@@ -449,6 +465,18 @@ export function Timeline({
     }
     lastAnchorId.current = clipId
     ids = selectedClipIds.includes(clipId) ? selectedClipIds : [clipId]
+    // 默认带着链接的 A/V 一起动，避免音画时间线错位（Alt 只动当前）
+    if (!e.altKey) {
+      const linked = new Set(ids)
+      for (const id of ids) {
+        const c = seq.clips.find((x) => x.id === id)
+        if (c?.linkedId) linked.add(c.linkedId)
+        for (const o of seq.clips) {
+          if (o.linkedId === id) linked.add(o.id)
+        }
+      }
+      ids = [...linked]
+    }
     selectClips(ids)
 
     if (tool === 'slip') {
@@ -556,7 +584,7 @@ export function Timeline({
   return (
     <section
       className={clsx(
-        'panel nle-timeline flex flex-col min-h-0 rounded-none border-x-0 border-b-0',
+        'panel nle-timeline flex flex-col min-h-0 min-w-0 w-full overflow-hidden rounded-none border-x-0 border-b-0',
         fill ? 'flex-1 h-full' : 'shrink-0',
       )}
       style={fill ? undefined : { height: 'var(--timeline-h)' }}

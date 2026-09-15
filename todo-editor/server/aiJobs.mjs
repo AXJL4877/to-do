@@ -15,8 +15,11 @@ import {
 } from './paipuClient.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const DATA_DIR = path.join(ROOT, '.data')
-const AI_OUT = path.join(ROOT, 'public/ai-generated')
+const DATA_DIR = process.env.TODO_DATA_DIR
+  ? path.resolve(process.env.TODO_DATA_DIR)
+  : path.join(ROOT, '.data')
+/** 成果目录：与 /ai-generated/* URL 对应，正式包由 AI 服务托管 */
+export const AI_OUT = path.join(DATA_DIR, 'ai-generated')
 // 协作者可设 MISHI_ROOT；默认本机桌面「密匙」
 const MISHI_ROOT = process.env.MISHI_ROOT || 'd:\\Desktop\\密匙'
 const MISHI = path.join(MISHI_ROOT, 'run.py')

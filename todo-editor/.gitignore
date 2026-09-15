@@ -7,6 +7,9 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+.native-tools/
+native/bin/
+native/test-output/
 node_modules
 dist
 dist-ssr

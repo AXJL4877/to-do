@@ -41,7 +41,7 @@ export function TimelineFloatWindow() {
 
   return (
     <div
-      className="fixed z-40 flex flex-col rounded-lg border shadow-2xl overflow-hidden"
+      className="fixed z-[70] flex flex-col rounded-lg border shadow-2xl overflow-hidden"
       style={{
         left: pos.x,
         top: pos.y,

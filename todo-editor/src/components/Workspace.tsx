@@ -248,8 +248,8 @@ export function Workspace() {
   }, [layout.dockH, setLayout])
 
   return (
-    <div className="nle-upper flex min-h-0 flex-1 flex-col overflow-hidden relative" data-testid="workspace">
-      <div className="flex min-h-0 flex-1 overflow-hidden">
+    <div className="nle-upper flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-hidden relative" data-testid="workspace">
+      <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
         {left.length > 0 && (
           <>
             <aside className="nle-panel-col shrink-0" style={{ width: layout.sidebarW }}>
@@ -258,7 +258,7 @@ export function Workspace() {
             <ResizeHandle axis="x" testId="resize-sidebar" onDelta={resizeSidebar} />
           </>
         )}
-        <main className="nle-center flex-1 min-w-[320px] min-h-0 flex flex-col p-1">
+        <main className="nle-center flex-1 min-w-0 min-h-0 flex flex-col p-1 overflow-hidden">
           <MonitorArea />
         </main>
         {right.length > 0 && (
@@ -291,6 +291,6 @@ export function TimelineResizeHandle() {
   }, [layout.timelineH, setLayout])
   const onPointerDown = useResize(onDelta)
   return (
-    <div className="resize-handle resize-handle-y shrink-0" data-testid="resize-timeline" onPointerDown={onPointerDown} />
+    <div className="resize-handle resize-handle-y shrink-0 min-w-0 w-full" data-testid="resize-timeline" onPointerDown={onPointerDown} />
   )
 }

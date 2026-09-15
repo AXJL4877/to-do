@@ -8,8 +8,10 @@ import { patchClipTransform, patchClipXY, resolveClipTransform, sampleKeyframes,
 import { clearPreviewCache, getProgramPreviewCache, notifyPreviewCacheChanged } from './lib/previewCache'
 import { ensureScene3d } from './lib/scene3d'
 import { desktop } from './lib/desktop'
+import { aiFetch } from './lib/aiFetch'
 import { setLivePlayhead } from './lib/livePlayhead'
-import { reviveMediaList } from './lib/importFiles'
+import { reviveMediaList, parseDesktopMedia } from './lib/importFiles'
+import { buildEditGraph } from './lib/editGraph'
 
 function sampleAt(c: Clip, prop: string, localT: number): number {
   const tr = c.transform
@@ -44,9 +46,70 @@ function makeTracks(): Track[] {
     { id: 'ts1', kind: 'subtitle', name: '字幕', locked: false, muted: false, solo: false, hidden: false, height: 28 },
     { id: 'tv2', kind: 'video', name: 'V2', locked: false, muted: false, solo: false, hidden: false, height: 40 },
     { id: 'tv1', kind: 'video', name: 'V1', locked: false, muted: false, solo: false, hidden: false, height: 48 },
-    { id: 'ta1', kind: 'audio', name: 'A1', locked: false, muted: false, solo: false, hidden: false, height: 36 },
-    { id: 'ta2', kind: 'audio', name: 'A2', locked: false, muted: false, solo: false, hidden: false, height: 28 },
+    { id: 'ta1', kind: 'audio', name: 'A1', locked: false, muted: false, solo: false, hidden: false, height: 40 },
+    { id: 'ta2', kind: 'audio', name: 'A2', locked: false, muted: false, solo: false, hidden: false, height: 32 },
   ]
+}
+
+/** 视频片段缺链接 A 轨时补上（旧工程 / 热更新前入轨） */
+function withLinkedAudioClips(seq: Sequence, mediaList: MediaItem[]): Sequence {
+  const aTrack = seq.tracks.find((t) => t.kind === 'audio')
+  if (!aTrack) return seq
+  const byId = new Map(mediaList.map((m) => [m.id, m]))
+  const extras: Clip[] = []
+  let changed = false
+
+  // 先拆开误并到同 kind（尤其是都进 V 轨）的链接音视频
+  let clips = seq.clips.map((c) => {
+    const track = seq.tracks.find((t) => t.id === c.trackId)
+    const m = c.mediaId ? byId.get(c.mediaId) : undefined
+    if (m?.kind === 'audio' && track && track.kind !== 'audio') {
+      changed = true
+      return { ...c, trackId: aTrack.id }
+    }
+    if (!track || track.kind === 'audio' || !c.linkedId) return c
+    const partner = seq.clips.find((x) => x.id === c.linkedId)
+    if (!partner || partner.mediaId !== c.mediaId) return c
+    const pt = seq.tracks.find((t) => t.id === partner.trackId)
+    if (pt?.kind !== 'video' || track.kind !== 'video') return c
+    // 同媒体、都在 V 轨：名称带「音频」或作为链接从属侧的挪回 A
+    const audioSide = /音频/.test(c.name) || partner.linkedId === c.id
+    if (!audioSide) return c
+    changed = true
+    return { ...c, trackId: aTrack.id }
+  })
+
+  clips = clips.map((c) => {
+    const track = seq.tracks.find((t) => t.id === c.trackId)
+    const m = c.mediaId ? byId.get(c.mediaId) : undefined
+    if (!m || m.kind !== 'video' || track?.kind !== 'video') return c
+    const linked =
+      (c.linkedId ? clips.find((x) => x.id === c.linkedId) : undefined)
+      ?? clips.find((x) =>
+        x.linkedId === c.id && seq.tracks.find((t) => t.id === x.trackId)?.kind === 'audio')
+      ?? extras.find((x) => x.linkedId === c.id)
+    if (linked) {
+      if (c.linkedId === linked.id) return c
+      changed = true
+      return { ...c, linkedId: linked.id }
+    }
+    const aid = uid('clip')
+    changed = true
+    extras.push({
+      ...JSON.parse(JSON.stringify(c)) as Clip,
+      id: aid,
+      trackId: aTrack.id,
+      linkedId: c.id,
+      name: `${c.name} 音频`,
+      transform: defaultTransform(),
+      color: defaultColor(),
+      effects: [],
+      text: undefined,
+    })
+    return { ...c, linkedId: aid }
+  })
+  if (!changed) return seq
+  return { ...seq, clips: [...clips, ...extras] }
 }
 
 /** 把入场/出场时长写回片段上实际存在的动画源 */
@@ -260,11 +323,14 @@ export type AppStore = {
   setClipThreeD: (enabled: boolean) => void
   updateSelectedTransform3d: (p: Partial<Transform3D>, opts?: { record?: boolean }) => void
   exportProgramFrame: () => Promise<void>
-  importMedia: (files: { name: string; url: string; path?: string; kind: MediaItem['kind']; duration: number; width?: number; height?: number }[]) => string[]
+  importMedia: (files: { name: string; url: string; path?: string; kind: MediaItem['kind']; duration: number; width?: number; height?: number; hasAudio?: boolean }[]) => string[]
   addFolder: (name: string) => void
   toggleFavorite: (id: string) => void
   removeMedia: (id: string) => void
   relinkMedia: (id: string, url: string, path?: string) => void
+  setMediaProxyPath: (id: string, proxyPath: string | undefined) => void
+  /** 桌面：对 media.path 生成代理；成功写 proxyPath */
+  makeMediaProxy: (id: string, height?: 480 | 720) => Promise<boolean>
   setSelectedMedia: (id: string | null) => void
   captureFrame: () => void
   setAiRef: (dataUrl: string | null) => void
@@ -319,6 +385,9 @@ export type AppStore = {
   addTextClip: () => void
   addTransition: (type: TransitionType) => void
   addEffect: (type: string, name: string) => void
+  setClipMask: (type: import('./types').MaskType | null) => void
+  toggleMaskInvert: () => void
+  setChromaKey: (enabled: boolean) => void
   addMarker: (label?: string) => void
   setWorkArea: (a: number, b: number) => void
   toggleTrack: (id: string, key: 'locked' | 'muted' | 'solo' | 'hidden') => void
@@ -376,6 +445,7 @@ export type AppStore = {
   nestSelected: () => void
   setTransitionDuration: (d: number) => void
   extractAudio: () => void
+  syncVideoAudioLinks: () => void
   syncByAudio: () => void
 }
 
@@ -513,21 +583,24 @@ function flushDragMove(get: () => AppStore, set: (p: Partial<AppStore> | ((s: Ap
   const setIds = new Set(ids)
   const appliedDt = resolveDragDt(get, ids, origins, dt, opts)
   const cur = get().seq()
+  const dest = trackId ? cur.tracks.find((t) => t.id === trackId) : undefined
   set({
     sequences: get().sequences.map((s) =>
       s.id !== cur.id
         ? s
         : {
             ...s,
-            clips: s.clips.map((c) =>
-              setIds.has(c.id)
-                ? {
-                    ...c,
-                    start: Math.max(0, (origins[c.id] ?? c.start) + appliedDt),
-                    trackId: trackId ?? c.trackId,
-                  }
-                : c,
-            ),
+            clips: s.clips.map((c) => {
+              if (!setIds.has(c.id)) return c
+              const src = s.tracks.find((t) => t.id === c.trackId)
+              // 只允许同 kind 换轨，避免 V/A/字幕被拖进一条轨「合并」
+              const canRetarget = !!(dest && src && dest.kind === src.kind)
+              return {
+                ...c,
+                start: Math.max(0, (origins[c.id] ?? c.start) + appliedDt),
+                trackId: canRetarget ? dest!.id : c.trackId,
+              }
+            }),
           },
     ),
   })
@@ -795,37 +868,11 @@ export const useApp = create<AppStore>((set, get) => {
       if (!api) return
       const r = await api.pickMediaFiles()
       if (!r.ok || !r.files.length) return
-      const parsed = await Promise.all(r.files.map(async (f) => {
-        if (f.kind === 'image') {
-          const dim = await new Promise<{ w: number; h: number }>((resolve) => {
-            const img = new Image()
-            img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight })
-            img.onerror = () => resolve({ w: 1280, h: 720 })
-            img.src = f.url
-          })
-          return {
-            name: f.name, url: f.url, path: f.path, kind: 'image' as const,
-            duration: get().settings.stillDuration, width: dim.w, height: dim.h,
-          }
-        }
-        if (f.kind === 'audio') {
-          return { name: f.name, url: f.url, path: f.path, kind: 'audio' as const, duration: 30 }
-        }
-        const meta = await new Promise<{ d: number; w: number; h: number }>((resolve) => {
-          const v = document.createElement('video')
-          v.preload = 'metadata'
-          v.onloadedmetadata = () => resolve({
-            d: Number.isFinite(v.duration) ? v.duration : 5,
-            w: v.videoWidth || 1280, h: v.videoHeight || 720,
-          })
-          v.onerror = () => resolve({ d: 5, w: 1280, h: 720 })
-          v.src = f.url
-        })
-        return {
-          name: f.name, url: f.url, path: f.path, kind: 'video' as const,
-          duration: meta.d, width: meta.w, height: meta.h,
-        }
-      }))
+      const parsed = []
+      for (const file of r.files) {
+        try { parsed.push(await parseDesktopMedia(file, get().settings.stillDuration)) }
+        catch (error) { notify(String(error)) }
+      }
       get().importMedia(parsed)
     },
 
@@ -901,6 +948,7 @@ export const useApp = create<AppStore>((set, get) => {
         id: uid('media'), name: f.name, kind: f.kind, url: f.url, path: f.path,
         duration: f.duration,
         width: f.width, height: f.height, fps: 30,
+        hasAudio: f.hasAudio ?? (f.kind === 'audio' || f.kind === 'video'),
         folderId: f.kind === 'audio' ? 'f_audio' : f.kind === 'sticker' ? 'f_sticker' : 'f_all',
         favorite: false, offline: false,
       }))
@@ -918,6 +966,14 @@ export const useApp = create<AppStore>((set, get) => {
       notify(`已导入 ${items.length} 个素材`)
       // 立刻落盘，避免关软件丢库
       queueMicrotask(() => get().saveProject({ silent: true }))
+      // useProxy 开启时异步生成代理（默认手动：开关关则不跑）
+      if (get().settings.useProxy) {
+        for (const it of items) {
+          if (it.kind === 'video' && it.path) {
+            void get().makeMediaProxy(it.id)
+          }
+        }
+      }
       return items.map((i) => i.id)
     },
 
@@ -941,6 +997,28 @@ export const useApp = create<AppStore>((set, get) => {
         media: get().media.map((m) => (m.id === id ? { ...m, url, path: path ?? m.path, offline: false } : m)),
       })
       notify('素材已重新链接')
+    },
+    setMediaProxyPath(id, proxyPath) {
+      set({
+        media: get().media.map((m) => (m.id === id ? { ...m, proxyPath } : m)),
+      })
+    },
+    async makeMediaProxy(id, height = 720) {
+      const api = desktop()
+      const m = get().media.find((x) => x.id === id)
+      if (!api?.makeProxy || !m?.path) {
+        notify('无法生成代理（需桌面版与本地路径）')
+        return false
+      }
+      const r = await api.makeProxy(m.path, height)
+      if (!r.ok || !r.proxyPath) {
+        notify(`代理失败: ${r.error || 'unknown'}`)
+        return false
+      }
+      get().setMediaProxyPath(id, r.proxyPath)
+      notify(r.cached ? '已使用缓存代理' : '代理已生成')
+      queueMicrotask(() => get().saveProject({ silent: true }))
+      return true
     },
     setSelectedMedia(id) {
       const m = get().media.find((x) => x.id === id)
@@ -970,7 +1048,7 @@ export const useApp = create<AppStore>((set, get) => {
       if (!get().aiFloat && get().layout.panelDock?.ai === 'tab') patch.libraryTab = 'ai'
       set(patch)
       notify('已截帧 · 已设为 AI 参考图（未入库）')
-      void fetch('/api/ai-assets', {
+      void aiFetch('/api/ai-assets', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ dataUrl, kind: 'capture', name: `帧_${Date.now()}.png` }),
@@ -997,7 +1075,23 @@ export const useApp = create<AppStore>((set, get) => {
       if (Math.abs(next - get().playhead) < (opts?.exact ? 1e-6 : 1 / fps / 2)) return
       set({ playhead: next })
     },
-    togglePlay() { set({ playing: !get().playing }) },
+    togglePlay() {
+      const next = !get().playing
+      if (next) {
+        const seq = get().seq()
+        const t = get().playhead
+        const offline = seq.clips.some((c) => {
+          if (!c.enabled || !c.mediaId || t < c.start || t >= c.start + c.duration) return false
+          const m = get().media.find((x) => x.id === c.mediaId)
+          return !!m && (m.offline || !m.url || (m.url.startsWith('blob:') && m.offline))
+        })
+        if (offline) {
+          notify('素材已离线（blob 失效），请用「导入」或桌面选文件重新导入后再播放')
+          return
+        }
+      }
+      set({ playing: next })
+    },
     stepFrame(d) { set({ playhead: Math.max(0, get().playhead + d / get().settings.fps), playing: false }) },
     setLoop(v) { set({ loop: v }) },
     setTool(t) { set({ tool: t }) },
@@ -1101,11 +1195,47 @@ export const useApp = create<AppStore>((set, get) => {
         transform: defaultTransform(), color: defaultColor(), audio: defaultAudio(),
         effects: [], blend: 'normal', keyframes: {},
       }
+      const extra: Clip[] = []
+      // 视频：始终拆一条链接 A 轨（有无探测到音轨都拆，方便剪辑）
+      if (media.kind === 'video') {
+        const aTrack = sequence.tracks.find((t) => t.kind === 'audio')
+        if (aTrack) {
+          const aid = uid('clip')
+          const vid = clip.id
+          clip.linkedId = aid
+          extra.push({
+            ...JSON.parse(JSON.stringify(clip)) as Clip,
+            id: aid,
+            trackId: aTrack.id,
+            linkedId: vid,
+            name: `${media.name} 音频`,
+            transform: defaultTransform(),
+            color: defaultColor(),
+            effects: [],
+            text: undefined,
+          })
+        }
+      }
       patchSeq((s) => ({
-        ...s, clips: [...s.clips, clip],
+        ...s, clips: [...s.clips, clip, ...extra],
         workOut: Math.max(s.workOut, clip.start + clip.duration),
       }))
-      set({ selectedClipIds: [clip.id], sourceMediaId: mediaId })
+      set({
+        selectedClipIds: [clip.id, ...extra.map((e) => e.id)],
+        sourceMediaId: mediaId,
+      })
+    },
+
+    /** 给已在时间线上的视频补链接音轨 */
+    syncVideoAudioLinks() {
+      const mediaList = get().media
+      let changed = false
+      const sequences = get().sequences.map((q) => {
+        const next = withLinkedAudioClips(q, mediaList)
+        if (next !== q) changed = true
+        return next
+      })
+      if (changed) set({ sequences })
     },
 
     selectClips(ids) {
@@ -1125,14 +1255,22 @@ export const useApp = create<AppStore>((set, get) => {
       if (opts?.record !== false) get().pushHistory()
       const setIds = new Set(ids)
       const snap = (t: number) => get().snapTime(t)
-      patchSeq((s) => ({
-        ...s,
-        clips: s.clips.map((c) =>
-          setIds.has(c.id)
-            ? { ...c, start: Math.max(0, snap(c.start + dt)), trackId: trackId ?? c.trackId }
-            : c,
-        ),
-      }))
+      patchSeq((s) => {
+        const dest = trackId ? s.tracks.find((t) => t.id === trackId) : undefined
+        return {
+          ...s,
+          clips: s.clips.map((c) => {
+            if (!setIds.has(c.id)) return c
+            const src = s.tracks.find((t) => t.id === c.trackId)
+            const canRetarget = !!(dest && src && dest.kind === src.kind)
+            return {
+              ...c,
+              start: Math.max(0, snap(c.start + dt)),
+              trackId: canRetarget ? dest!.id : c.trackId,
+            }
+          }),
+        }
+      })
     },
 
     snapTime(t) {
@@ -1164,17 +1302,32 @@ export const useApp = create<AppStore>((set, get) => {
     trimClip(id, edge, t, opts) {
       if (opts?.record !== false) get().pushHistory()
       const snapped = get().snapTime(t)
-      patchSeq((s) => ({
-        ...s,
-        clips: s.clips.map((c) => {
-          if (c.id !== id) return c
-          if (edge === 'in') {
-            const delta = snapped - c.start
-            return { ...c, start: snapped, duration: Math.max(0.1, c.duration - delta), inPoint: c.inPoint + delta }
-          }
-          return { ...c, duration: Math.max(0.1, snapped - c.start), outPoint: c.inPoint + Math.max(0.1, snapped - c.start) }
-        }),
-      }))
+      patchSeq((s) => {
+        const primary = s.clips.find((c) => c.id === id)
+        const targets = new Set<string>([id])
+        if (primary?.linkedId) targets.add(primary.linkedId)
+        for (const c of s.clips) {
+          if (c.linkedId === id) targets.add(c.id)
+        }
+        return {
+          ...s,
+          clips: s.clips.map((c) => {
+            if (!targets.has(c.id)) return c
+            if (edge === 'in') {
+              const delta = snapped - c.start
+              return {
+                ...c,
+                start: snapped,
+                duration: Math.max(0.1, c.duration - delta),
+                inPoint: c.inPoint + delta,
+                outPoint: c.inPoint + delta + Math.max(0.1, c.duration - delta),
+              }
+            }
+            const duration = Math.max(0.1, snapped - c.start)
+            return { ...c, duration, outPoint: c.inPoint + duration }
+          }),
+        }
+      })
     },
 
     resizeEdgeAnim(id, edge, sec, opts) {
@@ -1574,6 +1727,43 @@ export const useApp = create<AppStore>((set, get) => {
       }))
     },
 
+    setClipMask(type) {
+      get().pushHistory()
+      if (!type) {
+        patchSelected((c) => ({ ...c, mask: undefined }))
+        return
+      }
+      patchSelected((c) => ({
+        ...c,
+        mask: {
+          type,
+          feather: c.mask?.feather ?? 0.15,
+          expand: c.mask?.expand ?? 0,
+          invert: c.mask?.invert ?? false,
+          points: type === 'pen'
+            ? (c.mask?.points?.length ? c.mask.points : [
+              { x: 0.2, y: 0.2 }, { x: 0.8, y: 0.2 }, { x: 0.8, y: 0.8 }, { x: 0.2, y: 0.8 },
+            ])
+            : c.mask?.points,
+        },
+      }))
+    },
+
+    toggleMaskInvert() {
+      get().pushHistory()
+      patchSelected((c) => (c.mask ? { ...c, mask: { ...c.mask, invert: !c.mask.invert } } : c))
+    },
+
+    setChromaKey(enabled) {
+      get().pushHistory()
+      patchSelected((c) => ({
+        ...c,
+        chromaKey: enabled
+          ? { color: c.chromaKey?.color ?? '#00FF00', tolerance: c.chromaKey?.tolerance ?? 0.35, enabled: true }
+          : { color: c.chromaKey?.color ?? '#00FF00', tolerance: c.chromaKey?.tolerance ?? 0.35, enabled: false },
+      }))
+    },
+
     addMarker(label = '标记') {
       patchSeq((s) => ({
         ...s,
@@ -1929,26 +2119,87 @@ export const useApp = create<AppStore>((set, get) => {
         rangeOnly: opts.rangeOnly ?? false, audioOnly: opts.audioOnly ?? false,
       }
       set({ exportQueue: [...get().exportQueue, job] })
-      notify(get().monitorCompose === '3d' ? '3D 合成导出已加入队列' : '已加入导出队列')
 
-      const runFake = () => {
-        const tick = () => {
-          const q = get().exportQueue.map((j) => {
-            if (j.id !== job.id || j.status === 'done') return j
-            const progress = Math.min(100, j.progress + 14 + Math.random() * 16)
-            return { ...j, status: (progress >= 100 ? 'done' : 'running') as ExportJob['status'], progress }
-          })
-          set({ exportQueue: q })
-          const cur = q.find((j) => j.id === job.id)
-          if (cur && cur.status !== 'done') setTimeout(tick, 260)
-          else if (cur?.status === 'done') {
-            if (get().monitorCompose === '3d') void get().exportProgramFrame()
-            notify('导出完成')
-          }
-        }
-        setTimeout(tick, 180)
+      const patchJob = (patch: Partial<ExportJob>) => {
+        set({
+          exportQueue: get().exportQueue.map((j) => (j.id === job.id ? { ...j, ...patch } : j)),
+        })
       }
-      runFake()
+
+      // 静帧封面：走监视器 PNG，不经 ffmpeg
+      if (opts.preset === 'frame') {
+        patchJob({ status: 'running', progress: 10 })
+        void get().exportProgramFrame().then(() => {
+          patchJob({ status: 'done', progress: 100 })
+          notify('静帧已导出')
+        }).catch((e) => {
+          patchJob({ status: 'error', progress: 0, error: String(e) })
+          notify('静帧导出失败')
+        })
+        return
+      }
+
+      const api = desktop()
+      if (!api?.exportSequence) {
+        patchJob({ status: 'error', error: '导出需在桌面版（Electron）中运行' })
+        notify('导出需在桌面版中运行')
+        return
+      }
+
+      const seq = get().seq()
+      const graph = buildEditGraph({
+        clips: seq.clips,
+        tracks: seq.tracks,
+        media: get().media,
+        settings: get().settings,
+        workIn: seq.workIn,
+        workOut: seq.workOut,
+        rangeOnly: opts.rangeOnly ?? false,
+        audioOnly: opts.audioOnly ?? false,
+        preset: opts.preset,
+      })
+
+      notify(get().monitorCompose === '3d'
+        ? '3D 合成简化导出（平面叠层，无摄像机）已加入队列'
+        : '已加入导出队列')
+      patchJob({ status: 'running', progress: 1 })
+
+      const unsub = api.onExportProgress?.((msg) => {
+        if (msg.jobId !== job.id) return
+        if (msg.status === 'running') {
+          patchJob({ status: 'running', progress: msg.progress })
+        } else if (msg.status === 'done') {
+          patchJob({ status: 'done', progress: 100, path: msg.path })
+        } else if (msg.status === 'error') {
+          patchJob({ status: 'error', progress: msg.progress, error: msg.error, path: msg.path })
+        }
+      })
+
+      void api.exportSequence({
+        jobId: job.id,
+        defaultName: `${job.name}.${opts.audioOnly ? 'm4a' : 'mp4'}`,
+        audioOnly: opts.audioOnly ?? false,
+        sequence: graph,
+      }).then((result) => {
+        unsub?.()
+        if (result.canceled) {
+          set({ exportQueue: get().exportQueue.filter((j) => j.id !== job.id) })
+          notify('已取消导出')
+          return
+        }
+        if (result.ok) {
+          patchJob({ status: 'done', progress: 100, path: result.path })
+          notify(result.path ? `导出完成 · ${result.path}` : '导出完成')
+          if (get().monitorCompose === '3d') void get().exportProgramFrame()
+        } else {
+          patchJob({ status: 'error', error: result.error || '导出失败' })
+          notify(result.error || '导出失败')
+        }
+      }).catch((e) => {
+        unsub?.()
+        patchJob({ status: 'error', error: String(e) })
+        notify(`导出失败：${e}`)
+      })
     },
 
     savePreset(name, kind, payload) {
@@ -2018,12 +2269,17 @@ export const useApp = create<AppStore>((set, get) => {
       if (!c?.mediaId) { notify('请选择含音频的片段'); return }
       get().pushHistory()
       const track = get().seq().tracks.find((t) => t.kind === 'audio')!
+      const aid = uid('clip')
       const audioClip: Clip = {
         ...JSON.parse(JSON.stringify(c)) as Clip,
-        id: uid('clip'), trackId: track.id, name: `${c.name} 音频`,
-        start: c.start, duration: c.duration,
+        id: aid, trackId: track.id, name: `${c.name} 音频`,
+        start: c.start, duration: c.duration, linkedId: c.id,
+        transform: defaultTransform(), color: defaultColor(), effects: [], text: undefined,
       }
-      patchSeq((s) => ({ ...s, clips: [...s.clips, audioClip] }))
+      patchSeq((s) => ({
+        ...s,
+        clips: s.clips.map((x) => x.id === c.id ? { ...x, linkedId: aid } : x).concat(audioClip),
+      }))
       notify('已提取音频到 A 轨')
     },
 

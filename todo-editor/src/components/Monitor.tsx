@@ -3,6 +3,7 @@ import { Play, Pause, SkipBack, SkipForward, Repeat, Camera } from 'lucide-react
 import { useApp, formatTime } from '../store'
 import { resolveClipTransform, patchClipXY } from '../lib/keyframeEval'
 import { getPreviewSize, hitTestMotionPathKf, hitTestProgramClips, renderProgramFrame, renderSourceFrame } from '../lib/monitorDraw'
+import { cancelComposeUpgrade } from '../lib/composePreview'
 import { clipHalfNorm, snapWithGuides, type SnapGuide } from '../lib/monitorSnap'
 import {
   blitCachedFrame,
@@ -17,24 +18,27 @@ import {
 import { useImageCache } from '../hooks/useImageCache'
 import { getLivePlayhead, setLivePlayhead, subscribeLivePlayhead } from '../lib/livePlayhead'
 import { setVideoSeekQuiet } from '../lib/videoCache'
+import { stopNativePlaySession } from '../lib/nativePlayBridge'
 import { broadcastLivePlayhead } from '../lib/storeSync'
+import { syncProgramAudio, stopProgramAudio } from '../lib/programAudio'
 import { Monitor3dViewport } from './Monitor3dViewport'
 import { webglOk } from '../lib/scene3d'
 import clsx from 'clsx'
 
-function fitSize(boxW: number, boxH: number, ar: number) {
-  if (boxW <= 0 || boxH <= 0) return { w: 0, h: 0 }
-  const boxAr = boxW / boxH
-  if (boxAr > ar) return { w: boxH * ar, h: boxH }
-  return { w: boxW, h: boxW / ar }
-}
-
-/** CSS 像素 → 归一化坐标（中心 0，左右/上下约 ±1） */
+/** 画布缓冲坐标：object-fit:contain 时要把 letterbox 算进去 */
 function clientToNorm(canvas: HTMLCanvasElement, clientX: number, clientY: number) {
   const rect = canvas.getBoundingClientRect()
-  if (rect.width <= 0 || rect.height <= 0) return { nx: 0, ny: 0 }
-  const nx = ((clientX - rect.left) / rect.width) * 2 - 1
-  const ny = ((clientY - rect.top) / rect.height) * 2 - 1
+  if (rect.width <= 0 || rect.height <= 0 || canvas.width <= 0 || canvas.height <= 0) {
+    return { nx: 0, ny: 0 }
+  }
+  const scale = Math.min(rect.width / canvas.width, rect.height / canvas.height)
+  const dw = canvas.width * scale
+  const dh = canvas.height * scale
+  const ox = rect.left + (rect.width - dw) / 2
+  const oy = rect.top + (rect.height - dh) / 2
+  if (dw <= 0 || dh <= 0) return { nx: 0, ny: 0 }
+  const nx = ((clientX - ox) / dw) * 2 - 1
+  const ny = ((clientY - oy) / dh) * 2 - 1
   return { nx, ny }
 }
 
@@ -51,14 +55,12 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program';
     axis: 'free' | 'x' | 'y'
     moved: boolean
     pending?: Record<string, { x: number; y: number }>
-    /** 路径关键帧：片段局部时间 */
     pathT?: number
     pathOrigin?: { x: number; y: number }
   }>(null)
+  /** 视口 CSS 像素（3D 用）；2D 用 object-fit 铺满视口 */
   const [display, setDisplay] = useState({ w: 0, h: 0 })
-  /** 节目监视器视口缩放（Ctrl+滚轮），1 = 适应窗口 */
   const [viewZoom, setViewZoom] = useState(1)
-  /** 视口平移（中键拖） */
   const [viewPan, setViewPan] = useState({ x: 0, y: 0 })
   const viewPanRef = useRef({ x: 0, y: 0 })
   const notifiedCache = useRef('')
@@ -91,7 +93,6 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program';
   const captureFrame = useApp((s) => s.captureFrame)
 
   const { cache: imgCache, version: imgVersion } = useImageCache(media)
-  const aspect = settings.width / settings.height
   const preview = getPreviewSize(settings, prefs.performance)
   const use3d = mode === 'program' && monitorCompose === '3d' && webglOk()
 
@@ -100,22 +101,16 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program';
     useApp.getState().setToast('WebGL 不可用，已回退 2D 监视器')
   }, [setMonitorCompose])
 
-  const resize = useCallback(() => {
-    const el = viewportRef.current
-    if (!el) return
-    setDisplay(fitSize(el.clientWidth, el.clientHeight, aspect))
-  }, [aspect])
-
   useEffect(() => {
-    resize()
     const el = viewportRef.current
     if (!el) return
-    const ro = new ResizeObserver(resize)
+    const measure = () => setDisplay({ w: el.clientWidth, h: el.clientHeight })
+    measure()
+    const ro = new ResizeObserver(measure)
     ro.observe(el)
     return () => ro.disconnect()
-  }, [resize])
+  }, [])
 
-  // Ctrl/⌘+滚轮：缩放节目监视器视口（非元素）；需非 passive 才能挡住浏览器页面缩放
   useEffect(() => {
     if (mode !== 'program') return
     const el = viewportRef.current
@@ -127,7 +122,6 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program';
       const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1
       setViewZoom((z) => Math.min(4, Math.max(0.25, Math.round(z * factor * 100) / 100)))
     }
-    // 挡住中键默认的自动滚动
     const blockMid = (e: MouseEvent) => {
       if (e.button === 1) e.preventDefault()
     }
@@ -168,11 +162,11 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program';
     window.addEventListener('pointerup', onUp)
   }
 
+  const viewDirty = viewZoom !== 1 || viewPan.x !== 0 || viewPan.y !== 0
   const viewTransform =
-    mode === 'program' && (viewZoom !== 1 || viewPan.x !== 0 || viewPan.y !== 0)
+    mode === 'program' && viewDirty
       ? `translate(${viewPan.x}px, ${viewPan.y}px) scale(${viewZoom})`
       : undefined
-  const viewDirty = viewZoom !== 1 || viewPan.x !== 0 || viewPan.y !== 0
 
   const paint = useCallback((t: number, transformOverrides?: Record<string, { x: number; y: number }>, opts?: { playing?: boolean; guides?: SnapGuide[] }) => {
     const canvas = canvasRef.current
@@ -198,11 +192,10 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program';
 
     const scrubbing = !opts?.playing
     if (opts?.playing && !transformOverrides) {
-      // 空时间点必须合成清空，绝不能 blit 旧缓存帧
       const hasVisibleClip = seq.clips.some((c) => {
         if (!c.enabled || t < c.start || t >= c.start + c.duration) return false
         const track = seq.tracks.find((tr) => tr.id === c.trackId)
-        return !track?.hidden
+        return !!track && !track.hidden && track.kind !== 'audio'
       })
       if (!hasVisibleClip) {
         renderProgramFrame(canvas, seq, media, settings, t, imgCache.current, w, h, [], undefined, false)
@@ -214,6 +207,15 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program';
         return
       }
       renderAndCacheFrame(ram, frame, fps, canvas, seq, media, settings, imgCache.current, w, h)
+      return
+    }
+
+    // scrub / 暂停：只走 Canvas2D（compose 升级会异步盖黑）
+    if (scrubbing && !transformOverrides) {
+      renderProgramFrame(
+        canvas, seq, media, settings, t, imgCache.current, w, h,
+        st.selectedClipIds, undefined, scrubbing && st.autoKeyframe, opts?.guides,
+      )
       return
     }
 
@@ -258,6 +260,8 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program';
 
   useEffect(() => {
     if (use3d || mode !== 'program' || !playing) return
+    cancelComposeUpgrade()
+    void stopNativePlaySession()
     setVideoSeekQuiet(true)
     let raf = 0
     const st0 = useApp.getState()
@@ -299,6 +303,7 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program';
           const span = Math.max(0.05, end - seq.workIn)
           t = seq.workIn + ((t - seq.workIn) % span)
         } else {
+          void stopNativePlaySession()
           paint(end, undefined, { playing: true })
           setLivePlayhead(end)
           broadcastLivePlayhead(end)
@@ -311,11 +316,11 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program';
       const hasVisibleClip = seq.clips.some((c) => {
         if (!c.enabled || t < c.start || t >= c.start + c.duration) return false
         const track = seq.tracks.find((tr) => tr.id === c.trackId)
-        return !track?.hidden
+        return !!track && !track.hidden && track.kind !== 'audio'
       })
       localPlayhead.current = t
       setLivePlayhead(t)
-      broadcastLivePlayhead(t)
+      if (frame % 2 === 0) broadcastLivePlayhead(t)
 
       // 无片段：强制合成空画面，绝不复用上一时刻缓存
       if (!hasVisibleClip) {
@@ -324,24 +329,29 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program';
           canvas, seq, media, settings, t, imgCache.current, preview.w, preview.h,
           [], undefined, false,
         )
+        syncProgramAudio(seq, media, t, true)
         raf = requestAnimationFrame(tick)
         return
       }
 
-      // 有视频时每帧实画（不用可能过期的 RAM blit），但仍写入缓存供绿条/回 scrub
+      // 有视频：HTMLVideo + Canvas2D 跟手；勿每帧 pump 原生 BMP / WebGL 上传
       if (clipUsesVideo(seq, t)) {
         lastShown = frame
         renderProgramFrame(
           canvas, seq, media, settings, t, imgCache.current, preview.w, preview.h,
           [], undefined, false,
         )
-        const { w: cw, h: ch } = cachePixelSize(preview.w, preview.h, st.prefs.previewCacheMaxEdge ?? 720)
-        if (seq !== lastSeq) {
-          lastSeq = seq
-          fp = previewFingerprint(seq, settings, cw, ch)
-          ensurePreviewFingerprint(cache, fp, cw, ch)
+        // 每 4 帧写一次 RAM；时间线条合并空隙仍显示实心绿
+        if (frame % 4 === 0) {
+          const { w: cw, h: ch } = cachePixelSize(preview.w, preview.h, st.prefs.previewCacheMaxEdge ?? 720)
+          if (seq !== lastSeq) {
+            lastSeq = seq
+            fp = previewFingerprint(seq, settings, cw, ch)
+            ensurePreviewFingerprint(cache, fp, cw, ch)
+          }
+          putCachedFrame(cache, frame, canvas, frame)
         }
-        putCachedFrame(cache, frame, canvas, frame)
+        syncProgramAudio(seq, media, t, true)
         raf = requestAnimationFrame(tick)
         return
       }
@@ -362,19 +372,26 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program';
           )
         }
       }
+      syncProgramAudio(seq, media, t, true)
 
       raf = requestAnimationFrame(tick)
     }
     raf = requestAnimationFrame(tick)
     return () => {
+      cancelComposeUpgrade()
+      stopProgramAudio()
       setVideoSeekQuiet(false)
       cancelAnimationFrame(raf)
+      void stopNativePlaySession()
       const current = useApp.getState().playhead
       // 普通暂停时 store 仍停在播放起点，提交最后播放帧；
       // 若 scrub/跨窗 seek 已写入新时间，不能再用旧播放循环覆盖。
+      const endT = Math.abs(current - tStart) < 1e-4 ? localPlayhead.current : current
       if (Math.abs(current - tStart) < 1e-4) {
-        useApp.setState({ playhead: localPlayhead.current })
+        useApp.setState({ playhead: endT })
       }
+      // 暂停后视频已 pause，下一 tick 强制 Canvas2D 重画，避免黑屏
+      requestAnimationFrame(() => paint(endT))
     }
   }, [playing, mode, loop, activeSeqId, paint, use3d, media, settings, preview.w, preview.h, imgCache])
 
@@ -635,11 +652,11 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program';
               className={clsx('icon-btn', monitorCompose === '2d' && 'active')}
               style={{ width: 26, height: 26, color: 'var(--text-on-ink)' }}
               data-testid="btn-compose-2d"
-              title="2D 合成预览"
-              aria-label="2D 合成预览"
+              title="GPU 合成预览（EditGraph=导出规则）"
+              aria-label="GPU 合成预览"
               onClick={() => setMonitorCompose('2d')}
             >
-              <span className="text-[10px] font-bold">2D</span>
+              <span className="text-[10px] font-bold">GPU</span>
             </button>
             <button
               className={clsx('icon-btn', monitorCompose === '3d' && 'active')}
@@ -678,20 +695,15 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program';
 
       <div
         ref={viewportRef}
-        className={clsx('flex-1 min-h-0 flex items-center justify-center overflow-hidden bg-black/40', compact ? 'p-1' : 'p-2')}
+        className="relative flex-1 min-h-0 w-full overflow-hidden bg-black"
         data-testid={mode === 'program' ? 'program-viewport' : 'source-viewport'}
         title={mode === 'program' ? 'Ctrl+滚轮缩放 · 中键拖移视口' : undefined}
         onPointerDown={onViewportPointerDown}
       >
         {use3d ? (
           <div
-            className="rounded-md shadow-lg overflow-hidden shrink-0"
-            style={{
-              width: display.w || undefined,
-              height: display.h || undefined,
-              transform: viewTransform,
-              transformOrigin: 'center center',
-            }}
+            className="absolute inset-0"
+            style={{ transform: viewTransform, transformOrigin: 'center center' }}
           >
             <Monitor3dViewport width={display.w} height={display.h} onFallback={on3dFallback} />
           </div>
@@ -700,15 +712,18 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program';
             ref={canvasRef}
             id={mode === 'program' ? 'program-canvas' : 'source-canvas'}
             data-testid={mode === 'program' ? 'program-canvas' : 'source-canvas'}
-            className="rounded-md shadow-lg shrink-0"
+            width={preview.w}
+            height={preview.h}
+            className="absolute inset-0"
             style={{
-              width: display.w > 0 ? display.w : undefined,
-              height: display.h > 0 ? display.h : undefined,
-              display: 'block',
-              cursor: mode === 'program' ? 'move' : 'default',
-              touchAction: 'none',
+              width: '100%',
+              height: '100%',
+              objectFit: 'contain',
               transform: viewTransform,
               transformOrigin: 'center center',
+              cursor: mode === 'program' ? 'move' : 'default',
+              touchAction: 'none',
+              background: '#000',
             }}
             onPointerDown={onCanvasPointerDown}
           />

@@ -5,10 +5,29 @@ contextBridge.exposeInMainWorld('todoDesktop', {
   isDesktop: true,
   platform: process.platform,
   getPaths: () => ipcRenderer.invoke('desktop:get-paths'),
+  getAiBaseUrl: () => ipcRenderer.sendSync('desktop:ai-base-url') || '',
+  aiBaseUrl: () => ipcRenderer.sendSync('desktop:ai-base-url') || '',
   saveProjectFile: (defaultName, json) => ipcRenderer.invoke('desktop:save-project', { defaultName, json }),
   openProjectFile: () => ipcRenderer.invoke('desktop:open-project'),
   pickMediaFiles: () => ipcRenderer.invoke('desktop:pick-media'),
+  probeMedia: (filePath, timeoutMs) => ipcRenderer.invoke('desktop:probe-media', { filePath, timeoutMs }),
+  decodeMediaFrame: (filePath, timeSec, timeoutMs) => ipcRenderer.invoke('desktop:decode-media-frame', { filePath, timeSec, timeoutMs }),
+  /** 测试用：连续播放 smoke */
+  playSmoke: (filePath, seconds, timeoutMs) => ipcRenderer.invoke('desktop:play-smoke', { filePath, seconds, timeoutMs }),
+  nativePlayOpen: (filePath, timeoutMs) => ipcRenderer.invoke('desktop:native-play-open', { filePath, timeoutMs }),
+  nativePlaySeek: (timeSec, timeoutMs) => ipcRenderer.invoke('desktop:native-play-seek', { timeSec, timeoutMs }),
+  nativePlayRead: (timeoutMs) => ipcRenderer.invoke('desktop:native-play-read', { timeoutMs }),
+  nativePlayAudioClock: (timeoutMs) => ipcRenderer.invoke('desktop:native-play-audio-clock', { timeoutMs }),
+  nativePlayClose: () => ipcRenderer.invoke('desktop:native-play-close'),
+  composeFrame: (graph, timeSec, timeoutMs) => ipcRenderer.invoke('desktop:compose-frame', { graph, timeSec, timeoutMs }),
+  makeProxy: (filePath, height) => ipcRenderer.invoke('desktop:make-proxy', { filePath, height }),
   exportFramePng: (defaultName, dataUrl) => ipcRenderer.invoke('desktop:export-frame', { defaultName, dataUrl }),
+  exportSequence: (payload) => ipcRenderer.invoke('desktop:export-sequence', payload),
+  onExportProgress: (cb) => {
+    const handler = (_e, msg) => cb(msg)
+    ipcRenderer.on('desktop:export-progress', handler)
+    return () => ipcRenderer.removeListener('desktop:export-progress', handler)
+  },
   revealPath: (filePath) => ipcRenderer.invoke('desktop:reveal', filePath),
   /** 拖入/选择的 File → 本机路径（sandbox 下勿依赖 file.path） */
   getPathForFile: (file) => {
@@ -47,4 +66,5 @@ contextBridge.exposeInMainWorld('todoDesktop', {
     ipcRenderer.on('desktop:media-drop', handler)
     return () => ipcRenderer.removeListener('desktop:media-drop', handler)
   },
+  waveformPeaks: (filePath, bins) => ipcRenderer.invoke('desktop:waveform-peaks', { filePath, bins }),
 })
