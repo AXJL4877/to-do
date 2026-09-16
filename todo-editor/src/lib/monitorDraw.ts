@@ -91,7 +91,8 @@ export function renderProgramFrame(
 
   for (const clip of visible) {
     const ov = transformOverrides?.[clip.id]
-    drawClip(ctx, clip, media, w, h, sx, sy, cache, playhead, ov, settings.fps)
+    const trk = seq.tracks.find((x) => x.id === clip.trackId)
+    drawClip(ctx, clip, media, w, h, sx, sy, cache, playhead, ov, settings.fps, !!trk?.muted)
   }
 
   // 选中框（与画面同一套 transform 计算）
@@ -355,6 +356,7 @@ function drawClip(
   playhead: number,
   xyOverride?: { x: number; y: number },
   fps = 30,
+  trackMuted = false,
 ) {
   const tr = effectiveTransform(clip, playhead, xyOverride)
   ctx.save()
@@ -396,7 +398,12 @@ function drawClip(
       const srcDur = m.duration > 0 ? m.duration : Infinity
       const inSrc = mediaT >= 0 && mediaT < srcDur - 1e-3
         && mediaT <= clip.outPoint + 1e-4
-      const frame = inSrc ? videoFrameAt(m, mediaT, fps, clip.id) : null
+      const vol = trackMuted || clip.audio.mute
+        ? 0
+        : Math.max(0, Math.min(1, Math.pow(10, (clip.audio.gainDb || 0) / 20)))
+      const frame = inSrc
+        ? videoFrameAt(m, mediaT, fps, clip.id, { speed, volume: vol, reverse: !!clip.reverse })
+        : null
       if (frame) {
         const iw = (frame as HTMLVideoElement).videoWidth
           || (frame as HTMLCanvasElement).width

@@ -1,15 +1,15 @@
 import type { Clip, MediaItem, Sequence } from '../types'
 import { muteAllVideos } from './videoCache'
 
-/** 声音单独走 HTMLAudio，跟画面解码器分开，只对齐序列钟 */
+/** 纯音轨才走 HTMLAudio；视频声跟该 clip 的 HTMLVideo，避免同一文件解两遍 */
 const audioOnly = new Map<string, HTMLAudioElement>()
 
-function ensureAudio(mediaId: string, url: string): HTMLAudioElement {
-  let a = audioOnly.get(mediaId)
+function ensureAudio(clipId: string, url: string): HTMLAudioElement {
+  let a = audioOnly.get(clipId)
   if (!a) {
     a = new Audio()
     a.preload = 'auto'
-    audioOnly.set(mediaId, a)
+    audioOnly.set(clipId, a)
   }
   if (a.dataset.src !== url) {
     a.dataset.src = url
@@ -22,43 +22,40 @@ function gainToVolume(db: number) {
   return Math.max(0, Math.min(1, Math.pow(10, db / 20)))
 }
 
-function audibleAt(seq: Sequence, media: MediaItem[], t: number): { media: MediaItem; mediaT: number; vol: number }[] {
+function inRange(c: Clip, t: number) {
+  return t >= c.start && t < c.start + c.duration
+}
+
+/** 成片音已由对应视频元素在播，这条链接音轨不要再解一遍 */
+function videoAlreadySounds(seq: Sequence, clip: Clip, t: number) {
+  const partner = seq.clips.find((x) => x.id === clip.linkedId)
+    ?? seq.clips.find((x) => x.linkedId === clip.id && x.id !== clip.id)
+  if (!partner || !inRange(partner, t) || partner.audio.mute) return false
+  const tr = seq.tracks.find((x) => x.id === partner.trackId)
+  return !!tr && tr.kind === 'video' && !tr.muted && !tr.hidden
+}
+
+function audibleAt(seq: Sequence, media: MediaItem[], t: number): { clipId: string; url: string; mediaT: number; vol: number; speed: number }[] {
   const byId = new Map(media.map((m) => [m.id, m]))
-  const out: { media: MediaItem; mediaT: number; vol: number }[] = []
-  const seen = new Set<string>()
+  const out: { clipId: string; url: string; mediaT: number; vol: number; speed: number }[] = []
 
-  const consider = (c: Clip, trackMuted: boolean) => {
-    if (!c.enabled || trackMuted || !c.mediaId || c.audio.mute) return
-    if (t < c.start || t >= c.start + c.duration) return
+  for (const c of seq.clips) {
+    if (!c.enabled || !c.mediaId || c.audio.mute || !inRange(c, t)) continue
+    const track = seq.tracks.find((tr) => tr.id === c.trackId)
+    if (!track || track.kind !== 'audio' || track.muted) continue
+    if (videoAlreadySounds(seq, c, t)) continue
     const m = byId.get(c.mediaId)
-    if (!m?.url || m.offline) return
-    if (seen.has(m.id)) return
-    seen.add(m.id)
-    const local = (t - c.start) * (c.speed || 1) + c.inPoint
-    out.push({ media: m, mediaT: Math.max(0, local), vol: gainToVolume(c.audio.gainDb) })
+    if (!m?.url || m.offline) continue
+    const speed = Math.max(0.25, Math.min(4, c.speed || 1))
+    const mediaT = Math.max(0, (t - c.start) * speed + c.inPoint)
+    out.push({ clipId: c.id, url: m.url, mediaT, vol: gainToVolume(c.audio.gainDb), speed })
   }
-
-  for (const c of seq.clips) {
-    const track = seq.tracks.find((tr) => tr.id === c.trackId)
-    if (!track || track.kind !== 'audio') continue
-    consider(c, track.muted)
-  }
-
-  for (const c of seq.clips) {
-    const track = seq.tracks.find((tr) => tr.id === c.trackId)
-    if (!track || track.kind !== 'video') continue
-    if (c.linkedId && seq.clips.some((x) => x.id === c.linkedId)) continue
-    const m = c.mediaId ? byId.get(c.mediaId) : undefined
-    if (!m || m.kind !== 'video' || m.hasAudio === false) continue
-    consider(c, track.muted)
-  }
-
   return out
 }
 
 export function syncProgramAudio(seq: Sequence, media: MediaItem[], t: number, playing: boolean) {
   const want = playing ? audibleAt(seq, media, t) : []
-  const wantIds = new Set(want.map((w) => w.media.id))
+  const wantIds = new Set(want.map((w) => w.clipId))
 
   for (const [id, a] of audioOnly) {
     if (!wantIds.has(id)) {
@@ -67,18 +64,14 @@ export function syncProgramAudio(seq: Sequence, media: MediaItem[], t: number, p
   }
 
   for (const w of want) {
-    const m = w.media
-    // 视频画面元素保持 muted 只负责画；声音统一走独立 Audio，避免抢 play/pause
-    if (m.kind === 'video' || m.kind === 'audio') {
-      const a = ensureAudio(m.id, m.url)
-      a.volume = w.vol
-      if (Math.abs(a.currentTime - w.mediaT) > 0.12) {
-        try { a.currentTime = w.mediaT } catch { /* */ }
-      }
-      if (a.paused) void a.play().catch(() => { /* */ })
+    const a = ensureAudio(w.clipId, w.url)
+    a.volume = w.vol
+    try { a.playbackRate = w.speed } catch { /* */ }
+    if (Math.abs(a.currentTime - w.mediaT) > 0.25) {
+      try { a.currentTime = w.mediaT } catch { /* */ }
     }
+    if (a.paused) void a.play().catch(() => { /* */ })
   }
-
 }
 
 export function stopProgramAudio() {

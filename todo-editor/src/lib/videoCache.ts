@@ -5,21 +5,23 @@ import { clearNativePlayBridge } from './nativePlayBridge'
 type Slot = {
   v: HTMLVideoElement
   snap: HTMLCanvasElement | null
-  /** 已画到 snap 上的时钟目标 */
   settled: number | null
-  /** 正在飞向的时钟目标 */
   pending: number | null
 }
 
-/** 一路解码器 = 一个片段，禁止两段片子共用一个 HTMLVideo */
 const slots = new Map<string, Slot>()
-/** 无 clip 时的预热（素材库） */
 const warmup = new Map<string, HTMLVideoElement>()
 const nativeSnaps = new Map<string, { t: number; canvas: HTMLCanvasElement }>()
 const nativePending = new Map<string, number>()
 let onReady: (() => void) | null = null
-/** true = 节目正在播：只跟序列钟，禁止 HTMLVideo.play */
+/** 节目正在播：各层 HTMLVideo 由序列钟带速 play，只在漂了才 seek */
 let clockPlay = false
+
+export type VideoFrameOpts = {
+  speed?: number
+  volume?: number
+  reverse?: boolean
+}
 
 export function setVideoCacheListener(cb: (() => void) | null) {
   onReady = cb
@@ -27,14 +29,13 @@ export function setVideoCacheListener(cb: (() => void) | null) {
 
 export function beginVideoCompose(_priorityMediaIds: string[] = []) {}
 
-/** true = 进入时钟播放，false = 暂停/scrub */
 export function setVideoSeekQuiet(on: boolean) {
   clockPlay = on
   for (const s of slots.values()) {
     s.pending = null
     try {
-      s.v.muted = true
       s.v.pause()
+      s.v.muted = true
     } catch { /* */ }
   }
 }
@@ -108,7 +109,6 @@ function slotOf(clipId: string, m: MediaItem): Slot {
   return s
 }
 
-/** 素材预热：不参与合成，避免和片段解码器抢同一元素 */
 export function ensureVideo(m: MediaItem): HTMLVideoElement {
   let v = warmup.get(m.id)
   if (!v) {
@@ -126,40 +126,48 @@ export function ensureVideo(m: MediaItem): HTMLVideoElement {
   return v
 }
 
-function htmlFrame(clipId: string, m: MediaItem, t: number, step: number): CanvasImageSource | null {
+function htmlFrame(clipId: string, m: MediaItem, t: number, step: number, opts?: VideoFrameOpts): CanvasImageSource | null {
   if (!m.url) return null
   const s = slotOf(clipId, m)
   const v = s.v
   if (v.error) return still(s)
+
+  const q = Math.round(t / step) * step
+
+  // 播放：序列钟 → mediaT，各层自己 play，漂了才纠；画面画 live
+  if (clockPlay && !opts?.reverse) {
+    const vol = Math.max(0, Math.min(1, opts?.volume ?? 0))
+    const rate = Math.max(0.25, Math.min(4, opts?.speed ?? 1))
+    try {
+      v.playbackRate = rate
+      v.volume = vol
+      v.muted = vol <= 0.001
+    } catch { /* */ }
+    const drift = Math.abs(v.currentTime - t)
+    if (drift > 0.25 && !v.seeking) {
+      try { v.currentTime = t } catch { /* */ }
+    }
+    if (v.paused && !v.seeking && v.readyState >= 2) {
+      void v.play().catch(() => { /* */ })
+    }
+    if (v.readyState >= 2 && v.videoWidth > 0) return v
+    return still(s)
+  }
 
   try {
     v.muted = true
     if (!v.paused) v.pause()
   } catch { /* */ }
 
-  const q = Math.round(t / step) * step
-  const eps = clockPlay ? step * 1.25 : Math.max(step * 2, 0.08)
-
-  // 已对准这一帧：只出冻帧，绝不把正在 seek 的 video 画进合成
-  if (s.settled != null && Math.abs(s.settled - q) <= eps && still(s)) {
-    return still(s)
-  }
-
-  if (v.seeking || s.pending != null) {
-    return still(s)
-  }
-
+  const eps = Math.max(step * 2, 0.08)
+  if (s.settled != null && Math.abs(s.settled - q) <= eps && still(s)) return still(s)
+  if (v.seeking || s.pending != null) return still(s)
   if (v.readyState >= 2 && Math.abs(v.currentTime - q) <= eps) {
     if (capture(s)) s.settled = q
     return still(s)
   }
-
   s.pending = q
-  try {
-    v.currentTime = q
-  } catch {
-    s.pending = null
-  }
+  try { v.currentTime = q } catch { s.pending = null }
   return still(s)
 }
 
@@ -204,14 +212,14 @@ export function videoFrameAt(
   mediaTime: number,
   fps = 30,
   clipId?: string,
+  opts?: VideoFrameOpts,
 ): CanvasImageSource | null {
   const step = 1 / Math.max(1, fps)
   const t = Math.max(0, mediaTime)
   const id = clipId || `media:${m.id}`
 
-  const html = htmlFrame(id, m, t, step)
+  const html = htmlFrame(id, m, t, step, opts)
   if (html) return html
-
   if (m.url && slots.has(id)) return still(slots.get(id)!)
 
   if (!clockPlay && m.path && m.kind === 'video' && desktop()?.decodeMediaFrame) {
