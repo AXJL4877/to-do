@@ -179,6 +179,10 @@ export function setLocalPlayheadScrubbing(on: boolean) {
   }
 }
 
+export function isLocalPlayheadScrubbing() {
+  return localScrubbing
+}
+
 /** 主窗播放时把 live 播放头推到独立窗（不写 Zustand） */
 export function broadcastLivePlayhead(t: number) {
   if (!started || localScrubbing) return

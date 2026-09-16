@@ -12,8 +12,8 @@ export function PlayheadOverlay({ xAt }: Props) {
 
   return (
     <div
-      className="absolute top-0 bottom-0 z-30 pointer-events-none"
-      style={{ left: left - 1, width: 2 }}
+      className="absolute top-0 bottom-0 z-30 pointer-events-none will-change-transform"
+      style={{ transform: `translate3d(${left - 1}px,0,0)`, width: 2 }}
       data-testid="playhead-layer"
     >
       <div

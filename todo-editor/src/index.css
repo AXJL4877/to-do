@@ -73,6 +73,17 @@
 }
 
 * { box-sizing: border-box; }
+/* 全局隐藏滚动条，保留滚轮/触控板滚动 */
+* {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+*::-webkit-scrollbar {
+  width: 0 !important;
+  height: 0 !important;
+  display: none !important;
+  background: transparent;
+}
 html, body, #root {
   height: 100%;
   width: 100%;
