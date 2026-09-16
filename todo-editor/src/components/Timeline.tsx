@@ -109,6 +109,7 @@ export function Timeline({
     kind: DragKind
     clipId?: string
     startX: number
+    startY?: number
     startScrollLeft: number
     originStarts: Record<string, number>
     slipStart?: number
@@ -121,6 +122,9 @@ export function Timeline({
     lastDt?: number
     lastTrackId?: string
     moveIds?: string[]
+    originTrackIds?: Record<string, string>
+    primaryKind?: string
+    spawn?: 'before' | 'after'
   } | null>(null)
 
   const pxPerSec = timelineZoom
@@ -160,29 +164,62 @@ export function Timeline({
     return Math.max(0, timeAtX(x))
   }, [timeAtX])
 
-  const trackFromEvent = useCallback((clientY: number) => {
-    const el = bodyRef.current
-    if (!el) return null
-    const rect = el.getBoundingClientRect()
-    // body 随父级滚动，clientY-rect.top 已是内容坐标，勿再加 scrollTop
-    return trackAtY(clientY - rect.top)
-  }, [trackAtY])
-
   const clearMovePreview = useCallback((ids: string[]) => {
     const body = bodyRef.current
     if (!body) return
     for (const id of ids) {
       const el = body.querySelector(`[data-testid="clip-${id}"]`) as HTMLElement | null
-      el?.style.removeProperty('transform')
+      if (!el) continue
+      el.style.removeProperty('transform')
+      el.style.removeProperty('z-index')
     }
   }, [])
+
+  /** 按指针 Y 命中轨道；拖离同 kind 区域时返回 spawn 以新建轨道 */
+  const trackFromEvent = useCallback((clientY: number, kind?: string): {
+    trackId: string | null
+    spawn?: 'before' | 'after'
+  } => {
+    const body = bodyRef.current
+    if (!body) return { trackId: null }
+    const kindTracks = seq.tracks.filter((t) => !kind || t.kind === kind)
+    const rows = kindTracks
+      .map((t) => {
+        const el = body.querySelector(`[data-testid="track-row-${t.id}"]`) as HTMLElement | null
+        if (!el) return null
+        const r = el.getBoundingClientRect()
+        return { id: t.id, top: r.top, bottom: r.bottom, mid: (r.top + r.bottom) / 2, height: r.height }
+      })
+      .filter(Boolean) as { id: string; top: number; bottom: number; mid: number; height: number }[]
+
+    if (!rows.length) {
+      const rect = body.getBoundingClientRect()
+      return { trackId: trackAtY(clientY - rect.top) }
+    }
+
+    const hit = rows.find((r) => clientY >= r.top && clientY < r.bottom)
+    if (hit) return { trackId: hit.id }
+
+    const margin = Math.max(12, rows[0].height * 0.35)
+    if (clientY < rows[0].top - margin) return { trackId: null, spawn: 'before' }
+    if (clientY >= rows[rows.length - 1].bottom + margin) return { trackId: null, spawn: 'after' }
+
+    // 缝隙：落到最近轨道
+    let best = rows[0]
+    let bestDist = Math.abs(clientY - rows[0].mid)
+    for (const r of rows) {
+      const dist = Math.abs(clientY - r.mid)
+      if (dist < bestDist) { bestDist = dist; best = r }
+    }
+    return { trackId: best.id }
+  }, [seq.tracks, trackAtY])
 
   useEffect(() => {
     const api = desktop()
     if (!api?.onMediaDrop) return
     return api.onMediaDrop(({ mediaId, x, y }) => {
       if (!acceptMediaDrop(mediaId)) return
-      addClipFromMedia(mediaId, trackFromEvent(y) ?? undefined, timeFromEvent(x))
+      addClipFromMedia(mediaId, trackFromEvent(y).trackId ?? undefined, timeFromEvent(x))
     })
   }, [addClipFromMedia, timeFromEvent, trackFromEvent])
 
@@ -192,7 +229,9 @@ export function Timeline({
     const body = bodyRef.current
     if (!body) return
     body.querySelectorAll('[data-testid^="clip-"]').forEach((node) => {
-      (node as HTMLElement).style.removeProperty('transform')
+      const el = node as HTMLElement
+      el.style.removeProperty('transform')
+      el.style.removeProperty('z-index')
     })
   }, [sequences])
 
@@ -265,7 +304,7 @@ export function Timeline({
           if (d.moved && d.moveIds?.length) {
             useApp.getState().dragMoveClips(
               d.moveIds, d.originStarts, d.lastDt ?? 0, d.lastTrackId,
-              { primaryId: d.clipId, alt: true },
+              { primaryId: d.clipId, alt: true, spawn: d.spawn },
             )
             clearMovePreview(d.moveIds)
           }
@@ -273,10 +312,14 @@ export function Timeline({
           return
         }
         const dx = e.clientX - d.startX
-        if (Math.abs(dx) > 2) d.moved = true
+        const startY = d.startY ?? e.clientY
+        if (Math.abs(dx) > 2 || Math.abs(e.clientY - startY) > 2) d.moved = true
         const dt = dx / pxPerSec
         const ids = d.moveIds?.length ? d.moveIds : (st.selectedClipIds.length ? st.selectedClipIds : [d.clipId])
-        const trackId = trackFromEvent(e.clientY) ?? undefined
+        const kind = d.primaryKind
+          ?? st.seq().tracks.find((t) => t.id === st.seq().clips.find((c) => c.id === d.clipId)?.trackId)?.kind
+        const place = trackFromEvent(e.clientY, kind)
+        const trackId = place.trackId ?? undefined
         const appliedDt = st.previewDragDt(ids, d.originStarts, dt, {
           shift: e.shiftKey,
           alt: e.altKey,
@@ -284,14 +327,41 @@ export function Timeline({
         })
         d.lastDt = appliedDt
         d.lastTrackId = trackId
+        d.spawn = place.spawn
         d.moveIds = ids
         const body = bodyRef.current
         if (body) {
           const dxPx = appliedDt * pxPerSec
+          const kindRows = (kind
+            ? st.seq().tracks.filter((t) => t.kind === kind)
+            : []
+          ).map((t) => body.querySelector(`[data-testid="track-row-${t.id}"]`) as HTMLElement | null)
+            .filter(Boolean) as HTMLElement[]
+          let destTop: number | undefined
+          if (place.spawn === 'before' && kindRows[0]) {
+            destTop = kindRows[0].getBoundingClientRect().top - kindRows[0].getBoundingClientRect().height
+          } else if (place.spawn === 'after' && kindRows.length) {
+            const last = kindRows[kindRows.length - 1]
+            destTop = last.getBoundingClientRect().bottom
+          } else if (trackId) {
+            destTop = body.querySelector(`[data-testid="track-row-${trackId}"]`)?.getBoundingClientRect().top
+          }
           for (const id of ids) {
             const el = body.querySelector(`[data-testid="clip-${id}"]`) as HTMLElement | null
             if (!el) continue
-            el.style.transform = dxPx ? `translateX(${dxPx}px)` : ''
+            const originTrackId = d.originTrackIds?.[id]
+            const clip = st.seq().clips.find((c) => c.id === id)
+            const srcTrack = st.seq().tracks.find((t) => t.id === (originTrackId ?? clip?.trackId))
+            let dyPx = 0
+            if (destTop != null && srcTrack && kind && srcTrack.kind === kind) {
+              const originRow = body.querySelector(
+                `[data-testid="track-row-${originTrackId ?? clip?.trackId}"]`,
+              ) as HTMLElement | null
+              const originTop = originRow?.getBoundingClientRect().top
+              if (originTop != null) dyPx = destTop - originTop
+            }
+            el.style.zIndex = '40'
+            el.style.transform = (dxPx || dyPx) ? `translate(${dxPx}px, ${dyPx}px)` : ''
           }
         }
         return
@@ -359,7 +429,7 @@ export function Timeline({
           d.originStarts,
           d.lastDt ?? 0,
           d.lastTrackId,
-          { primaryId: d.clipId, alt: true },
+          { primaryId: d.clipId, alt: true, spawn: d.spawn },
         )
         clearMovePreview(d.moveIds)
       }
@@ -448,6 +518,7 @@ export function Timeline({
       return
     }
     if (trackLocked || tool === 'hand') return
+    e.preventDefault()
     e.stopPropagation()
     if (tool === 'razor') {
       razorAtPlayhead()
@@ -543,13 +614,21 @@ export function Timeline({
       return
     }
     const starts: Record<string, number> = {}
+    const originTrackIds: Record<string, string> = {}
     for (const id of ids) {
       const c = seq.clips.find((x) => x.id === id)
-      if (c) starts[id] = c.start
+      if (c) {
+        starts[id] = c.start
+        originTrackIds[id] = c.trackId
+      }
     }
+    const primary = seq.clips.find((c) => c.id === clipId)
+    const primaryKind = seq.tracks.find((t) => t.id === primary?.trackId)?.kind
+    pushHistory()
     drag.current = {
-      kind: 'move', clipId, startX: e.clientX, startScrollLeft: 0,
-      originStarts: starts, moved: false, moveIds: ids,
+      kind: 'move', clipId, startX: e.clientX, startY: e.clientY, startScrollLeft: 0,
+      originStarts: starts, originTrackIds, primaryKind, moved: false, moveIds: ids,
+      pointerId: e.pointerId,
     }
     ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
   }
@@ -567,7 +646,7 @@ export function Timeline({
   async function onDrop(e: React.DragEvent) {
     e.preventDefault()
     const t = timeFromEvent(e.clientX)
-    const trackId = trackFromEvent(e.clientY) ?? undefined
+    const trackId = trackFromEvent(e.clientY).trackId ?? undefined
     const mediaId = readMediaDrag(e.dataTransfer)
     if (mediaId) {
       if (acceptMediaDrop(mediaId)) addClipFromMedia(mediaId, trackId, t)

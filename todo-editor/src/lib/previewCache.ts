@@ -87,6 +87,7 @@ export function previewFingerprint(
   return [
     seq.id, w, h, settings.width, settings.height, settings.fps,
     settings.canvasBg, settings.canvasColor, settings.safeFrame ? 1 : 0,
+    seq.tracks.map((t) => `${t.id}:${t.kind}:${t.hidden ? 0 : 1}`).join(','),
     clips,
   ].join('#')
 }

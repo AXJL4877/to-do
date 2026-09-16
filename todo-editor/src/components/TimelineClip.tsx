@@ -210,6 +210,8 @@ export const TimelineClip = memo(function TimelineClip({
         opacity: clip.enabled ? 1 : 0.4,
         cursor: tool === 'razor' ? 'inherit' : tool === 'hand' ? 'grab' : 'grab',
         color: track.kind === 'audio' ? 'hsl(158 45% 30%)' : undefined,
+        userSelect: 'none',
+        WebkitUserSelect: 'none',
       }}
       data-testid={`clip-${clip.id}`}
       onPointerDown={onPointerDown}
@@ -287,7 +289,13 @@ export const TimelineClip = memo(function TimelineClip({
           widthPx={w}
         />
       )}
-      <span className="text-[10px] font-medium truncate block px-1.5 pt-0.5 pointer-events-none relative z-[2]">{clip.name}</span>
+      <span
+        className="text-[10px] font-medium truncate block px-1.5 pt-0.5 pointer-events-none relative z-[2] select-none"
+        style={{ userSelect: 'none', WebkitUserSelect: 'none' }}
+        draggable={false}
+      >
+        {clip.name}
+      </span>
     </div>
   )
 })

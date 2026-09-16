@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import {
-  type Camera3D, type Clip, type EffectPreset, type ExportJob, type MediaItem, type ProjectSettings, type Sequence,
+  type Camera3D, type Clip, type ClipMeta, type EffectPreset, type ExportJob, type MediaItem, type ProjectSettings, type Sequence,
   type Tool, type Track, type TrackKind, type Transform3D, type TransitionType,
   defaultAudio, defaultColor, defaultScene3d, defaultText, defaultTransform, defaultTransform3d, uid,
 } from './types'
@@ -41,14 +41,259 @@ function bakeProp(c: Clip, prop: string, value: number): Clip {
 }
 
 function makeTracks(): Track[] {
-  // 列表自上而下：字幕盖在视频之上（与监视器合成一致）
+  // 初始仅一条视频轨 + 一条音频轨；需要时再自动增删
   return [
-    { id: 'ts1', kind: 'subtitle', name: '字幕', locked: false, muted: false, solo: false, hidden: false, height: 28 },
-    { id: 'tv2', kind: 'video', name: 'V2', locked: false, muted: false, solo: false, hidden: false, height: 40 },
     { id: 'tv1', kind: 'video', name: 'V1', locked: false, muted: false, solo: false, hidden: false, height: 48 },
     { id: 'ta1', kind: 'audio', name: 'A1', locked: false, muted: false, solo: false, hidden: false, height: 40 },
-    { id: 'ta2', kind: 'audio', name: 'A2', locked: false, muted: false, solo: false, hidden: false, height: 32 },
   ]
+}
+
+function rangeOverlap(aStart: number, aDur: number, bStart: number, bDur: number) {
+  return aStart < bStart + bDur && bStart < aStart + aDur
+}
+
+function buildClipMeta(clip: Clip, track?: Track, source?: ClipMeta['source']): ClipMeta {
+  const absIn = Math.max(0, clip.start)
+  const duration = Math.max(0.1, clip.duration)
+  const absOut = absIn + duration
+  const enabled = clip.enabled !== false
+  const trackHidden = !!track?.hidden
+  return {
+    absIn,
+    absOut,
+    start: absIn,
+    duration,
+    end: absOut,
+    inPoint: clip.inPoint,
+    outPoint: clip.outPoint,
+    trackId: clip.trackId,
+    trackName: track?.name,
+    trackKind: track?.kind,
+    enabled,
+    trackHidden,
+    trackMuted: !!track?.muted,
+    visible: enabled && !trackHidden,
+    source: source ?? clip.meta?.source,
+    updatedAt: Date.now(),
+  }
+}
+
+function withFreshClipMeta(seq: Sequence): Sequence {
+  const byTrack = new Map(seq.tracks.map((t) => [t.id, t]))
+  return {
+    ...seq,
+    clips: seq.clips.map((c) => ({
+      ...c,
+      meta: buildClipMeta(c, byTrack.get(c.trackId), c.meta?.source),
+    })),
+  }
+}
+
+function newTrackOfKind(seq: Sequence, kind: TrackKind): Track {
+  const n = seq.tracks.filter((t) => t.kind === kind).length + 1
+  return {
+    id: uid('track'),
+    kind,
+    name: kind === 'video' ? `V${n}` : kind === 'audio' ? `A${n}` : kind === 'subtitle' ? '字幕' : String(kind),
+    locked: false, muted: false, solo: false, hidden: false,
+    height: kind === 'subtitle' ? 28 : 40,
+  }
+}
+
+function renameKindTracks(tracks: Track[]): Track[] {
+  const counts: Partial<Record<TrackKind, number>> = {}
+  return tracks.map((t) => {
+    if (t.kind !== 'video' && t.kind !== 'audio') return t
+    counts[t.kind] = (counts[t.kind] || 0) + 1
+    const n = counts[t.kind]!
+    return { ...t, name: t.kind === 'video' ? `V${n}` : `A${n}` }
+  })
+}
+
+/** 在同 kind 段前/后插入新轨 */
+function insertTrack(
+  tracks: Track[],
+  track: Track,
+  where: 'before' | 'after',
+): Track[] {
+  const indices = tracks.map((t, i) => (t.kind === track.kind ? i : -1)).filter((i) => i >= 0)
+  if (!indices.length) {
+    if (track.kind === 'video') {
+      const audioAt = tracks.findIndex((t) => t.kind === 'audio')
+      if (audioAt >= 0) return [...tracks.slice(0, audioAt), track, ...tracks.slice(audioAt)]
+    }
+    return where === 'before' ? [track, ...tracks] : [...tracks, track]
+  }
+  if (where === 'before') {
+    const i = indices[0]
+    return [...tracks.slice(0, i), track, ...tracks.slice(i)]
+  }
+  const i = indices[indices.length - 1]
+  return [...tracks.slice(0, i + 1), track, ...tracks.slice(i + 1)]
+}
+
+/**
+ * 无片段的轨道自动删除；始终保留至少 1 条视频轨 + 1 条音频轨。
+ * 字幕等其它轨：有片段才保留。
+ */
+function pruneEmptyTracks(seq: Sequence): Sequence {
+  const used = new Set(seq.clips.map((c) => c.trackId))
+  let tracks = seq.tracks.filter((t) => used.has(t.id))
+
+  if (!tracks.some((t) => t.kind === 'video')) {
+    tracks.push({
+      id: uid('track'), kind: 'video', name: 'V1',
+      locked: false, muted: false, solo: false, hidden: false, height: 48,
+    })
+  }
+  if (!tracks.some((t) => t.kind === 'audio')) {
+    tracks.push({
+      id: uid('track'), kind: 'audio', name: 'A1',
+      locked: false, muted: false, solo: false, hidden: false, height: 40,
+    })
+  }
+
+  tracks = [
+    ...tracks.filter((t) => t.kind === 'subtitle'),
+    ...tracks.filter((t) => t.kind === 'video'),
+    ...tracks.filter((t) => t.kind === 'audio'),
+    ...tracks.filter((t) => t.kind !== 'subtitle' && t.kind !== 'video' && t.kind !== 'audio'),
+  ]
+  tracks = renameKindTracks(tracks)
+  return { ...seq, tracks }
+}
+
+/** 在 [start, start+duration) 找无重叠的同 kind 轨道；没有则新建（绝对时间不变） */
+function resolveFreeTrack(seq: Sequence, kind: TrackKind, start: number, duration: number): { seq: Sequence; track: Track } {
+  const candidates = seq.tracks.filter((t) => t.kind === kind && !t.locked)
+  for (const track of candidates) {
+    const hit = seq.clips.some(
+      (c) => c.trackId === track.id && rangeOverlap(start, duration, c.start, c.duration),
+    )
+    if (!hit) return { seq, track }
+  }
+  const track = newTrackOfKind(seq, kind)
+  return { seq: { ...seq, tracks: insertTrack(seq.tracks, track, 'before') }, track }
+}
+
+/**
+ * 硬规则：同一轨道上绝对时间轴不得交叉。
+ * 冲突片段保留 absIn/absOut，挪到同 kind 空轨；没有则新建轨道。
+ */
+function enforceNoOverlap(seq: Sequence): Sequence {
+  let tracks = [...seq.tracks]
+  const clips = seq.clips.map((c) => ({ ...c }))
+  const kinds = [...new Set([...tracks.map((t) => t.kind), ...clips.map((c) => {
+    const tr = tracks.find((t) => t.id === c.trackId)
+    return tr?.kind
+  }).filter(Boolean) as TrackKind[]])]
+
+  for (const kind of kinds) {
+    const kindTrackIds = () => new Set(tracks.filter((t) => t.kind === kind).map((t) => t.id))
+    let guard = 0
+    while (guard++ < 200) {
+      const ids = kindTrackIds()
+      const ordered = clips
+        .filter((c) => ids.has(c.trackId))
+        .sort((a, b) => a.start - b.start || a.duration - b.duration || a.id.localeCompare(b.id))
+
+      let conflict: Clip | null = null
+      const lastByTrack = new Map<string, Clip>()
+      for (const c of ordered) {
+        const prev = lastByTrack.get(c.trackId)
+        if (prev && rangeOverlap(prev.start, prev.duration, c.start, c.duration)) {
+          conflict = c
+          break
+        }
+        lastByTrack.set(c.trackId, c)
+      }
+      if (!conflict) break
+
+      const start = conflict.start
+      const duration = conflict.duration
+      let placed = false
+      for (const track of tracks.filter((t) => t.kind === kind && !t.locked && t.id !== conflict.trackId)) {
+        const hit = clips.some(
+          (c) => c.id !== conflict!.id && c.trackId === track.id && rangeOverlap(start, duration, c.start, c.duration),
+        )
+        if (!hit) {
+          conflict.trackId = track.id
+          placed = true
+          break
+        }
+      }
+      if (!placed) {
+        const track = newTrackOfKind({ ...seq, tracks }, kind)
+        tracks = insertTrack(tracks, track, 'before')
+        conflict.trackId = track.id
+      }
+    }
+  }
+
+  return withFreshClipMeta(pruneEmptyTracks({ ...seq, tracks, clips }))
+}
+
+/** 裁剪时钳制到同轨邻居，禁止越过交叉 */
+function clampTrimNoOverlap(seq: Sequence, clip: Clip, edge: 'in' | 'out', t: number): Clip {
+  const others = seq.clips.filter((c) => c.trackId === clip.trackId && c.id !== clip.id)
+  if (edge === 'in') {
+    const prevEnd = others
+      .filter((c) => c.start < clip.start + 1e-6)
+      .reduce((m, c) => Math.max(m, c.start + c.duration), 0)
+    const maxEnd = clip.start + clip.duration
+    const snapped = Math.max(prevEnd, Math.min(t, maxEnd - 0.1))
+    const delta = snapped - clip.start
+    const duration = Math.max(0.1, clip.duration - delta)
+    return {
+      ...clip,
+      start: snapped,
+      duration,
+      inPoint: clip.inPoint + delta,
+      outPoint: clip.inPoint + delta + duration,
+    }
+  }
+  const nextStart = others
+    .filter((c) => c.start > clip.start + 1e-6)
+    .reduce((m, c) => Math.min(m, c.start), Number.POSITIVE_INFINITY)
+  const maxOut = Number.isFinite(nextStart) ? nextStart : Number.POSITIVE_INFINITY
+  const duration = Math.max(0.1, Math.min(t, maxOut) - clip.start)
+  return { ...clip, duration, outPoint: clip.inPoint + duration }
+}
+
+/**
+ * 移动后若同轨交叉：保持绝对时间，改放到空轨；整组移动失败则回退原位。
+ */
+function applyMoveNoOverlap(
+  seq: Sequence,
+  moving: Clip[],
+  excludeIds: Set<string>,
+): { seq: Sequence; clips: Clip[] } {
+  let nextSeq = seq
+  const result = moving.map((c) => ({ ...c }))
+  for (const clip of result) {
+    const track = nextSeq.tracks.find((t) => t.id === clip.trackId)
+    const kind = track?.kind ?? 'video'
+    const hit = nextSeq.clips.some(
+      (c) => !excludeIds.has(c.id) && c.trackId === clip.trackId
+        && rangeOverlap(clip.start, clip.duration, c.start, c.duration),
+    ) || result.some(
+      (c) => c.id !== clip.id && c.trackId === clip.trackId
+        && rangeOverlap(clip.start, clip.duration, c.start, c.duration),
+    )
+    if (!hit) continue
+    // 相对其他已放置结果 + 原序列静止 clips 找空轨
+    const phantom: Sequence = {
+      ...nextSeq,
+      clips: [
+        ...nextSeq.clips.filter((c) => !excludeIds.has(c.id)),
+        ...result.filter((c) => c.id !== clip.id),
+      ],
+    }
+    const resolved = resolveFreeTrack(phantom, kind, clip.start, clip.duration)
+    nextSeq = { ...nextSeq, tracks: resolved.seq.tracks }
+    clip.trackId = resolved.track.id
+  }
+  return { seq: nextSeq, clips: result }
 }
 
 /** 视频片段缺链接 A 轨时补上（旧工程 / 热更新前入轨） */
@@ -198,7 +443,7 @@ function migrateSequence(q: Sequence): Sequence {
     if (t.kind !== 'effect' && t.kind !== 'adjustment') return true
     return q.clips.some((c) => c.trackId === t.id)
   })
-  return {
+  return enforceNoOverlap({
     ...q,
     tracks,
     scene3d: ensureScene3d(q.scene3d),
@@ -206,7 +451,7 @@ function migrateSequence(q: Sequence): Sequence {
       ...c,
       transform3d: c.transform3d ?? (c.threeD ? defaultTransform3d() : undefined),
     })),
-  }
+  })
 }
 
 function defaultSettings(): ProjectSettings {
@@ -353,7 +598,12 @@ export type AppStore = {
   openPropDialOnMonitor: (prop: 'scale' | 'opacity') => void
   setEditMode: (m: 'insert' | 'overwrite') => void
   setSourceIO: (a: number, b: number) => void
-  addClipFromMedia: (mediaId: string, trackId?: string, at?: number) => void
+  addClipFromMedia: (
+    mediaId: string,
+    trackId?: string,
+    at?: number,
+    opts?: { preferFreeTrack?: boolean; source?: ClipMeta['source'] },
+  ) => void
   selectClips: (ids: string[]) => void
   moveClips: (ids: string[], dt: number, trackId?: string, opts?: { record?: boolean }) => void
   razorAtPlayhead: () => void
@@ -436,7 +686,7 @@ export type AppStore = {
   resizeEdgeAnim: (id: string, edge: 'in' | 'out', sec: number, opts?: { record?: boolean }) => void
   snapTime: (t: number) => number
   trackAtY: (contentY: number) => string | null
-  dragMoveClips: (ids: string[], origins: Record<string, number>, dt: number, trackId?: string, opts?: { shift?: boolean; alt?: boolean; primaryId?: string }) => void
+  dragMoveClips: (ids: string[], origins: Record<string, number>, dt: number, trackId?: string, opts?: { shift?: boolean; alt?: boolean; primaryId?: string; spawn?: 'before' | 'after' }) => void
   /** 仅计算吸附后的 dt，不写 store（供时间线拖拽预览） */
   previewDragDt: (ids: string[], origins: Record<string, number>, dt: number, opts?: { shift?: boolean; alt?: boolean; primaryId?: string }) => number
   nudgeSelectedTransform: (dx: number, dy: number) => void
@@ -530,7 +780,7 @@ type PendingDrag = {
   origins: Record<string, number>
   dt: number
   trackId?: string
-  opts?: { shift?: boolean; alt?: boolean; primaryId?: string }
+  opts?: { shift?: boolean; alt?: boolean; primaryId?: string; spawn?: 'before' | 'after' }
 }
 let pendingDragMove: PendingDrag | null = null
 let dragMoveRaf = 0
@@ -583,27 +833,37 @@ function flushDragMove(get: () => AppStore, set: (p: Partial<AppStore> | ((s: Ap
   const { ids, origins, dt, trackId, opts } = pending
   const setIds = new Set(ids)
   const appliedDt = resolveDragDt(get, ids, origins, dt, opts)
-  const cur = get().seq()
-  const dest = trackId ? cur.tracks.find((t) => t.id === trackId) : undefined
+  let cur = get().seq()
+  const primary = cur.clips.find((c) => c.id === (opts?.primaryId && setIds.has(opts.primaryId) ? opts.primaryId : ids[0]))
+  const primaryKind = cur.tracks.find((t) => t.id === primary?.trackId)?.kind
+
+  let dest = trackId ? cur.tracks.find((t) => t.id === trackId) : undefined
+  // 拖离现有同 kind 轨道区域 → 自动新建轨道承接
+  if (opts?.spawn && primaryKind && (primaryKind === 'video' || primaryKind === 'audio' || primaryKind === 'subtitle')) {
+    const track = newTrackOfKind(cur, primaryKind)
+    cur = { ...cur, tracks: insertTrack(cur.tracks, track, opts.spawn) }
+    dest = track
+  }
+
+  const moved = cur.clips
+    .filter((c) => setIds.has(c.id))
+    .map((c) => {
+      const src = cur.tracks.find((t) => t.id === c.trackId)
+      const canRetarget = !!(dest && src && dest.kind === src.kind)
+      return {
+        ...c,
+        start: Math.max(0, (origins[c.id] ?? c.start) + appliedDt),
+        trackId: canRetarget ? dest!.id : c.trackId,
+      }
+    })
+  const applied = applyMoveNoOverlap(cur, moved, setIds)
+  const byId = new Map(applied.clips.map((c) => [c.id, c]))
+  const nextSeq = enforceNoOverlap({
+    ...applied.seq,
+    clips: applied.seq.clips.map((c) => byId.get(c.id) ?? c),
+  })
   set({
-    sequences: get().sequences.map((s) =>
-      s.id !== cur.id
-        ? s
-        : {
-            ...s,
-            clips: s.clips.map((c) => {
-              if (!setIds.has(c.id)) return c
-              const src = s.tracks.find((t) => t.id === c.trackId)
-              // 只允许同 kind 换轨，避免 V/A/字幕被拖进一条轨「合并」
-              const canRetarget = !!(dest && src && dest.kind === src.kind)
-              return {
-                ...c,
-                start: Math.max(0, (origins[c.id] ?? c.start) + appliedDt),
-                trackId: canRetarget ? dest!.id : c.trackId,
-              }
-            }),
-          },
-    ),
+    sequences: get().sequences.map((s) => (s.id === cur.id ? nextSeq : s)),
   })
 }
 
@@ -806,8 +1066,10 @@ export const useApp = create<AppStore>((set, get) => {
 
     saveProject(opts) {
       const s = get()
+      const sequences = s.sequences.map((q) => enforceNoOverlap(q))
+      set({ sequences })
       localStorage.setItem(`todo-draft-${s.projectId}`, JSON.stringify({
-        settings: s.settings, media: s.media, folders: s.folders, sequences: s.sequences,
+        settings: s.settings, media: s.media, folders: s.folders, sequences,
         activeSeqId: s.activeSeqId, prefs: s.prefs, presets: s.presets, fonts: s.fonts,
         monitorCompose: s.monitorCompose,
         selectedClipIds: s.selectedClipIds,
@@ -821,6 +1083,7 @@ export const useApp = create<AppStore>((set, get) => {
 
     async saveProjectToFile() {
       const api = desktop()
+      get().saveProject({ silent: true })
       const s = get()
       const payload = {
         version: 1,
@@ -829,10 +1092,9 @@ export const useApp = create<AppStore>((set, get) => {
         monitorCompose: s.monitorCompose, projectName: s.projectName,
       }
       if (!api) {
-        get().saveProject()
+        notify('项目已保存')
         return
       }
-      get().saveProject()
       const r = await api.saveProjectFile(`${s.projectName || 'project'}.todo.json`, payload)
       if (r.ok && r.path) notify(`已保存到文件`)
     },
@@ -1161,16 +1423,12 @@ export const useApp = create<AppStore>((set, get) => {
     setEditMode(m) { set({ editMode: m }) },
     setSourceIO(a, b) { set({ sourceIn: a, sourceOut: b, sourceIoArmed: true }) },
 
-    addClipFromMedia(mediaId, trackId, at) {
+    addClipFromMedia(mediaId, trackId, at, opts) {
       get().pushHistory()
       const media = get().media.find((m) => m.id === mediaId)
       if (!media) return
-      const sequence = get().seq()
-      const wantKind = media.kind === 'audio' ? 'audio' : 'video'
-      const dropped = trackId ? sequence.tracks.find((t) => t.id === trackId) : undefined
-      const track = (dropped && dropped.kind === wantKind ? dropped : undefined)
-        ?? sequence.tracks.find((t) => t.kind === wantKind)
-      if (!track) { notify('没有可用轨道'); return }
+      let sequence = get().seq()
+      const wantKind: TrackKind = media.kind === 'audio' ? 'audio' : 'video'
       // 仅用户打过 I/O 且源监视器就是这份素材时，才按范围入轨
       const useSourceRange = get().sourceIoArmed
         && get().sourceMediaId === mediaId
@@ -1184,11 +1442,44 @@ export const useApp = create<AppStore>((set, get) => {
           : Math.max(0.2, media.duration || get().settings.stillDuration)
       const inPoint = useSourceRange ? get().sourceIn : 0
       let start = at ?? get().playhead
-      // 拖放到指定时间时尊重落点；仅双击/入点入轨时走磁性吸附
-      if (at == null && get().settings.magnetic) {
-        start = sequence.clips.filter((c) => c.trackId === track.id)
-          .reduce((e, c) => Math.max(e, c.start + c.duration), 0)
+
+      const dropped = trackId ? sequence.tracks.find((t) => t.id === trackId) : undefined
+      let track: Track | undefined
+      // 硬规则：同轨绝对时间不得交叉。指定轨若冲突则改找空轨/新建。
+      if (dropped && dropped.kind === wantKind) {
+        const hit = sequence.clips.some(
+          (c) => c.trackId === dropped.id && rangeOverlap(start, duration, c.start, c.duration),
+        )
+        if (!hit) {
+          track = dropped
+        } else {
+          const resolved = resolveFreeTrack(sequence, wantKind, start, duration)
+          sequence = resolved.seq
+          track = resolved.track
+        }
+      } else {
+        const resolved = resolveFreeTrack(sequence, wantKind, start, duration)
+        sequence = resolved.seq
+        track = resolved.track
       }
+      if (!track) { notify('没有可用轨道'); return }
+
+      // 拖放到指定时间时尊重落点；仅双击/入点入轨时走磁性吸附（吸附后再次校验空轨）
+      if (at == null && get().settings.magnetic) {
+        start = sequence.clips.filter((c) => c.trackId === track!.id)
+          .reduce((e, c) => Math.max(e, c.start + c.duration), 0)
+      } else {
+        // 非磁性：若当前轨仍冲突（极端竞态），再解析一次
+        const hit = sequence.clips.some(
+          (c) => c.trackId === track!.id && rangeOverlap(start, duration, c.start, c.duration),
+        )
+        if (hit) {
+          const resolved = resolveFreeTrack(sequence, wantKind, start, duration)
+          sequence = resolved.seq
+          track = resolved.track
+        }
+      }
+
       const clip: Clip = {
         id: uid('clip'), trackId: track.id, mediaId, name: media.name,
         start, duration, inPoint, outPoint: inPoint + duration,
@@ -1196,29 +1487,37 @@ export const useApp = create<AppStore>((set, get) => {
         transform: defaultTransform(), color: defaultColor(), audio: defaultAudio(),
         effects: [], blend: 'normal', keyframes: {},
       }
+      clip.meta = buildClipMeta(clip, track, opts?.source)
+
       const extra: Clip[] = []
       // 视频：始终拆一条链接 A 轨（有无探测到音轨都拆，方便剪辑）
       if (media.kind === 'video') {
-        const aTrack = sequence.tracks.find((t) => t.kind === 'audio')
-        if (aTrack) {
-          const aid = uid('clip')
-          const vid = clip.id
-          clip.linkedId = aid
-          extra.push({
-            ...JSON.parse(JSON.stringify(clip)) as Clip,
-            id: aid,
-            trackId: aTrack.id,
-            linkedId: vid,
-            name: `${media.name} 音频`,
-            transform: defaultTransform(),
-            color: defaultColor(),
-            effects: [],
-            text: undefined,
-          })
+        const audioResolved = resolveFreeTrack(sequence, 'audio', start, duration)
+        sequence = audioResolved.seq
+        const aTrack = audioResolved.track
+        const aid = uid('clip')
+        const vid = clip.id
+        clip.linkedId = aid
+        const audioClip: Clip = {
+          ...JSON.parse(JSON.stringify(clip)) as Clip,
+          id: aid,
+          trackId: aTrack.id,
+          linkedId: vid,
+          name: `${media.name} 音频`,
+          transform: defaultTransform(),
+          color: defaultColor(),
+          effects: [],
+          text: undefined,
         }
+        audioClip.meta = buildClipMeta(audioClip, aTrack, opts?.source)
+        extra.push(audioClip)
       }
-      patchSeq((s) => ({
-        ...s, clips: [...s.clips, clip, ...extra],
+
+      const tracks = sequence.tracks
+      patchSeq((s) => enforceNoOverlap({
+        ...s,
+        tracks,
+        clips: [...s.clips, clip, ...extra],
         workOut: Math.max(s.workOut, clip.start + clip.duration),
       }))
       set({
@@ -1232,7 +1531,7 @@ export const useApp = create<AppStore>((set, get) => {
       const mediaList = get().media
       let changed = false
       const sequences = get().sequences.map((q) => {
-        const next = withLinkedAudioClips(q, mediaList)
+        const next = enforceNoOverlap(withLinkedAudioClips(q, mediaList))
         if (next !== q) changed = true
         return next
       })
@@ -1258,10 +1557,9 @@ export const useApp = create<AppStore>((set, get) => {
       const snap = (t: number) => get().snapTime(t)
       patchSeq((s) => {
         const dest = trackId ? s.tracks.find((t) => t.id === trackId) : undefined
-        return {
-          ...s,
-          clips: s.clips.map((c) => {
-            if (!setIds.has(c.id)) return c
+        const moved = s.clips
+          .filter((c) => setIds.has(c.id))
+          .map((c) => {
             const src = s.tracks.find((t) => t.id === c.trackId)
             const canRetarget = !!(dest && src && dest.kind === src.kind)
             return {
@@ -1269,8 +1567,13 @@ export const useApp = create<AppStore>((set, get) => {
               start: Math.max(0, snap(c.start + dt)),
               trackId: canRetarget ? dest!.id : c.trackId,
             }
-          }),
-        }
+          })
+        const applied = applyMoveNoOverlap(s, moved, setIds)
+        const byId = new Map(applied.clips.map((c) => [c.id, c]))
+        return enforceNoOverlap({
+          ...applied.seq,
+          clips: s.clips.map((c) => byId.get(c.id) ?? c),
+        })
       })
     },
 
@@ -1310,24 +1613,13 @@ export const useApp = create<AppStore>((set, get) => {
         for (const c of s.clips) {
           if (c.linkedId === id) targets.add(c.id)
         }
-        return {
+        return enforceNoOverlap({
           ...s,
           clips: s.clips.map((c) => {
             if (!targets.has(c.id)) return c
-            if (edge === 'in') {
-              const delta = snapped - c.start
-              return {
-                ...c,
-                start: snapped,
-                duration: Math.max(0.1, c.duration - delta),
-                inPoint: c.inPoint + delta,
-                outPoint: c.inPoint + delta + Math.max(0.1, c.duration - delta),
-              }
-            }
-            const duration = Math.max(0.1, snapped - c.start)
-            return { ...c, duration, outPoint: c.inPoint + duration }
+            return clampTrimNoOverlap(s, c, edge, snapped)
           }),
-        }
+        })
       })
     },
 
@@ -1553,7 +1845,7 @@ export const useApp = create<AppStore>((set, get) => {
       const copies = get().seq().clips.filter((c) => ids.has(c.id)).map((c) => ({
         ...(JSON.parse(JSON.stringify(c)) as Clip), id: uid('clip'), start: c.start + c.duration,
       }))
-      patchSeq((s) => ({ ...s, clips: [...s.clips, ...copies] }))
+      patchSeq((s) => enforceNoOverlap({ ...s, clips: [...s.clips, ...copies] }))
       set({ selectedClipIds: copies.map((c) => c.id) })
     },
 
@@ -1570,7 +1862,7 @@ export const useApp = create<AppStore>((set, get) => {
         ...(JSON.parse(JSON.stringify(c)) as Clip),
         id: uid('clip'), start: get().playhead + (c.start - base),
       }))
-      patchSeq((s) => ({ ...s, clips: [...s.clips, ...copies] }))
+      patchSeq((s) => enforceNoOverlap({ ...s, clips: [...s.clips, ...copies] }))
       set({ selectedClipIds: copies.map((c) => c.id) })
     },
     copySelected() {
@@ -1591,7 +1883,7 @@ export const useApp = create<AppStore>((set, get) => {
         ...(JSON.parse(JSON.stringify(c)) as Clip),
         id: uid('clip'), start: get().playhead + (c.start - base),
       }))
-      patchSeq((s) => ({ ...s, clips: [...s.clips, ...copies] }))
+      patchSeq((s) => enforceNoOverlap({ ...s, clips: [...s.clips, ...copies] }))
       set({ selectedClipIds: copies.map((c) => c.id) })
     },
     selectAllClips() {
@@ -1699,7 +1991,13 @@ export const useApp = create<AppStore>((set, get) => {
 
     addTextClip() {
       get().pushHistory()
-      const track = get().seq().tracks.find((t) => t.kind === 'subtitle')!
+      let seq = get().seq()
+      let track = seq.tracks.find((t) => t.kind === 'subtitle')
+      if (!track) {
+        track = newTrackOfKind(seq, 'subtitle')
+        seq = { ...seq, tracks: [track, ...seq.tracks] }
+        set({ sequences: get().sequences.map((s) => (s.id === seq.id ? seq : s)) })
+      }
       const clip: Clip = {
         id: uid('clip'), trackId: track.id, name: '文本',
         start: get().playhead, duration: 3, inPoint: 0, outPoint: 3,
@@ -1707,7 +2005,8 @@ export const useApp = create<AppStore>((set, get) => {
         transform: defaultTransform(), color: defaultColor(), audio: defaultAudio(),
         text: defaultText(), effects: [], blend: 'normal', keyframes: {},
       }
-      patchSeq((s) => ({ ...s, clips: [...s.clips, clip] }))
+      clip.meta = buildClipMeta(clip, track, { type: 'manual' })
+      patchSeq((s) => enforceNoOverlap({ ...s, clips: [...s.clips, clip] }))
       set({ selectedClipIds: [clip.id], propTab: 'text' })
     },
 

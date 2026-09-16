@@ -64,14 +64,20 @@ export function topNativePlayTarget(
   for (const c of seq.clips) {
     if (!c.enabled || t < c.start || t >= c.start + c.duration) continue
     const track = seq.tracks.find((tr) => tr.id === c.trackId)
-    if (track?.hidden) continue
+    if (track?.hidden || track?.kind === 'audio') continue
     const m = media.find((x) => x.id === c.mediaId)
     if (!m || m.kind !== 'video') continue
     videos.push({ clip: c, media: m })
   }
   if (videos.length === 0) return null
-  // ponytail: 多视频叠层仍走 HTML；单层 + path 才用 play-session
+  // 多视频叠层走 Canvas 合成；单层 + path 才用 play-session
   if (videos.length > 1) return null
+  // 单层也按轨道上位优先（与预览一致）
+  videos.sort((a, b) => {
+    const ia = seq.tracks.findIndex((tr) => tr.id === a.clip.trackId)
+    const ib = seq.tracks.findIndex((tr) => tr.id === b.clip.trackId)
+    return ia - ib
+  })
   const top = videos[0]
   const playPath = (opts?.useProxy && top.media.proxyPath) || top.media.path
   if (!playPath || top.clip.reverse) return null

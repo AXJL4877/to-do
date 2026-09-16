@@ -1,7 +1,7 @@
 import type { Clip, MediaItem, Sequence } from '../types'
-import { ensureVideo, muteAllVideos } from './videoCache'
+import { muteAllVideos } from './videoCache'
 
-/** 纯音频素材用 HTMLAudio；视频跟 canvas 同一 HTMLVideo 解静音 */
+/** 声音单独走 HTMLAudio，跟画面解码器分开，只对齐序列钟 */
 const audioOnly = new Map<string, HTMLAudioElement>()
 
 function ensureAudio(mediaId: string, url: string): HTMLAudioElement {
@@ -79,10 +79,6 @@ export function syncProgramAudio(seq: Sequence, media: MediaItem[], t: number, p
     }
   }
 
-  for (const m of media) {
-    if (m.kind !== 'video' || !m.url) continue
-    try { ensureVideo(m).muted = true } catch { /* */ }
-  }
 }
 
 export function stopProgramAudio() {

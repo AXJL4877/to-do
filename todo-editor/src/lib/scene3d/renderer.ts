@@ -74,8 +74,10 @@ export class Scene3dRenderer {
       this.scene.fog = null
     }
 
+    const trackKind = new Map((input.tracks ?? []).map((t) => [t.id, t.kind]))
     const active = input.clips.filter((c) => {
       if (!c.enabled || c.threeD === false) return false
+      if (trackKind.get(c.trackId) === 'audio') return false
       // scene3d.enabled 时：三D 图层 + 默认把无 threeD=false 的可见视频/图/字也当平面
       const inRange = input.playhead >= c.start && input.playhead < c.start + c.duration
       if (!inRange) return false
@@ -97,8 +99,14 @@ export class Scene3dRenderer {
     }
 
     const mediaMap = new Map(input.media.map((m) => [m.id, m]))
-    // 轨道列表自上而下覆盖：后添加的更靠近相机（轻微 z bias）
-    active.forEach((clip, i) => {
+    const trackIndex = new Map((input.tracks ?? []).map((t, i) => [t.id, i]))
+    // 时间轴越靠上（index 越小）越靠近相机；无 tracks 时退回 clips 顺序
+    const stacked = [...active].sort((a, b) => {
+      const ia = trackIndex.has(a.trackId) ? trackIndex.get(a.trackId)! : 999
+      const ib = trackIndex.has(b.trackId) ? trackIndex.get(b.trackId)! : 999
+      return ia - ib
+    })
+    stacked.forEach((clip, i) => {
       let mesh = this.layers.get(clip.id)
       if (!mesh) {
         mesh = this.makePlane(clip.id)
@@ -106,6 +114,7 @@ export class Scene3dRenderer {
         this.root.add(mesh)
       }
       const t3 = resolveLayer3d(clip, input.playhead)
+      // i=0 为最上轨，z 更大（更靠近相机）
       this.applyTransform(mesh, t3, i)
       mesh.visible = true
       const selected = input.selectedIds.includes(clip.id)

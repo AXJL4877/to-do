@@ -109,6 +109,37 @@ export interface Scene3D {
   fog: number
 }
 
+/** 时间线元素元数据（绝对时间轴为唯一基准，随工程 JSON 持久化） */
+export interface ClipMeta {
+  /** 绝对时间轴起点（头秒）= clip.start */
+  absIn: number
+  /** 绝对时间轴终点（尾秒）= clip.start + clip.duration */
+  absOut: number
+  /** 同 absIn，兼容旧字段 */
+  start: number
+  duration: number
+  /** 同 absOut */
+  end: number
+  /** 素材剪切入点（媒体时间） */
+  inPoint: number
+  /** 素材剪切出点（媒体时间） */
+  outPoint: number
+  trackId: string
+  trackName?: string
+  trackKind?: TrackKind
+  enabled: boolean
+  trackHidden?: boolean
+  trackMuted?: boolean
+  /** 最终是否可见：片段启用且轨道未隐藏 */
+  visible?: boolean
+  source?: {
+    type: 'ai' | 'import' | 'manual'
+    jobId?: string
+    kind?: string
+  }
+  updatedAt?: number
+}
+
 export interface Clip {
   id: string; trackId: string; mediaId?: string; name: string
   start: number; duration: number; inPoint: number; outPoint: number
@@ -123,6 +154,8 @@ export interface Clip {
   /** 作为 3D 平面参与虚拟摄像机合成 */
   threeD?: boolean
   transform3d?: Transform3D
+  /** 独立元数据：时间线位置、轨道、可见性、来源等 */
+  meta?: ClipMeta
 }
 
 export interface Track {

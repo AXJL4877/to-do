@@ -1,159 +1,178 @@
 import type { MediaItem } from '../types'
 import { desktop } from './desktop'
-import { clearNativePlayBridge, getNativePlayFrame } from './nativePlayBridge'
+import { clearNativePlayBridge } from './nativePlayBridge'
 
-const videos = new Map<string, HTMLVideoElement>()
-const snapshots = new Map<string, HTMLCanvasElement>()
-const pendingSeek = new Map<string, number>()
-/** C++ 引擎 scrub 帧：仅 HTML 失败时兜底 */
+type Slot = {
+  v: HTMLVideoElement
+  snap: HTMLCanvasElement | null
+  /** 已画到 snap 上的时钟目标 */
+  settled: number | null
+  /** 正在飞向的时钟目标 */
+  pending: number | null
+}
+
+/** 一路解码器 = 一个片段，禁止两段片子共用一个 HTMLVideo */
+const slots = new Map<string, Slot>()
+/** 无 clip 时的预热（素材库） */
+const warmup = new Map<string, HTMLVideoElement>()
 const nativeSnaps = new Map<string, { t: number; canvas: HTMLCanvasElement }>()
 const nativePending = new Map<string, number>()
 let onReady: (() => void) | null = null
-/** 播放 rAF 已在画，seeked 不必再 bump，避免闪 */
-let quiet = false
+/** true = 节目正在播：只跟序列钟，禁止 HTMLVideo.play */
+let clockPlay = false
 
 export function setVideoCacheListener(cb: (() => void) | null) {
   onReady = cb
 }
 
-/** 播放循环内开启：只 seek/画，不触发 React 重绘风暴 */
+export function beginVideoCompose(_priorityMediaIds: string[] = []) {}
+
+/** true = 进入时钟播放，false = 暂停/scrub */
 export function setVideoSeekQuiet(on: boolean) {
-  if (!on && quiet) {
-    // 停播前冻当前帧，避免 pause/seek 空窗黑屏
-    for (const [id, v] of videos) {
-      captureFrame(id, v)
-    }
-  }
-  quiet = on
-  if (!on) {
-    for (const v of videos.values()) {
-      try {
-        v.muted = true
-        v.pause()
-      } catch { /* */ }
-    }
+  clockPlay = on
+  for (const s of slots.values()) {
+    s.pending = null
+    try {
+      s.v.muted = true
+      s.v.pause()
+    } catch { /* */ }
   }
 }
 
-/** 节目停播：全部回到静音 */
 export function muteAllVideos() {
-  for (const v of videos.values()) {
-    try { v.muted = true } catch { /* */ }
+  for (const s of slots.values()) {
+    try { s.v.muted = true; s.v.pause() } catch { /* */ }
+  }
+  for (const v of warmup.values()) {
+    try { v.muted = true; v.pause() } catch { /* */ }
   }
 }
 
 function bump() {
-  if (!quiet) onReady?.()
+  if (!clockPlay) onReady?.()
 }
 
-function captureFrame(id: string, v: HTMLVideoElement) {
-  if (v.readyState < 2 || !v.videoWidth) return
-  let sheet = snapshots.get(id)
+function makeVideo(onSeeked: (el: HTMLVideoElement) => void): HTMLVideoElement {
+  const v = document.createElement('video')
+  v.muted = true
+  v.playsInline = true
+  v.preload = 'auto'
+  v.addEventListener('seeked', () => onSeeked(v))
+  v.addEventListener('loadeddata', () => onSeeked(v))
+  v.addEventListener('error', bump)
+  return v
+}
+
+function capture(s: Slot): boolean {
+  const v = s.v
+  if (v.seeking || v.readyState < 2 || !v.videoWidth) return false
+  let sheet = s.snap
   if (!sheet) {
     sheet = document.createElement('canvas')
-    snapshots.set(id, sheet)
+    s.snap = sheet
   }
   if (sheet.width !== v.videoWidth || sheet.height !== v.videoHeight) {
     sheet.width = v.videoWidth
     sheet.height = v.videoHeight
   }
   const ctx = sheet.getContext('2d')
-  if (!ctx) return
+  if (!ctx) return false
   ctx.drawImage(v, 0, 0)
+  return sheet.width > 0
 }
 
-/** 懒加载 video 元素；同一素材复用 */
+function still(s: Slot): HTMLCanvasElement | null {
+  return s.snap && s.snap.width > 0 ? s.snap : null
+}
+
+function slotOf(clipId: string, m: MediaItem): Slot {
+  let s = slots.get(clipId)
+  if (!s) {
+    s = { v: makeVideo((el) => {
+      const cur = slots.get(clipId)
+      if (!cur || cur.v !== el) return
+      const want = cur.pending
+      if (capture(cur)) cur.settled = want ?? el.currentTime
+      cur.pending = null
+      bump()
+    }), snap: null, settled: null, pending: null }
+    slots.set(clipId, s)
+  }
+  if (s.v.dataset.src !== m.url) {
+    s.v.dataset.src = m.url
+    s.v.src = m.url
+    s.snap = null
+    s.settled = null
+    s.pending = null
+  }
+  return s
+}
+
+/** 素材预热：不参与合成，避免和片段解码器抢同一元素 */
 export function ensureVideo(m: MediaItem): HTMLVideoElement {
-  let v = videos.get(m.id)
+  let v = warmup.get(m.id)
   if (!v) {
-    v = document.createElement('video')
-    v.muted = true
-    v.playsInline = true
-    v.preload = 'auto'
-    v.addEventListener('seeked', () => {
-      captureFrame(m.id, v!)
-      pendingSeek.delete(m.id)
+    v = makeVideo((el) => {
+      try { el.pause() } catch { /* */ }
       bump()
     })
-    v.addEventListener('loadeddata', () => {
-      captureFrame(m.id, v!)
-      bump()
-    })
-    v.addEventListener('error', bump)
-    videos.set(m.id, v)
+    warmup.set(m.id, v)
   }
   if (v.dataset.src !== m.url) {
     v.dataset.src = m.url
     v.src = m.url
-    pendingSeek.delete(m.id)
-    snapshots.delete(m.id)
-    nativeSnaps.delete(m.id)
-    nativePending.delete(m.id)
   }
+  try { v.muted = true; v.pause() } catch { /* */ }
   return v
 }
 
-function htmlVideoFrameAt(m: MediaItem, mediaTime: number, step: number): CanvasImageSource | null {
+function htmlFrame(clipId: string, m: MediaItem, t: number, step: number): CanvasImageSource | null {
   if (!m.url) return null
-  const v = ensureVideo(m)
-  if (v.error) return snapshots.get(m.id) ?? null
+  const s = slotOf(clipId, m)
+  const v = s.v
+  if (v.error) return still(s)
 
-  let t = Math.max(0, mediaTime)
-  const dur = Number.isFinite(v.duration) && v.duration > 0 ? v.duration : null
-  if (dur != null) t = Math.min(Math.max(0, dur - 1e-3), t)
+  try {
+    v.muted = true
+    if (!v.paused) v.pause()
+  } catch { /* */ }
 
-  // 播放：让 HTMLVideo 自己跑，只在偏差大时纠一次，避免每帧硬 seek
-  if (quiet) {
-    if (Math.abs(v.currentTime - t) > 0.15) {
-      try { v.currentTime = t } catch { /* */ }
-    }
-    if (v.paused && v.readyState >= 2) {
-      void v.play().catch(() => { /* */ })
-    }
-    if (v.readyState >= 2 && v.videoWidth > 0) return v
-    const snap = snapshots.get(m.id)
-    return snap && snap.width > 0 ? snap : null
+  const q = Math.round(t / step) * step
+  const eps = clockPlay ? step * 1.25 : Math.max(step * 2, 0.08)
+
+  // 已对准这一帧：只出冻帧，绝不把正在 seek 的 video 画进合成
+  if (s.settled != null && Math.abs(s.settled - q) <= eps && still(s)) {
+    return still(s)
   }
 
-  const snap = snapshots.get(m.id)
-  const near = !v.seeking && v.readyState >= 2 && Math.abs(v.currentTime - t) <= step * 0.55
-
-  if (near) {
-    captureFrame(m.id, v)
-    return snapshots.get(m.id) ?? v
+  if (v.seeking || s.pending != null) {
+    return still(s)
   }
 
-  if (!v.seeking) {
-    const prev = pendingSeek.get(m.id)
-    if (prev == null || Math.abs(prev - t) > step * 0.45) {
-      pendingSeek.set(m.id, t)
-      try {
-        v.currentTime = t
-      } catch { /* */ }
-    }
+  if (v.readyState >= 2 && Math.abs(v.currentTime - q) <= eps) {
+    if (capture(s)) s.settled = q
+    return still(s)
   }
 
-  // seek 中优先用冻帧，避免暂停/scrub 黑屏
-  if (snap && snap.width > 0) return snap
-  if (v.readyState >= 2 && v.videoWidth > 0 && Math.abs(v.currentTime - t) < 0.35) {
-    captureFrame(m.id, v)
-    return snapshots.get(m.id) ?? v
+  s.pending = q
+  try {
+    v.currentTime = q
+  } catch {
+    s.pending = null
   }
-  if (v.readyState >= 2 && v.videoWidth > 0) return v
-  return null
+  return still(s)
 }
 
-function nativeFrameAt(m: MediaItem, t: number, step: number): CanvasImageSource | null {
+function nativeFrameAt(id: string, m: MediaItem, t: number, step: number): CanvasImageSource | null {
   const api = desktop()
   if (!api?.decodeMediaFrame || !m.path) return null
-  const hit = nativeSnaps.get(m.id)
-  if (hit && Math.abs(hit.t - t) <= step * 0.55) return hit.canvas
+  const hit = nativeSnaps.get(id)
+  if (hit && Math.abs(hit.t - t) <= Math.max(step, 0.08)) return hit.canvas
 
-  const pending = nativePending.get(m.id)
-  if (pending == null || Math.abs(pending - t) > step * 0.45) {
-    nativePending.set(m.id, t)
+  const pending = nativePending.get(id)
+  if (pending == null || Math.abs(pending - t) > 0.08) {
+    nativePending.set(id, t)
     const mediaPath = m.path
-    const id = m.id
     void api.decodeMediaFrame(mediaPath, t, 8000).then((r) => {
       if (nativePending.get(id) !== t) return
       nativePending.delete(id)
@@ -180,33 +199,25 @@ function nativeFrameAt(m: MediaItem, t: number, step: number): CanvasImageSource
   return null
 }
 
-/**
- * 返回可绘制的稳帧。
- * 优先 HTMLVideo（跟手）；播放时可选用 nativePlayBridge；无 url 再 C++ 取帧。
- */
 export function videoFrameAt(
   m: MediaItem,
   mediaTime: number,
   fps = 30,
+  clipId?: string,
 ): CanvasImageSource | null {
   const step = 1 / Math.max(1, fps)
-  let t = Math.max(0, mediaTime)
-  t = Math.round(t / step) * step
+  const t = Math.max(0, mediaTime)
+  const id = clipId || `media:${m.id}`
 
-  // 播放：若已有原生泵帧可用则用（可选）；否则 HTMLVideo
-  if (quiet && m.path && m.kind === 'video') {
-    const bridge = getNativePlayFrame(m.id, t, step)
-    if (bridge) return bridge
-  }
-
-  const html = htmlVideoFrameAt(m, t, step)
+  const html = htmlFrame(id, m, t, step)
   if (html) return html
 
-  // 无 file URL / HTML 失败：C++ 单帧兜底（勿在热路径优先）
-  if (!quiet && m.path && m.kind === 'video' && desktop()?.decodeMediaFrame) {
-    const native = nativeFrameAt(m, t, step)
+  if (m.url && slots.has(id)) return still(slots.get(id)!)
+
+  if (!clockPlay && m.path && m.kind === 'video' && desktop()?.decodeMediaFrame) {
+    const native = nativeFrameAt(id, m, t, step)
     if (native) return native
-    const hit = nativeSnaps.get(m.id)
+    const hit = nativeSnaps.get(id)
     return hit && Math.abs(hit.t - t) < 0.35 ? hit.canvas : null
   }
 
@@ -214,14 +225,18 @@ export function videoFrameAt(
 }
 
 export function dropVideo(id: string) {
-  const v = videos.get(id)
-  if (v) {
-    v.removeAttribute('src')
-    v.load()
-    videos.delete(id)
+  const s = slots.get(id)
+  if (s) {
+    s.v.removeAttribute('src')
+    s.v.load()
+    slots.delete(id)
   }
-  pendingSeek.delete(id)
-  snapshots.delete(id)
+  const w = warmup.get(id)
+  if (w) {
+    w.removeAttribute('src')
+    w.load()
+    warmup.delete(id)
+  }
   nativeSnaps.delete(id)
   nativePending.delete(id)
   clearNativePlayBridge(id)

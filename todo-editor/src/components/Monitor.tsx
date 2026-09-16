@@ -390,10 +390,12 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program';
       if (Math.abs(current - tStart) < 1e-4) {
         useApp.setState({ playhead: endT })
       }
+      setLivePlayhead(endT)
       // 暂停后视频已 pause，下一 tick 强制 Canvas2D 重画，避免黑屏
       requestAnimationFrame(() => paint(endT))
     }
-  }, [playing, mode, loop, activeSeqId, paint, use3d, media, settings, preview.w, preview.h, imgCache])
+    // 故意不把 paint/imgVersion 放进依赖：否则 seeked→bump 会拆掉播放循环，播放头回跳抽搐
+  }, [playing, mode, loop, activeSeqId, use3d, media, settings, preview.w, preview.h, imgCache])
 
   // 节目监视器：拖拽时本地绘制，松手再写 store（避免每帧重渲染时间线）
   useEffect(() => {

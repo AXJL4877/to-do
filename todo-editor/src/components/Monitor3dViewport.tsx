@@ -52,6 +52,7 @@ export function Monitor3dViewport({
     eng.sync({
       scene: seq.scene3d,
       clips: seq.clips,
+      tracks: seq.tracks,
       media,
       playhead,
       aspect: settings.width / settings.height,
@@ -72,6 +73,7 @@ export function Monitor3dViewport({
         eng.sync({
           scene: q.scene3d,
           clips: q.clips,
+          tracks: q.tracks,
           media: st.media,
           playhead: st.playhead,
           aspect: st.settings.width / st.settings.height,

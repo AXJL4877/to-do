@@ -67,6 +67,8 @@ export function resolveLayer3d(clip: Clip, playhead: number): Transform3D {
 export type SceneFrameInput = {
   scene: Scene3D
   clips: Clip[]
+  /** 用于叠层：列表越靠上越靠近相机 */
+  tracks?: { id: string; kind: string }[]
   media: MediaItem[]
   playhead: number
   aspect: number

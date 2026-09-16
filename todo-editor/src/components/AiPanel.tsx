@@ -286,7 +286,12 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
           media: st.media.map((m) => (m.id === added.id ? { ...m, folderId: 'f_ai' } : m)),
         })
         setJustAdded(added.id)
-        if (j.params.autoTimeline) addClipFromMedia(added.id)
+        if (j.params.autoTimeline) {
+          addClipFromMedia(added.id, undefined, undefined, {
+            preferFreeTrack: true,
+            source: { type: 'ai', jobId: j.id, kind: j.kind },
+          })
+        }
         window.setTimeout(() => setJustAdded(null), 1800)
         useApp.getState().setToast(`AI ${kind === 'video' ? '视频' : '图片'}已入库`)
       }

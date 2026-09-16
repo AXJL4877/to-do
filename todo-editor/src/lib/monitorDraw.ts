@@ -1,4 +1,4 @@
-import type { Clip, MediaItem, ProjectSettings, Sequence } from '../types'
+import type { Clip, MediaItem, ProjectSettings, Sequence, Track } from '../types'
 import { blendToComposite, clipCanvasFilter } from './clipFilters'
 import { sampleKeyframes, resolveClipTransform, effectiveTransform } from './keyframeEval'
 import type { SnapGuide } from './monitorSnap'
@@ -6,6 +6,23 @@ import { videoFrameAt } from './videoCache'
 
 export type ImageCache = Map<string, HTMLImageElement>
 export type { SnapGuide } from './monitorSnap'
+
+/**
+ * 节目叠层顺序：时间轴列表越靠上（index 越小）越在上层。
+ * 返回值越大越靠前（后画）。字幕 > 特效 > 视频。
+ */
+export function clipStackRank(clip: Clip, tracks: Track[]): number {
+  const idx = tracks.findIndex((t) => t.id === clip.trackId)
+  const track = idx >= 0 ? tracks[idx] : undefined
+  const base = 10000 - (idx >= 0 ? idx : 999)
+  if (clip.text || track?.kind === 'subtitle') return 30000 + base
+  if (track?.kind === 'effect' || track?.kind === 'adjustment') return 20000 + base
+  return base
+}
+
+export function sortClipsByStack(clips: Clip[], tracks: Track[]): Clip[] {
+  return [...clips].sort((a, b) => clipStackRank(a, tracks) - clipStackRank(b, tracks))
+}
 
 export function getPreviewSize(settings: ProjectSettings, perf: 'quality' | 'balanced' | 'speed') {
   const scale = perf === 'speed' ? 0.5 : perf === 'balanced' ? 0.66 : 1
@@ -55,18 +72,9 @@ export function renderProgramFrame(
   ctx.fillStyle = settings.canvasBg === 'color' ? settings.canvasColor : '#0b0d10'
   ctx.fillRect(0, 0, w, h)
 
-  const trackIndex = new Map(seq.tracks.map((t, i) => [t.id, i]))
-  const trackKind = new Map(seq.tracks.map((t) => [t.id, t.kind]))
-  // 图层：列表越靠上（index 越小）越靠前；字幕/特效/调节始终盖在视频之上
-  const layerOf = (c: Clip) => {
-    const kind = trackKind.get(c.trackId)
-    const base = 1000 - (trackIndex.get(c.trackId) ?? 0)
-    if (c.text || kind === 'subtitle') return 3000 + base
-    if (kind === 'effect' || kind === 'adjustment') return 2000 + base
-    return base
-  }
-  const visible = seq.clips
-    .filter((c) => {
+  // 下层先画、上层后画：时间轴越靠上（列表越前）越后画
+  const visible = sortClipsByStack(
+    seq.clips.filter((c) => {
       if (!c.enabled) return false
       if (playhead < c.start || playhead >= c.start + c.duration) return false
       const tr = seq.tracks.find((t) => t.id === c.trackId)
@@ -74,8 +82,9 @@ export function renderProgramFrame(
       // 音轨只出声，不进节目画面
       if (tr.kind === 'audio') return false
       return true
-    })
-    .sort((a, b) => layerOf(a) - layerOf(b))
+    }),
+    seq.tracks,
+  )
 
   const sx = w / settings.width
   const sy = h / settings.height
@@ -307,14 +316,18 @@ export function hitTestProgramClips(
   ny: number,
   preferIds: string[] = [],
 ): string | null {
-  const visible = seq.clips.filter((c) => {
-    if (!c.enabled) return false
-    if (playhead < c.start || playhead >= c.start + c.duration) return false
-    const tr = seq.tracks.find((t) => t.id === c.trackId)
-    if (!tr || tr.hidden || tr.kind === 'audio') return false
-    return true
-  })
-  const ordered = [...visible].reverse() // 顶层优先
+  const visible = sortClipsByStack(
+    seq.clips.filter((c) => {
+      if (!c.enabled) return false
+      if (playhead < c.start || playhead >= c.start + c.duration) return false
+      const tr = seq.tracks.find((t) => t.id === c.trackId)
+      if (!tr || tr.hidden || tr.kind === 'audio') return false
+      return true
+    }),
+    seq.tracks,
+  )
+  // 顶层优先命中
+  const ordered = [...visible].reverse()
   const prefer = new Set(preferIds)
   const candidates = [
     ...ordered.filter((c) => prefer.has(c.id)),
@@ -383,7 +396,7 @@ function drawClip(
       const srcDur = m.duration > 0 ? m.duration : Infinity
       const inSrc = mediaT >= 0 && mediaT < srcDur - 1e-3
         && mediaT <= clip.outPoint + 1e-4
-      const frame = inSrc ? videoFrameAt(m, mediaT, fps) : null
+      const frame = inSrc ? videoFrameAt(m, mediaT, fps, clip.id) : null
       if (frame) {
         const iw = (frame as HTMLVideoElement).videoWidth
           || (frame as HTMLCanvasElement).width
