@@ -10,6 +10,12 @@ const { makeProxy } = require('./makeProxy.cjs')
 
 const isDev = !app.isPackaged
 
+function appIconPath() {
+  const ico = path.join(__dirname, '../build/icon.ico')
+  if (fs.existsSync(ico)) return ico
+  return path.join(__dirname, '../build/icon.png')
+}
+
 /** @type {BrowserWindow | null} */
 let mainWindow = null
 /** @type {BrowserWindow | null} */
@@ -54,6 +60,7 @@ function createWindow() {
     minHeight: 600,
     title: 'TO DO',
     backgroundColor: '#F2EEE8',
+    icon: appIconPath(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -126,6 +133,7 @@ async function openTimelineWindow() {
     minHeight: 240,
     title: 'TO DO · 时间轴',
     backgroundColor: '#F2EEE8',
+    icon: appIconPath(),
     // 挂到主窗：始终叠在节目监视器所在主窗前面
     parent,
     modal: false,
@@ -198,6 +206,7 @@ async function openAiWindow() {
     minHeight: 480,
     title: 'TO DO · AI+',
     backgroundColor: '#F2EEE8',
+    icon: appIconPath(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,

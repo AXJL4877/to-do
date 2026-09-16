@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none">
+  <!-- ”(þÒ¹• + ÁL;AoöÎ<	 -->
+  <rect width="128" height="128" rx="28" fill="#F4F0EA"/>
+  <g transform="translate(8 4) scale(0.88)">
+    <defs>
+      <clipPath id="bolt-cut-app">
+        <path fill-rule="evenodd" d="
+          M0 0H128V128H0Z
+          M62 10 L52 42 H60 L48 78 L78 42 H68 L76 10 Z
+        "/>
+      </clipPath>
+    </defs>
+    <g clip-path="url(#bolt-cut-app)">
+      <path fill="#2F6BFF" d="M64 6 L38 54 L20 82 L46 92 L54 70 L50 48 L64 22 Z"/>
+      <path fill="#0B1424" d="M64 6 L78 22 L74 48 L70 70 L78 92 L104 82 L86 54 Z"/>
+    </g>
+    <path fill="#2F6BFF" d="M54 86 L54 110 L76 98 Z"/>
+    <path fill="#0B1424" d="M14 90 L42 97 L39 112 L10 105 Z"/>
+    <g fill="#F4F0EA">
+      <rect x="16" y="95" width="3.5" height="5.5" rx="0.6" transform="rotate(-14 16 95)"/>
+      <rect x="23" y="96.5" width="3.5" height="5.5" rx="0.6" transform="rotate(-14 23 96.5)"/>
+      <rect x="30" y="98" width="3.5" height="5.5" rx="0.6" transform="rotate(-14 30 98)"/>
+      <rect x="37" y="99.5" width="3.5" height="5.5" rx="0.6" transform="rotate(-14 37 99.5)"/>
+    </g>
+    <path fill="#0B1424" d="M82 97 L110 90 L114 105 L85 112 Z"/>
+    <g fill="#F4F0EA">
+      <rect x="88" y="95" width="3.5" height="5.5" rx="0.6" transform="rotate(14 88 95)"/>
+      <rect x="95" y="96.5" width="3.5" height="5.5" rx="0.6" transform="rotate(14 95 96.5)"/>
+      <rect x="102" y="98" width="3.5" height="5.5" rx="0.6" transform="rotate(14 102 98)"/>
+      <rect x="109" y="99.5" width="3.5" height="5.5" rx="0.6" transform="rotate(14 109 99.5)"/>
+    </g>
+  </g>
+</svg>

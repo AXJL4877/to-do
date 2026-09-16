@@ -113,6 +113,7 @@ export function Timeline({
     originStarts: Record<string, number>
     slipStart?: number
     moved: boolean
+    pointerId?: number
     marqueeX0?: number
     marqueeY0?: number
     marqueeAdditive?: boolean
@@ -196,56 +197,84 @@ export function Timeline({
   }, [sequences])
 
   useEffect(() => {
-    let phRaf = 0
     let pendingPh: number | null = null
-    const flushPlayhead = () => {
-      phRaf = 0
-      if (pendingPh == null) return
+
+    const endPlayheadScrub = (commit: boolean) => {
+      if (drag.current?.kind !== 'playhead') return
       const t = pendingPh
       pendingPh = null
-      useApp.getState().setPlayhead(t, { exact: true })
+      setLocalPlayheadScrubbing(false)
+      drag.current = null
+      if (commit && t != null) {
+        useApp.getState().setPlayhead(t, { exact: true })
+        broadcastPlayheadSeek(t)
+      }
     }
 
     const onMove = (e: PointerEvent) => {
       const d = drag.current
       if (!d) return
+      // 只跟启动拖拽的那根指针；避免空格/失焦后另一指针串台
+      if (d.pointerId != null && e.pointerId !== d.pointerId) return
+
       const st = useApp.getState()
       if (d.kind === 'pan') {
+        // 中键松开后 buttons 不再含 4；左键平移同理
+        if (d.pointerId != null && e.buttons === 0) {
+          drag.current = null
+          return
+        }
         const el = scrollRef.current
         if (el) el.scrollLeft = d.startScrollLeft - (e.clientX - d.startX)
         return
       }
       if (d.kind === 'playhead') {
+        // 未按住主键：立刻结束 scrub，杜绝「空格后仍粘鼠标」
+        if ((e.buttons & 1) === 0) {
+          endPlayheadScrub(true)
+          return
+        }
         d.moved = true
         const t = timeFromEvent(e.clientX)
+        // 拖动中只改 live 时钟（播放头/监视器订阅），不写 Zustand、不广播——避免掉帧
         setLivePlayhead(t)
-        broadcastPlayheadSeek(t)
         pendingPh = t
-        if (!phRaf) phRaf = requestAnimationFrame(flushPlayhead)
         const el = scrollRef.current
         if (el) {
           const x = t * pxPerSec
-          const m = 48
+          const m = 64
           if (x < el.scrollLeft + m) el.scrollLeft = Math.max(0, x - m)
           else if (x > el.scrollLeft + el.clientWidth - m) el.scrollLeft = x - el.clientWidth + m
         }
         return
       }
       if (d.kind === 'trim-in' && d.clipId) {
+        if ((e.buttons & 1) === 0) { drag.current = null; return }
         d.moved = true
         st.trimClip(d.clipId, 'in', timeFromEvent(e.clientX), { record: false })
         return
       }
       if (d.kind === 'trim-out' && d.clipId) {
+        if ((e.buttons & 1) === 0) { drag.current = null; return }
         d.moved = true
         st.trimClip(d.clipId, 'out', timeFromEvent(e.clientX), { record: false })
         return
       }
       if (d.kind === 'move' && d.clipId) {
+        if ((e.buttons & 1) === 0) {
+          if (d.moved && d.moveIds?.length) {
+            useApp.getState().dragMoveClips(
+              d.moveIds, d.originStarts, d.lastDt ?? 0, d.lastTrackId,
+              { primaryId: d.clipId, alt: true },
+            )
+            clearMovePreview(d.moveIds)
+          }
+          drag.current = null
+          return
+        }
         const dx = e.clientX - d.startX
         if (Math.abs(dx) > 2) d.moved = true
         const dt = dx / pxPerSec
-        // 用按下时锁定的 moveIds，勿跟 selectedClipIds 漂移
         const ids = d.moveIds?.length ? d.moveIds : (st.selectedClipIds.length ? st.selectedClipIds : [d.clipId])
         const trackId = trackFromEvent(e.clientY) ?? undefined
         const appliedDt = st.previewDragDt(ids, d.originStarts, dt, {
@@ -262,13 +291,17 @@ export function Timeline({
           for (const id of ids) {
             const el = body.querySelector(`[data-testid="clip-${id}"]`) as HTMLElement | null
             if (!el) continue
-            // 用 transform 预览，勿改 left——React 重绘会把 style.left 盖回 store 位置导致乱跳
             el.style.transform = dxPx ? `translateX(${dxPx}px)` : ''
           }
         }
         return
       }
       if (d.kind === 'marquee') {
+        if ((e.buttons & 1) === 0) {
+          drag.current = null
+          setMarquee(null)
+          return
+        }
         const body = bodyRef.current
         if (!body) return
         const rect = body.getBoundingClientRect()
@@ -286,7 +319,6 @@ export function Timeline({
         const bottom = Math.max(y0, y1)
         const cur = st.sequences.find((s) => s.id === st.activeSeqId) ?? st.sequences[0]
         const hits: string[] = []
-        // 与 trackAtY / 轨行布局一致：顶部 CAM 占 22px
         let y = 22
         for (const track of cur.tracks) {
           for (const clip of cur.clips.filter((c) => c.trackId === track.id)) {
@@ -302,6 +334,7 @@ export function Timeline({
         return
       }
       if (d.kind === 'slip' && d.clipId) {
+        if ((e.buttons & 1) === 0) { drag.current = null; return }
         const dx = e.clientX - d.startX
         if (Math.abs(dx) > 2) d.moved = true
         d.slipStart = (d.slipStart ?? 0) + dx
@@ -310,20 +343,17 @@ export function Timeline({
       }
     }
 
-    const onUp = () => {
-      if (phRaf) {
-        cancelAnimationFrame(phRaf)
-        flushPlayhead()
-      }
-      if (drag.current?.kind === 'playhead') {
-        setLocalPlayheadScrubbing(false)
-      }
+    const onUp = (e: PointerEvent) => {
       const d = drag.current
+      if (d?.pointerId != null && e.pointerId !== d.pointerId) return
+      if (d?.kind === 'playhead') {
+        endPlayheadScrub(true)
+        return
+      }
       if (d?.kind === 'marquee' && !d.moved && !d.marqueeAdditive) {
         useApp.getState().selectClips([])
       }
       if (d?.kind === 'move' && d.moved && d.clipId && d.moveIds?.length) {
-        // lastDt 已含吸附结果，alt 跳过二次吸附
         useApp.getState().dragMoveClips(
           d.moveIds,
           d.originStarts,
@@ -337,12 +367,28 @@ export function Timeline({
       setMarquee(null)
     }
 
-    window.addEventListener('pointermove', onMove)
+    const onCancel = (e: PointerEvent) => {
+      if (drag.current?.pointerId != null && e.pointerId !== drag.current.pointerId) return
+      if (drag.current?.kind === 'playhead') {
+        endPlayheadScrub(true)
+        return
+      }
+      if (drag.current?.kind === 'move' && drag.current.moveIds) clearMovePreview(drag.current.moveIds)
+      drag.current = null
+      setMarquee(null)
+      setLocalPlayheadScrubbing(false)
+      pendingPh = null
+    }
+
+    window.addEventListener('pointermove', onMove, { passive: true })
     window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onCancel)
+    window.addEventListener('lostpointercapture', onCancel)
     return () => {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
-      if (phRaf) cancelAnimationFrame(phRaf)
+      window.removeEventListener('pointercancel', onCancel)
+      window.removeEventListener('lostpointercapture', onCancel)
     }
   }, [pxPerSec, timeFromEvent, trackFromEvent, clearMovePreview])
 
@@ -363,22 +409,31 @@ export function Timeline({
     // 中键 / Alt+左键 / 抓手：平移时间线
     if (e.button === 1 || tool === 'hand' || (e.button === 0 && e.altKey)) {
       e.preventDefault()
-      drag.current = {
-        kind: 'pan', startX: e.clientX, startScrollLeft: scrollRef.current?.scrollLeft ?? 0,
-        originStarts: {}, moved: false,
-      }
+    drag.current = {
+      kind: 'pan', startX: e.clientX, startScrollLeft: scrollRef.current?.scrollLeft ?? 0,
+      originStarts: {}, moved: false, pointerId: e.pointerId,
+    }
       return
     }
     if (e.button !== 0) return
     // 刀片工具：标尺点击由 onRulerClick 处理，勿进入 scrub 把播放头拽走
     if (tool === 'razor') return
+    // scrub 时停播，避免空格播放与拖拽抢 playhead
+    if (useApp.getState().playing) useApp.setState({ playing: false })
     setLocalPlayheadScrubbing(true)
     const t = timeFromEvent(e.clientX)
     setLivePlayhead(t)
     broadcastPlayheadSeek(t)
     useApp.getState().setPlayhead(t, { exact: true })
-    drag.current = { kind: 'playhead', startX: e.clientX, startScrollLeft: 0, originStarts: {}, moved: false }
-    ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+    drag.current = {
+      kind: 'playhead',
+      startX: e.clientX,
+      startScrollLeft: 0,
+      originStarts: {},
+      moved: false,
+      pointerId: e.pointerId,
+    }
+    try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId) } catch { /* */ }
   }
 
   function onClipPointerDown(e: React.PointerEvent, clipId: string, trackLocked: boolean) {
@@ -386,10 +441,10 @@ export function Timeline({
     if (e.button === 1) {
       e.preventDefault()
       e.stopPropagation()
-      drag.current = {
-        kind: 'pan', startX: e.clientX, startScrollLeft: scrollRef.current?.scrollLeft ?? 0,
-        originStarts: {}, moved: false,
-      }
+    drag.current = {
+      kind: 'pan', startX: e.clientX, startScrollLeft: scrollRef.current?.scrollLeft ?? 0,
+      originStarts: {}, moved: false, pointerId: e.pointerId,
+    }
       return
     }
     if (trackLocked || tool === 'hand') return
@@ -530,10 +585,10 @@ export function Timeline({
     // 中键 / Alt+左键 / 抓手：平移
     if (e.button === 1 || tool === 'hand' || (e.button === 0 && e.altKey)) {
       e.preventDefault()
-      drag.current = {
-        kind: 'pan', startX: e.clientX, startScrollLeft: scrollRef.current?.scrollLeft ?? 0,
-        originStarts: {}, moved: false,
-      }
+    drag.current = {
+      kind: 'pan', startX: e.clientX, startScrollLeft: scrollRef.current?.scrollLeft ?? 0,
+      originStarts: {}, moved: false, pointerId: e.pointerId,
+    }
       return
     }
     if (e.button !== 0) return
@@ -564,12 +619,20 @@ export function Timeline({
       return
     }
     setLocalPlayheadScrubbing(true)
+    if (useApp.getState().playing) useApp.setState({ playing: false })
     const t = timeFromEvent(e.clientX)
     setLivePlayhead(t)
     broadcastPlayheadSeek(t)
     useApp.getState().setPlayhead(t, { exact: true })
-    drag.current = { kind: 'playhead', startX: e.clientX, startScrollLeft: 0, originStarts: {}, moved: false }
-    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    drag.current = {
+      kind: 'playhead',
+      startX: e.clientX,
+      startScrollLeft: 0,
+      originStarts: {},
+      moved: false,
+      pointerId: e.pointerId,
+    }
+    try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId) } catch { /* */ }
   }
 
   function onWheel(e: React.WheelEvent) {

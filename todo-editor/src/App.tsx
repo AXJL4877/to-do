@@ -9,7 +9,7 @@ import { Modals } from './components/Modals'
 import { Monitor } from './components/Monitor'
 import { PropWheel } from './components/PropWheel'
 import { tryDeletePickedKeyframes } from './lib/kfDelete'
-import { initStoreSync, isAiPopout, isTimelinePopout } from './lib/storeSync'
+import { initStoreSync, isAiPopout, isTimelinePopout, isLocalPlayheadScrubbing } from './lib/storeSync'
 import { setLivePlayhead } from './lib/livePlayhead'
 import { desktop } from './lib/desktop'
 import { PanelBottomClose } from 'lucide-react'
@@ -160,9 +160,16 @@ export default function App() {
 
       if (isPlainTextField(e.target)) return
 
-      if (e.code === 'Space') { e.preventDefault(); s.togglePlay() }
+      if (e.code === 'Space') {
+        e.preventDefault()
+        if (isLocalPlayheadScrubbing()) return
+        s.togglePlay()
+      }
       if (e.key === 'j' || e.key === 'J') s.stepFrame(-1)
-      if (e.key === 'k' || e.key === 'K') s.togglePlay()
+      if (e.key === 'k' || e.key === 'K') {
+        if (isLocalPlayheadScrubbing()) return
+        s.togglePlay()
+      }
       if (e.key === 'l' || e.key === 'L') { s.togglePlay(); s.setPlayhead(s.playhead + 1 / s.settings.fps) }
       if (e.key === 'ArrowLeft') s.stepFrame(-1)
       if (e.key === 'ArrowRight') s.stepFrame(1)
