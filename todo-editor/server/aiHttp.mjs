@@ -20,6 +20,8 @@ import {
   kickWorker,
   listAiJobs,
 } from './aiJobs.mjs'
+import { listModels } from './huniuClient.mjs'
+import { readAiConfig, writeAiConfig } from './huniuConfig.mjs'
 
 export { kickWorker as kickAiWorker }
 
@@ -198,6 +200,36 @@ export async function handleAiHttp(req, res) {
       }
 
       sendJson(res, 405, { ok: false, error: 'method not allowed' })
+      return true
+    }
+
+    if (url.startsWith('/api/ai-config')) {
+      if (req.method === 'GET') {
+        sendJson(res, 200, { ok: true, config: readAiConfig() })
+        return true
+      }
+      if (req.method === 'POST') {
+        const body = JSON.parse((await readBody(req)) || '{}')
+        sendJson(res, 200, { ok: true, config: writeAiConfig(body) })
+        return true
+      }
+      sendJson(res, 405, { ok: false, error: 'method not allowed' })
+      return true
+    }
+
+    if (url.startsWith('/api/ai-models')) {
+      if (req.method !== 'GET') {
+        sendJson(res, 405, { ok: false, error: 'method not allowed' })
+        return true
+      }
+      try {
+        const config = readAiConfig({ revealKey: true })
+        const mode = new URL(url, 'http://x').searchParams.get('mode') || 'image'
+        const models = await listModels(config, mode)
+        sendJson(res, 200, { ok: true, models })
+      } catch (e) {
+        sendJson(res, 400, { ok: false, error: String(e instanceof Error ? e.message : e) })
+      }
       return true
     }
 

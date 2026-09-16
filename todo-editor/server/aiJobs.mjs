@@ -7,12 +7,11 @@ import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawn } from 'node:child_process'
-import { readAiConfig } from './paipuConfig.mjs'
 import {
-  pollImageGeneration,
   saveImageResult,
   submitImageGeneration,
-} from './paipuClient.mjs'
+} from './huniuClient.mjs'
+import { readAiConfig } from './huniuConfig.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const DATA_DIR = process.env.TODO_DATA_DIR
@@ -216,6 +215,7 @@ async function runImageJob(job) {
   const filePath = path.join(AI_OUT, `${job.id}.png`)
   const params = job.params
   setPhase.run('提交生图…', Date.now(), job.id)
+
   const config = readAiConfig({ revealKey: true })
   const row = getJob.get(job.id)
   let imageDataUrl = ''
@@ -232,14 +232,8 @@ async function runImageJob(job) {
     imageDataUrl,
   })
 
-  const result = submitted.kind === 'task'
-    ? await pollImageGeneration(config, submitted.taskId, (phase) => {
-        setPhase.run(phase, Date.now(), job.id)
-      })
-    : submitted
-
   setPhase.run('下载图片…', Date.now(), job.id)
-  const file = await saveImageResult(config, result, filePath)
+  const file = await saveImageResult(config, submitted, filePath)
   const name = path.basename(file)
   updateJob.run(
     'done', '完成', name, `/ai-generated/${name}`, 'image',

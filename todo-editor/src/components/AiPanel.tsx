@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Camera, ImagePlus, Loader2, Plus, Settings, Sparkles, Trash2, Video, Wand2, X } from 'lucide-react'
+import { AudioLines, Camera, ImagePlus, Loader2, Music, Plus, Settings, Sparkles, Trash2, Video, Wand2, X } from 'lucide-react'
 import { useApp } from '../store'
 import { AiFloatLaunch } from './AiFloat'
 import { isAiPopout } from '../lib/storeSync'
@@ -39,15 +39,17 @@ type AiModel = {
   defaultQuality?: string
 }
 type AiConfig = { baseUrl: string; hasApiKey: boolean; apiKeyMasked: string }
+type AiMode = 'image' | 'video' | 'audio'
 
 type AiJob = {
   id: string
-  kind: 'image' | 'video'
+  kind: 'image' | 'video' | 'audio'
   status: 'queued' | 'running' | 'done' | 'error' | 'imported'
   prompt: string
   params: {
     size?: string
     model?: string
+    quality?: string
     duration?: number
     autoTimeline?: boolean
     width?: number | null
@@ -88,6 +90,36 @@ function statusLabel(j: AiJob) {
   return '失败'
 }
 
+function audioModelProfile(modelId: string) {
+  const id = modelId.toLowerCase()
+  if (id.includes('voice-clone') || id.includes('speech-2.8')) {
+    return {
+      kind: 'voice-clone' as const,
+      title: id.includes('speech-2.8') ? '海螺语音克隆' : '克隆音色',
+      detail: '上传参考音频并填写对应文本，用于复刻专属音色。',
+    }
+  }
+  if (id.includes('voice-design')) {
+    return {
+      kind: 'voice-design' as const,
+      title: '音色设计',
+      detail: '根据音色描述创建声音，可用于后续文本转语音。',
+    }
+  }
+  if (id.includes('music') || id.includes('suno')) {
+    return {
+      kind: 'music' as const,
+      title: '音乐生成',
+      detail: '根据主题、风格或歌词生成完整音乐。',
+    }
+  }
+  return {
+    kind: 'tts' as const,
+    title: modelId.includes('GT') || id.includes('tts') ? '文本转语音' : '语音合成',
+    detail: '输入文本、音色和语速，生成朗读音频。',
+  }
+}
+
 /** AI+：异步入队；截帧→SQLite；成果→媒体库 */
 export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
   const importMedia = useApp((s) => s.importMedia)
@@ -105,12 +137,22 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
   const [quality, setQuality] = useState('low')
   const [model, setModel] = useState('gpt-image-2')
   const [duration, setDuration] = useState<(typeof VID_DURATIONS)[number]>(5)
+  const [audioText, setAudioText] = useState('')
+  const [audioTitle, setAudioTitle] = useState('')
+  const [audioVoice, setAudioVoice] = useState('alloy')
+  const [audioSpeed, setAudioSpeed] = useState(1)
+  const [audioFormat, setAudioFormat] = useState('mp3')
+  const [audioStyle, setAudioStyle] = useState('')
+  const [audioVoiceName, setAudioVoiceName] = useState('')
+  const [audioRefText, setAudioRefText] = useState('')
+  const [audioRefName, setAudioRefName] = useState('')
+  const [audioLoop, setAudioLoop] = useState(false)
   const [autoTimeline, setAutoTimeline] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [configOpen, setConfigOpen] = useState(false)
   const [config, setConfig] = useState<AiConfig | null>(null)
-  const [configBaseUrl, setConfigBaseUrl] = useState('https://api.paipu.net')
+  const [configBaseUrl, setConfigBaseUrl] = useState('https://huniuai.com')
   const [configKey, setConfigKey] = useState('')
   const [configSaving, setConfigSaving] = useState(false)
   const [models, setModels] = useState<AiModel[]>([...FALLBACK_MODELS])
@@ -120,6 +162,7 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
   const [cold, setCold] = useState<ColdAsset[]>([])
   const [jobs, setJobs] = useState<AiJob[]>([])
   const fileRef = useRef<HTMLInputElement>(null)
+  const audioFileRef = useRef<HTMLInputElement>(null)
   const importing = useRef(new Set<string>())
 
   const aiMedia = media.filter((m) => m.folderId === 'f_ai')
@@ -127,6 +170,7 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
   const selectedModel = useMemo(() => models.find((m) => m.id === model), [model, models])
   const sizeOptions = selectedModel?.sizeOptions?.length ? selectedModel.sizeOptions : [...FALLBACK_SIZE_OPTIONS]
   const qualityOptions = selectedModel?.qualityOptions?.length ? selectedModel.qualityOptions : [...FALLBACK_QUALITY_OPTIONS]
+  const audioProfile = audioModelProfile(model)
 
   async function refreshCold() {
     try {
@@ -156,12 +200,12 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
 
   async function refreshConfig() {
     try {
-      const r = await fetch('/api/ai-config')
+      const r = await aiFetch('/api/ai-config')
       const data = await r.json()
       if (!data.ok) return
       const next = data.config as AiConfig
       setConfig(next)
-      setConfigBaseUrl(next.baseUrl || 'https://api.paipu.net')
+      setConfigBaseUrl(next.baseUrl || 'https://huniuai.com')
     } catch { /* */ }
   }
 
@@ -169,13 +213,13 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
     setModelsLoading(true)
     setModelsError(null)
     try {
-      const r = await fetch('/api/ai-models')
+      const r = await aiFetch(`/api/ai-models?mode=${encodeURIComponent(mode)}`)
       const data = await r.json()
       if (!data.ok) throw new Error(data.error || '模型列表读取失败')
       const next = (data.models || []) as AiModel[]
-      const usable = next.length ? next : [...FALLBACK_MODELS]
+      const usable = next.length ? next : (mode === 'image' ? [...FALLBACK_MODELS] : [])
       setModels(usable)
-      const nextModel = usable.some((m) => m.id === model) ? model : usable[0]?.id || 'gpt-image-2'
+      const nextModel = usable.some((m) => m.id === model) ? model : usable[0]?.id || ''
       setModel(nextModel)
       const profile = usable.find((m) => m.id === nextModel)
       const optionValues = (profile?.sizeOptions || FALLBACK_SIZE_OPTIONS).map((s) => s.value)
@@ -183,7 +227,7 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
       const qualityValues = (profile?.qualityOptions || FALLBACK_QUALITY_OPTIONS).map((q) => q.value)
       if (!qualityValues.includes(quality)) setQuality(profile?.defaultQuality || qualityValues[0] || 'standard')
     } catch (e) {
-      setModels([...FALLBACK_MODELS])
+      setModels(mode === 'image' ? [...FALLBACK_MODELS] : [])
       setModelsError(friendlyAiError(e instanceof Error ? e.message : String(e)))
     } finally {
       setModelsLoading(false)
@@ -196,7 +240,7 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
     try {
       const body: { baseUrl: string; apiKey?: string } = { baseUrl: configBaseUrl }
       if (configKey.trim()) body.apiKey = configKey.trim()
-      const r = await fetch('/api/ai-config', {
+      const r = await aiFetch('/api/ai-config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -267,6 +311,10 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
   }, [])
 
   useEffect(() => {
+    void refreshModels()
+  }, [mode])
+
+  useEffect(() => {
     if (!sizeOptions.some((s) => s.value === size)) {
       setSize(selectedModel?.defaultSize || sizeOptions[0]?.value || '1024x1024')
     }
@@ -303,7 +351,7 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
     if (!p || submitting) return
     if (!config?.hasApiKey) {
       setConfigOpen(true)
-      setError('请先配置 Paipu API Key')
+      setError('请先配置虎妞 API Key')
       return
     }
     setSubmitting(true)
@@ -342,6 +390,7 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
   }
 
   const canGen = !!prompt.trim() && !submitting
+  const isAudioMode = mode === 'audio'
 
   return (
     <div className="ai-panel flex flex-col gap-2.5 p-1" data-testid="ai-panel">
@@ -397,8 +446,17 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
         >
           <Video size={12} className="inline mr-1" />生视频
         </button>
+        <button
+          type="button"
+          className={clsx('tab flex-1', mode === 'audio' && 'active')}
+          data-testid="ai-mode-audio"
+          onClick={() => setMode('audio')}
+        >
+          <AudioLines size={12} className="inline mr-1" />生音频
+        </button>
       </div>
 
+      {mode !== 'audio' && (
       <div className="field">
         <label>参考图（可选 · {mode === 'video' ? '有则图生视频' : '有则图生图'}）</label>
         {refDataUrl ? (
@@ -429,8 +487,9 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
         </div>
         <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onPickRef} />
       </div>
+      )}
 
-      {cold.length > 0 && (
+      {mode !== 'audio' && cold.length > 0 && (
         <div className="field">
           <label>最近参考</label>
           <div className="flex gap-1 overflow-x-auto pb-0.5" data-testid="ai-cold-list">
@@ -451,15 +510,34 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
         </div>
       )}
 
+      {mode !== 'audio' && (
       <div className="field">
         <label>提示词</label>
         <textarea
           data-testid="ai-prompt"
           rows={3}
-          placeholder={mode === 'image' ? '描述画面…' : '描述运动…'}
+          placeholder={mode === 'image' ? '描述画面…' : mode === 'video' ? '描述运动…' : '输入要生成的声音、音乐或朗读文本…'}
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
         />
+      </div>
+      )}
+
+      <div className="field">
+        <label>模型</label>
+        <select data-testid="ai-model" value={model} onChange={(e) => setModel(e.target.value)}>
+          {models.map((m) => (
+            <option key={m.id} value={m.id}>{m.label || m.id}</option>
+          ))}
+        </select>
+        <div className="flex items-center justify-between gap-1 px-0.5 text-[10px]" style={{ color: 'var(--text-muted)' }}>
+          <span className="truncate">
+            {modelsLoading ? '模型读取中...' : modelsError ? modelsError : models.length ? `${models.length} 个可用模型` : config?.hasApiKey ? '当前能力暂无可用模型' : '请先配置 Key 后刷新模型'}
+          </span>
+          <button type="button" className="underline shrink-0" data-testid="ai-model-refresh" onClick={() => void refreshModels()}>
+            刷新
+          </button>
+        </div>
       </div>
 
       {mode === 'image' ? (
@@ -480,24 +558,8 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
               ))}
             </select>
           </div>
-          <div className="field">
-            <label>模型</label>
-            <select data-testid="ai-model" value={model} onChange={(e) => setModel(e.target.value)}>
-              {models.map((m) => (
-                <option key={m.id} value={m.id}>{m.label || m.id}</option>
-              ))}
-            </select>
-            <div className="flex items-center justify-between gap-1 px-0.5 text-[10px]" style={{ color: 'var(--text-muted)' }}>
-              <span className="truncate">
-                {modelsLoading ? '模型读取中...' : modelsError ? modelsError : config?.hasApiKey ? `来自 ${config.baseUrl}` : '请先配置 Key 后刷新模型'}
-              </span>
-              <button type="button" className="underline shrink-0" data-testid="ai-model-refresh" onClick={() => void refreshModels()}>
-                刷新
-              </button>
-            </div>
-          </div>
         </>
-      ) : (
+      ) : mode === 'video' ? (
         <div className="field">
           <label>时长</label>
           <select data-testid="ai-duration" value={duration} onChange={(e) => setDuration(Number(e.target.value) as typeof duration)}>
@@ -506,22 +568,132 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
             ))}
           </select>
         </div>
+      ) : (
+        <>
+          <div className="field">
+            <label>{audioProfile.title}</label>
+            <div className="rounded-md px-2 py-1.5 text-[11px] flex items-center gap-1.5" style={{ background: 'var(--surface-2)', color: 'var(--text-muted)' }}>
+              {audioProfile.kind === 'music' ? <Music size={12} /> : <AudioLines size={12} />}
+              <span>{audioProfile.detail}</span>
+            </div>
+          </div>
+
+          {audioProfile.kind === 'music' && (
+            <>
+              <div className="field">
+                <label>音乐主题</label>
+                <textarea data-testid="ai-audio-music-prompt" rows={3} value={audioText} onChange={(e) => setAudioText(e.target.value)} placeholder="描述旋律、情绪、歌词或想要的音乐画面..." />
+              </div>
+              <div className="field">
+                <label>标题</label>
+                <input data-testid="ai-audio-title" value={audioTitle} onChange={(e) => setAudioTitle(e.target.value)} placeholder="可选" />
+              </div>
+              <div className="field">
+                <label>风格</label>
+                <input data-testid="ai-audio-style" value={audioStyle} onChange={(e) => setAudioStyle(e.target.value)} placeholder="流行、电子、民谣、纯音乐..." />
+              </div>
+              <label className="flex items-center gap-2 text-[11px] px-0.5 cursor-pointer" style={{ color: 'var(--text-secondary)' }}>
+                <input type="checkbox" checked={audioLoop} onChange={(e) => setAudioLoop(e.target.checked)} />
+                循环/氛围素材
+              </label>
+            </>
+          )}
+
+          {audioProfile.kind === 'tts' && (
+            <>
+              <div className="field">
+                <label>朗读文本</label>
+                <textarea data-testid="ai-audio-tts-text" rows={4} value={audioText} onChange={(e) => setAudioText(e.target.value)} placeholder="输入要合成语音的文本..." />
+              </div>
+              <div className="field">
+                <label>音色</label>
+                <select data-testid="ai-audio-voice" value={audioVoice} onChange={(e) => setAudioVoice(e.target.value)}>
+                  {['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'].map((v) => <option key={v} value={v}>{v}</option>)}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="field">
+                  <label>语速</label>
+                  <input data-testid="ai-audio-speed" type="number" min="0.5" max="2" step="0.1" value={audioSpeed} onChange={(e) => setAudioSpeed(Number(e.target.value) || 1)} />
+                </div>
+                <div className="field">
+                  <label>格式</label>
+                  <select data-testid="ai-audio-format" value={audioFormat} onChange={(e) => setAudioFormat(e.target.value)}>
+                    {['mp3', 'wav', 'opus', 'aac', 'flac'].map((f) => <option key={f} value={f}>{f}</option>)}
+                  </select>
+                </div>
+              </div>
+            </>
+          )}
+
+          {audioProfile.kind === 'voice-clone' && (
+            <>
+              <div className="field">
+                <label>参考音频</label>
+                <button type="button" className="btn btn-ghost w-full justify-start" data-testid="ai-audio-ref-pick" onClick={() => audioFileRef.current?.click()}>
+                  <AudioLines size={13} /> {audioRefName || '上传参考音频'}
+                </button>
+                <input
+                  ref={audioFileRef}
+                  type="file"
+                  accept="audio/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    setAudioRefName(e.target.files?.[0]?.name || '')
+                    e.target.value = ''
+                  }}
+                />
+              </div>
+              <div className="field">
+                <label>参考文本</label>
+                <textarea data-testid="ai-audio-ref-text" rows={3} value={audioRefText} onChange={(e) => setAudioRefText(e.target.value)} placeholder="填写参考音频中说/唱的内容..." />
+              </div>
+              <div className="field">
+                <label>音色名称</label>
+                <input data-testid="ai-audio-voice-name" value={audioVoiceName} onChange={(e) => setAudioVoiceName(e.target.value)} placeholder="例如：我的旁白音色" />
+              </div>
+              <div className="field">
+                <label>生成文本</label>
+                <textarea data-testid="ai-audio-clone-text" rows={3} value={audioText} onChange={(e) => setAudioText(e.target.value)} placeholder="使用克隆音色朗读的文本..." />
+              </div>
+            </>
+          )}
+
+          {audioProfile.kind === 'voice-design' && (
+            <>
+              <div className="field">
+                <label>音色描述</label>
+                <textarea data-testid="ai-audio-design-style" rows={3} value={audioStyle} onChange={(e) => setAudioStyle(e.target.value)} placeholder="温暖、年轻、纪录片旁白、低沉、有亲和力..." />
+              </div>
+              <div className="field">
+                <label>试听文本</label>
+                <textarea data-testid="ai-audio-design-text" rows={3} value={audioText} onChange={(e) => setAudioText(e.target.value)} placeholder="输入用于试听新音色的文本..." />
+              </div>
+              <div className="field">
+                <label>音色名称</label>
+                <input data-testid="ai-audio-design-name" value={audioVoiceName} onChange={(e) => setAudioVoiceName(e.target.value)} placeholder="可选" />
+              </div>
+            </>
+          )}
+        </>
       )}
 
+      {mode !== 'audio' && (
       <label className="flex items-center gap-2 text-[11px] px-0.5 cursor-pointer" style={{ color: 'var(--text-secondary)' }}>
         <input type="checkbox" checked={autoTimeline} data-testid="ai-auto-timeline" onChange={(e) => setAutoTimeline(e.target.checked)} />
         完成后自动入轨
       </label>
+      )}
 
       <button
         type="button"
         className={clsx('btn btn-primary w-full', submitting && 'opacity-70')}
         data-testid="ai-generate"
-        disabled={!canGen}
+        disabled={!canGen || isAudioMode || !model}
         onClick={() => void enqueue()}
       >
-        {submitting ? <Loader2 size={13} className="animate-spin" /> : mode === 'video' ? <Video size={13} /> : <Sparkles size={13} />}
-        {submitting ? '入队中…' : refDataUrl ? (mode === 'video' ? '图生视频 · 入队' : '图生图 · 入队') : (mode === 'video' ? '文生视频 · 入队' : '文生图 · 入队')}
+        {submitting ? <Loader2 size={13} className="animate-spin" /> : mode === 'video' ? <Video size={13} /> : mode === 'audio' ? <AudioLines size={13} /> : <Sparkles size={13} />}
+        {submitting ? '入队中…' : mode === 'audio' ? '生音频 · 待接入' : refDataUrl ? (mode === 'video' ? '图生视频 · 入队' : '图生图 · 入队') : (mode === 'video' ? '文生视频 · 入队' : '文生图 · 入队')}
       </button>
 
       {error && (
@@ -621,7 +793,7 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
                 <input
                   data-testid="ai-config-base-url"
                   value={configBaseUrl}
-                  placeholder="https://api.paipu.net"
+                  placeholder="https://huniuai.com"
                   onChange={(e) => setConfigBaseUrl(e.target.value)}
                 />
               </div>

@@ -1,10 +1,12 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { normalizeBaseUrl } from './paipuClient.mjs'
+import { normalizeBaseUrl } from './huniuClient.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const DATA_DIR = path.join(ROOT, '.data')
+const DATA_DIR = process.env.TODO_DATA_DIR
+  ? path.resolve(process.env.TODO_DATA_DIR)
+  : path.join(ROOT, '.data')
 const CONFIG_PATH = path.join(DATA_DIR, 'ai-config.json')
 
 mkdirSync(DATA_DIR, { recursive: true })
@@ -22,7 +24,7 @@ export function readAiConfig({ revealKey = false } = {}) {
     try { cfg = JSON.parse(readFileSync(CONFIG_PATH, 'utf8')) } catch { cfg = {} }
   }
   const apiKey = String(cfg.apiKey || '')
-  const baseUrl = String(cfg.baseUrl || 'https://api.paipu.net')
+  const baseUrl = String(cfg.baseUrl || 'https://huniuai.com')
   return {
     apiKey: revealKey ? apiKey : '',
     apiKeyMasked: maskKey(apiKey),
@@ -35,7 +37,7 @@ export function writeAiConfig(body) {
   const current = readAiConfig({ revealKey: true })
   const apiKeyInput = body.apiKey
   const apiKey = apiKeyInput === undefined ? current.apiKey : String(apiKeyInput || '').trim()
-  const baseUrl = normalizeBaseUrl(String(body.baseUrl || current.baseUrl || 'https://api.paipu.net'))
+  const baseUrl = normalizeBaseUrl(String(body.baseUrl || current.baseUrl || 'https://huniuai.com'))
   const next = { apiKey, baseUrl }
   writeFileSync(CONFIG_PATH, `${JSON.stringify(next, null, 2)}\n`)
   return readAiConfig()

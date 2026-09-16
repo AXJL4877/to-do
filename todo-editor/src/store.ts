@@ -253,8 +253,8 @@ export type AppStore = {
   libraryTab: string
   /** AI+：当前参考图（截帧 / 上传），生图·生视频共用；不进媒体库 */
   aiRefDataUrl: string | null
-  /** AI+：生图 | 生视频 */
-  aiGenMode: 'image' | 'video'
+  /** AI+：生图 | 生视频 | 生音频 */
+  aiGenMode: 'image' | 'video' | 'audio'
   /** AI+ 弹出：独立窗 / 应用内浮窗 */
   aiFloat: boolean
   aiFloatKind: null | 'window' | 'panel'
@@ -334,7 +334,7 @@ export type AppStore = {
   setSelectedMedia: (id: string | null) => void
   captureFrame: () => void
   setAiRef: (dataUrl: string | null) => void
-  setAiGenMode: (m: 'image' | 'video') => void
+  setAiGenMode: (m: 'image' | 'video' | 'audio') => void
   setAiFloat: (v: boolean) => void
   setPlayhead: (t: number, opts?: { exact?: boolean }) => void
   togglePlay: () => void
