@@ -200,7 +200,7 @@ export async function handleAiHttp(req, res) {
       sendJson(res, 405, { ok: false, error: 'method not allowed' })
       return true
     }
-
+    
     if (url === '/api/ai-image' || url.startsWith('/api/ai-image?')) {
       if (req.method !== 'POST') {
         sendJson(res, 405, { ok: false, error: 'POST only' })
