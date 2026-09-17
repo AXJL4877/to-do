@@ -105,9 +105,16 @@ let started = false
 let applying = false
 /** 本窗正在拖 scrub：忽略对端 live，避免主窗播放把播放头抢回去 */
 let localScrubbing = false
+/** 弹窗尚未收到主窗快照前，禁止把空 sequences 权威写回主窗 */
+let popoutHydrated = false
 const origin = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 
 let postOutgoing: (msg: SyncMsg) => void = () => {}
+
+function clipCount(sequences: unknown): number {
+  if (!Array.isArray(sequences)) return 0
+  return sequences.reduce((n, q) => n + (Array.isArray((q as { clips?: unknown[] })?.clips) ? (q as { clips: unknown[] }).clips.length : 0), 0)
+}
 
 function handleIncoming(data: SyncMsg) {
   if (!data || data.origin === origin) return
@@ -143,6 +150,15 @@ function handleIncoming(data: SyncMsg) {
   if (data.type === 'authority-request') {
     // 只有主窗受理工程权威写入
     if (isAnyPopout() || !data.patch) return
+    // 拒绝「空工程」覆盖主窗已有片段（弹窗未 hydrate 时的竞态）
+    if ('sequences' in data.patch) {
+      const cur = clipCount(useApp.getState().sequences)
+      const incoming = clipCount(data.patch.sequences)
+      if (cur > 0 && incoming === 0) {
+        postOutgoing({ type: 'patch', origin, patch: pickSync(useApp.getState() as unknown as Record<string, unknown>) })
+        return
+      }
+    }
     applying = true
     useApp.setState(data.patch as Parameters<typeof useApp.setState>[0])
     applying = false
@@ -155,6 +171,7 @@ function handleIncoming(data: SyncMsg) {
     const patch = { ...data.patch } as SyncPatch
     if (isAnyPopout()) {
       // 弹窗全量接受主窗 patch
+      popoutHydrated = true
     } else {
       // 主窗忽略从弹窗误发的权威字段（应走 authority-request）
       for (const k of Object.keys(patch)) {
@@ -226,7 +243,8 @@ export function initStoreSync() {
       else mirrorPatch[key] = state[key]
     }
     if (isAnyPopout()) {
-      if (Object.keys(authPatch).length) {
+      // 未收到主窗快照前不回写权威字段，避免空工程冲掉主窗素材
+      if (Object.keys(authPatch).length && popoutHydrated) {
         postOutgoing({ type: 'authority-request', origin, patch: authPatch })
       }
       if (Object.keys(mirrorPatch).length) {
@@ -246,13 +264,20 @@ export function initStoreSync() {
   }
 
   if (isTimelinePopout() || isAiPopout()) {
+    popoutHydrated = false
     postOutgoing({ type: 'hello', origin })
+    // 主窗可能稍晚才挂上监听：短重试 hello，避免一直停在空工程
+    const retry = window.setTimeout(() => {
+      if (!popoutHydrated) postOutgoing({ type: 'hello', origin })
+    }, 400)
+    cleanups.push(() => window.clearTimeout(retry))
     setLivePlayhead(useApp.getState().playhead)
   }
 
   return () => {
     for (const c of cleanups) c()
     started = false
+    popoutHydrated = false
   }
 }
 

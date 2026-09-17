@@ -3,6 +3,7 @@ import { useApp } from './store'
 import { Workspace, TimelineResizeHandle } from './components/Workspace'
 import { TimelineDock } from './components/TimelineDock'
 import { TimelineFloatWindow } from './components/TimelineFloat'
+import { TimelinePopoutShell } from './components/TimelinePopoutShell'
 import { AiFloatWindow } from './components/AiFloat'
 import { AiPanel } from './components/AiPanel'
 import { Modals } from './components/Modals'
@@ -37,6 +38,8 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    // 弹窗初始是空工程；等主窗快照后再由主窗权威维护链接，避免空 sequences 回写冲掉素材
+    if (POPOUT) return
     useApp.getState().syncVideoAudioLinks()
   }, [])
 
@@ -51,7 +54,6 @@ export default function App() {
   useEffect(() => {
     if (TIMELINE_POPOUT) {
       document.title = 'TO DO · 时间轴'
-      document.documentElement.style.setProperty('--timeline-h', '100%')
       useApp.setState({ timelineFloat: true, timelineFloatKind: 'window' })
       return
     }
@@ -256,18 +258,9 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey, true)
   }, [])
 
-  // 独立时间轴窗口：只渲染 dock，状态靠 BroadcastChannel 与主窗同步
+  // 独立时间轴窗口：只渲染 dock，状态靠 BroadcastChannel 与主窗同步；高度跟轨道收紧
   if (TIMELINE_POPOUT) {
-    return (
-      <div
-        className="h-full min-h-0 flex flex-col overflow-hidden outline-none"
-        style={{ background: 'var(--surface-0)' }}
-        data-testid="timeline-popout-shell"
-        tabIndex={-1}
-      >
-        <TimelineDock fill />
-      </div>
-    )
+    return <TimelinePopoutShell />
   }
 
   // 独立 AI 窗口

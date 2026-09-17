@@ -287,7 +287,8 @@ export function TimelineResizeHandle() {
   const layout = useApp((s) => s.layout)
   const setLayout = useApp((s) => s.setLayout)
   const onDelta = useCallback((_dx: number, dy: number) => {
-    setLayout({ timelineH: Math.min(440, Math.max(160, layout.timelineH - dy)) })
+    const maxH = Math.max(280, Math.floor(window.innerHeight * 0.72))
+    setLayout({ timelineH: Math.min(maxH, Math.max(160, layout.timelineH - dy)) })
   }, [layout.timelineH, setLayout])
   const onPointerDown = useResize(onDelta)
   return (

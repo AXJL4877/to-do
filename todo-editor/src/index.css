@@ -52,6 +52,8 @@
 .nle-timeline {
   border-top: 1px solid var(--border);
   border-radius: 0;
+  user-select: none;
+  -webkit-user-select: none;
 }
 .resize-handle {
   flex-shrink: 0;

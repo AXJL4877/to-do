@@ -116,6 +116,7 @@ export type DesktopApi = {
   getPathForFile?: (file: File) => string
   openTimelineWindow?: () => Promise<{ ok: boolean; reused?: boolean }>
   closeTimelineWindow?: () => Promise<{ ok: boolean; alreadyClosed?: boolean }>
+  resizeTimelineWindow?: (size: { width?: number; height: number }) => Promise<{ ok: boolean }>
   timelineWindowAlive?: () => Promise<{ ok: boolean }>
   onTimelineWindowOpened?: (cb: () => void) => () => void
   onTimelineWindowClosed?: (cb: () => void) => () => void

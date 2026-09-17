@@ -4,15 +4,15 @@ import { useApp } from '../store'
 import { TimelineDock } from './TimelineDock'
 import { desktop } from '../lib/desktop'
 import { openTimelinePopoutBrowser, openTimelinePopoutElectron } from '../lib/timelinePopout'
+import { isTimelinePopout } from '../lib/storeSync'
 
-/** 应用内浮窗回退：独立窗口打不开时仍能用时间轴/K帧 */
+/** 应用内浮窗回退：独立窗口打不开时仍能用时间轴/K帧；高度跟轨道收紧 */
 export function TimelineFloatWindow() {
   const setTimelineFloat = useApp((s) => s.setTimelineFloat)
   const [pos, setPos] = useState(() => ({
     x: Math.max(24, Math.floor(window.innerWidth * 0.08)),
     y: Math.max(48, Math.floor(window.innerHeight * 0.42)),
     w: Math.min(1100, Math.floor(window.innerWidth * 0.84)),
-    h: Math.min(380, Math.floor(window.innerHeight * 0.42)),
   }))
   const drag = useRef<{ mx: number; my: number; x: number; y: number } | null>(null)
 
@@ -46,7 +46,8 @@ export function TimelineFloatWindow() {
         left: pos.x,
         top: pos.y,
         width: pos.w,
-        height: pos.h,
+        height: 'auto',
+        maxHeight: '72vh',
         background: 'var(--surface-1)',
         borderColor: 'var(--border)',
       }}
@@ -74,8 +75,8 @@ export function TimelineFloatWindow() {
           <PanelBottomClose size={13} />
         </button>
       </div>
-      <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-        <TimelineDock fill />
+      <div className="shrink-0 flex flex-col overflow-y-auto min-h-0" style={{ maxHeight: 'calc(72vh - 28px)' }}>
+        <TimelineDock fill={false} />
       </div>
     </div>
   )
@@ -90,16 +91,28 @@ function fallBackPanel(msg: string) {
 }
 
 export function TimelineFloatLaunch() {
+  const timelineFloat = useApp((s) => s.timelineFloat)
+  const setTimelineFloat = useApp((s) => s.setTimelineFloat)
+  const inPopout = isTimelinePopout()
+  const active = timelineFloat || inPopout
+
   return (
     <button
       type="button"
-      className="icon-btn shrink-0"
+      className={`icon-btn shrink-0${active ? ' active' : ''}`}
       data-testid="btn-timeline-float"
-      title="弹出独立时间轴窗口（可拖到副屏；失败则应用内浮窗）"
+      title={active ? '还原时间轴到底部' : '弹出独立时间轴窗口（可拖到副屏；失败则应用内浮窗）'}
       onClick={() => {
+        // 再按一次：弹回 / 关闭独立窗
+        if (active) {
+          setTimelineFloat(false)
+          if (inPopout) {
+            try { window.close() } catch { /* */ }
+          }
+          return
+        }
         const d = desktop()
         if (d?.openTimelineWindow) {
-          // 先藏主窗时间轴，避免独立窗打开期间叠两份
           useApp.setState({ timelineFloat: true, timelineFloatKind: 'window' })
           void openTimelinePopoutElectron().then((ok) => {
             if (!ok) fallBackPanel('独立窗口打开失败，已改用应用内浮窗')
@@ -114,7 +127,7 @@ export function TimelineFloatLaunch() {
         }
       }}
     >
-      <PanelBottomOpen size={13} />
+      {active ? <PanelBottomClose size={13} /> : <PanelBottomOpen size={13} />}
     </button>
   )
 }

@@ -13,7 +13,7 @@ import {
   subscribePreviewCache,
 } from '../lib/previewCache'
 import { getLivePlayhead, setLivePlayhead, subscribeLivePlayhead } from '../lib/livePlayhead'
-import { broadcastPlayheadSeek, setLocalPlayheadScrubbing } from '../lib/storeSync'
+import { broadcastPlayheadSeek, setLocalPlayheadScrubbing, isTimelinePopout } from '../lib/storeSync'
 import { ContextMenu } from './ContextMenu'
 import { TimelineClip } from './TimelineClip'
 import { PlayheadOverlay } from './PlayheadOverlay'
@@ -80,6 +80,9 @@ export function Timeline({
   const monitorCompose = useApp((s) => s.monitorCompose)
   const setPropTab = useApp((s) => s.setPropTab)
   const setModal = useApp((s) => s.setModal)
+  const timelineH = useApp((s) => s.layout.timelineH)
+  const setLayout = useApp((s) => s.setLayout)
+  const popout = isTimelinePopout()
 
   const [ctx, setCtx] = useState<{ x: number; y: number; clipId: string } | null>(null)
   const [marquee, setMarquee] = useState<null | {
@@ -133,6 +136,28 @@ export function Timeline({
     () => Math.max(seq.workOut, ...seq.clips.map((c) => c.start + c.duration), 12),
     [seq],
   )
+
+  // 轨区高度 = 真实轨道总和，不留空白假轨道
+  // 弹出窗：不吃主窗 timelineH 上限；主窗：轨道变多时自动抬高面板（有屏幕上限），超出才内滚
+  const RULER_H = 28
+  const CAM_H = 22
+  const CHROME_H = 58 // 工具条 + 底栏时间码
+  const tracksSum = useMemo(() => seq.tracks.reduce((a, t) => a + t.height, 0), [seq.tracks])
+  const lanesNatural = RULER_H + CAM_H + tracksSum
+  const dockMaxH = typeof window !== 'undefined'
+    ? Math.max(280, Math.floor(window.innerHeight * 0.72))
+    : 720
+  const lanesCap = Math.max(80, Math.min(dockMaxH, timelineH) - CHROME_H)
+  const lanesH = popout ? lanesNatural : Math.min(lanesNatural, lanesCap)
+
+  // 主窗：轨道变多时抬高时间轴面板，避免被旧的 timelineH 卡死
+  useEffect(() => {
+    if (popout || fill) return
+    const need = lanesNatural + CHROME_H
+    if (need <= timelineH) return
+    const next = Math.min(dockMaxH, need)
+    if (next > timelineH) setLayout({ timelineH: next })
+  }, [popout, fill, lanesNatural, timelineH, dockMaxH, setLayout])
 
   // 内容至少铺满可视区；用整数像素避免略超 clientWidth 冒出多余横向滚动条
   const [bodyW, setBodyW] = useState(0)
@@ -375,11 +400,12 @@ export function Timeline({
         const body = bodyRef.current
         if (!body) return
         const rect = body.getBoundingClientRect()
+        // 任意方向：始终用内容坐标 + min/max 归一化，不依赖拖拽象限
         const x1 = e.clientX - rect.left
         const y1 = e.clientY - rect.top
-        d.moved = Math.abs(x1 - (d.marqueeX0 ?? x1)) > 3 || Math.abs(y1 - (d.marqueeY0 ?? y1)) > 3
         const x0 = d.marqueeX0 ?? x1
         const y0 = d.marqueeY0 ?? y1
+        d.moved = Math.abs(x1 - x0) > 3 || Math.abs(y1 - y0) > 3
         const additive = !!d.marqueeAdditive
         const base = d.marqueeBase ?? []
         setMarquee({ x0, y0, x1, y1, additive, base })
@@ -400,7 +426,11 @@ export function Timeline({
           }
           y += track.height
         }
-        st.selectClips(additive ? [...new Set([...base, ...hits])] : hits)
+        const next = additive ? [...new Set([...base, ...hits])] : hits
+        const prev = st.selectedClipIds
+        if (next.length !== prev.length || next.some((id, i) => id !== prev[i])) {
+          st.selectClips(next)
+        }
         return
       }
       if (d.kind === 'slip' && d.clipId) {
@@ -530,7 +560,8 @@ export function Timeline({
     }
     let ids: string[]
     if (e.ctrlKey || e.metaKey) {
-      // Ctrl+单击切换选中；Ctrl+拖动加选框选
+      // Ctrl+单击切换选中；Ctrl+拖动任意方向加选框选
+      e.preventDefault()
       e.stopPropagation()
       const startX = e.clientX
       const startY = e.clientY
@@ -553,12 +584,14 @@ export function Timeline({
           startScrollLeft: 0,
           originStarts: {},
           moved: true,
+          pointerId: e.pointerId,
           marqueeX0: x0,
           marqueeY0: y0,
           marqueeAdditive: true,
           marqueeBase: base,
         }
         setMarquee({ x0, y0, x1: x0, y1: y0, additive: true, base })
+        try { body.setPointerCapture(e.pointerId) } catch { /* */ }
       }
       const onUp = () => {
         window.removeEventListener('pointermove', onMove)
@@ -676,8 +709,10 @@ export function Timeline({
       razorAtPlayhead()
       return
     }
-    // Ctrl/Cmd：框选；否则空白处点击/拖动 = 播放头跟随
+    // Ctrl/Cmd：任意方向框选；否则空白处点击/拖动 = 播放头跟随
     if (e.ctrlKey || e.metaKey) {
+      e.preventDefault()
+      e.stopPropagation()
       const body = bodyRef.current
       if (!body) return
       const rect = body.getBoundingClientRect()
@@ -689,12 +724,14 @@ export function Timeline({
         startScrollLeft: 0,
         originStarts: {},
         moved: false,
+        pointerId: e.pointerId,
         marqueeX0: x0,
         marqueeY0: y0,
         marqueeAdditive: true,
         marqueeBase: [...selectedClipIds],
       }
       setMarquee({ x0, y0, x1: x0, y1: y0, additive: true, base: [...selectedClipIds] })
+      try { body.setPointerCapture(e.pointerId) } catch { /* */ }
       return
     }
     setLocalPlayheadScrubbing(true)
@@ -727,10 +764,10 @@ export function Timeline({
   return (
     <section
       className={clsx(
-        'panel nle-timeline flex flex-col min-h-0 min-w-0 w-full overflow-hidden rounded-none border-x-0 border-b-0',
+        'panel nle-timeline flex flex-col min-h-0 min-w-0 w-full overflow-hidden rounded-none border-x-0 border-b-0 select-none',
         fill ? 'flex-1 h-full' : 'shrink-0',
       )}
-      style={fill ? undefined : { height: 'var(--timeline-h)' }}
+      style={popout || fill ? undefined : { height: 'auto', maxHeight: Math.min(dockMaxH, timelineH) }}
       data-testid="timeline"
       data-tool={tool}
       onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy' }}
@@ -781,7 +818,10 @@ export function Timeline({
         <button className="icon-btn shrink-0" data-testid="btn-export" onClick={() => setModal('export')} title="导出成片" aria-label="导出"><Download size={13} /></button>
       </div>
 
-      <div className="flex flex-1 min-h-0">
+      <div
+        className="flex shrink-0 min-h-0"
+        style={{ height: lanesH, maxHeight: fill ? '100%' : undefined }}
+      >
         {/* 左侧轨头：顶部留出与标尺同高的占位，否则轨名会整体上移一行对不齐 */}
         <div
           ref={headersRef}
@@ -798,13 +838,13 @@ export function Timeline({
         >
           <div className="sticky top-0 z-10 h-7 border-b shrink-0" style={{ borderColor: 'var(--border)', background: 'var(--surface-2)' }} />
           <div
-            className="flex items-center gap-0.5 px-1 border-b cursor-pointer"
+            className="flex items-center gap-0.5 px-1 border-b cursor-pointer select-none"
             style={{ height: 22, borderColor: 'var(--border)', background: monitorCompose === '3d' ? 'var(--accent-dim)' : undefined }}
             data-testid="track-header-camera"
             onClick={() => { setPropTab('scene3d'); setMonitorCompose('3d') }}
             title="虚拟相机"
           >
-            <span className="text-[10px] font-medium w-full truncate">CAM</span>
+            <span className="text-[10px] font-medium w-full truncate select-none pointer-events-none">CAM</span>
           </div>
           {seq.tracks.map((t) => (
             <div
@@ -996,9 +1036,8 @@ export function Timeline({
         </div>
       </div>
 
-      <div className="px-2 py-1 border-t text-[10px] tabular-nums shrink-0 flex gap-3" style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}>
+      <div className="px-2 py-1 border-t text-[10px] tabular-nums shrink-0 select-none" style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}>
         <TimelineTimecode fps={fps} duration={duration} />
-        <span>选中后：1 静态 · 2 K帧 · 3 转场 · Tab 轮盘</span>
       </div>
 
       {ctx && (
@@ -1031,6 +1070,12 @@ export function Timeline({
 function TimelineTimecode({ fps, duration }: { fps: number; duration: number }) {
   const t = useSyncExternalStore(subscribeLivePlayhead, getLivePlayhead, getLivePlayhead)
   return (
-    <span data-testid="timecode-timeline">{formatTime(t, fps)} / {formatTime(duration, fps)}</span>
+    <span
+      data-testid="timecode-timeline"
+      className="select-none pointer-events-none"
+      style={{ userSelect: 'none', WebkitUserSelect: 'none' }}
+    >
+      {formatTime(t, fps)} / {formatTime(duration, fps)}
+    </span>
   )
 }

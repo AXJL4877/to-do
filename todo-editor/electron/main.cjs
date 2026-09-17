@@ -128,9 +128,9 @@ async function openTimelineWindow() {
 
   const win = new BrowserWindow({
     width: 1280,
-    height: 420,
+    height: 260,
     minWidth: 720,
-    minHeight: 240,
+    minHeight: 160,
     title: 'TO DO · 时间轴',
     backgroundColor: '#F2EEE8',
     icon: appIconPath(),
@@ -190,6 +190,18 @@ function closeTimelineWindow() {
     return { ok: true }
   }
   return { ok: true, alreadyClosed: true }
+}
+
+function resizeTimelineWindow(size = {}) {
+  if (!timelineWindow || timelineWindow.isDestroyed()) return { ok: false }
+  const cur = timelineWindow.getContentSize()
+  const screenH = screen.getPrimaryDisplay()?.workAreaSize?.height || 900
+  const maxH = Math.max(400, Math.floor(screenH * 0.9))
+  const w = Math.max(720, Math.round(size.width ?? cur[0]))
+  const h = Math.max(160, Math.min(maxH, Math.round(size.height ?? cur[1])))
+  if (w === cur[0] && h === cur[1]) return { ok: true, unchanged: true }
+  timelineWindow.setContentSize(w, h)
+  return { ok: true }
 }
 
 async function openAiWindow() {
@@ -647,6 +659,7 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('desktop:open-timeline-window', async () => openTimelineWindow())
   ipcMain.handle('desktop:close-timeline-window', () => closeTimelineWindow())
+  ipcMain.handle('desktop:resize-timeline-window', (_e, size) => resizeTimelineWindow(size || {}))
   ipcMain.handle('desktop:timeline-window-alive', () => ({ ok: timelineWindowAlive() }))
   ipcMain.handle('desktop:open-ai-window', async () => openAiWindow())
   ipcMain.handle('desktop:close-ai-window', () => closeAiWindow())

@@ -36,6 +36,7 @@ contextBridge.exposeInMainWorld('todoDesktop', {
   },
   openTimelineWindow: () => ipcRenderer.invoke('desktop:open-timeline-window'),
   closeTimelineWindow: () => ipcRenderer.invoke('desktop:close-timeline-window'),
+  resizeTimelineWindow: (size) => ipcRenderer.invoke('desktop:resize-timeline-window', size),
   timelineWindowAlive: () => ipcRenderer.invoke('desktop:timeline-window-alive'),
   onTimelineWindowOpened: (cb) => {
     const handler = () => cb()
