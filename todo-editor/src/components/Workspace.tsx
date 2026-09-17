@@ -35,7 +35,11 @@ function MonitorArea() {
   const setMonitorView = useApp((s) => s.setMonitorView)
   const [viewOpen, setViewOpen] = useState(false)
 
-  const viewLabel = monitorView === 'dual' ? '双监视器' : monitorView === 'source' ? '源' : '节目'
+  const viewLabel =
+    monitorView === 'dual' ? '编辑+节目'
+      : monitorView === 'edit' ? '编辑'
+        : monitorView === 'source' ? '源'
+          : '节目'
 
   return (
     <div className="flex flex-col flex-1 min-h-0 min-w-0" data-testid="monitor-area">
@@ -50,14 +54,15 @@ function MonitorArea() {
         </button>
         {viewOpen && (
           <div
-            className="absolute left-1 top-full z-20 mt-0.5 min-w-[120px] rounded-lg border p-1 shadow-lg menu-pop"
+            className="absolute left-1 top-full z-20 mt-0.5 min-w-[132px] rounded-lg border p-1 shadow-lg menu-pop"
             style={{ background: 'var(--surface-1)', borderColor: 'var(--border)' }}
             data-testid="monitor-view-dropdown"
           >
             {([
-              ['program', '节目'],
-              ['dual', '双监视器'],
-              ['source', '源'],
+              ['dual', '编辑 + 节目'],
+              ['edit', '编辑窗'],
+              ['program', '节目窗'],
+              ['source', '源监视器'],
             ] as const).map(([id, label]) => (
               <button
                 key={id}
@@ -79,12 +84,18 @@ function MonitorArea() {
       {monitorView === 'dual' && (
         <div className="flex flex-1 min-h-0 min-w-0 gap-1" data-testid="dual-monitors" onClick={() => setViewOpen(false)}>
           <div className="flex-1 min-w-0 min-h-0 overflow-hidden">
-            <Monitor mode="source" />
+            <Monitor mode="edit" />
           </div>
           <div className="w-px shrink-0 self-stretch" style={{ background: 'var(--border)' }} />
-          <div className="flex-[1.2] min-w-0 min-h-0 overflow-hidden">
+          <div className="flex-[1.15] min-w-0 min-h-0 overflow-hidden">
             <Monitor mode="program" />
           </div>
+        </div>
+      )}
+
+      {monitorView === 'edit' && (
+        <div className="flex-1 min-h-0 overflow-hidden" onClick={() => setViewOpen(false)}>
+          <Monitor mode="edit" />
         </div>
       )}
 

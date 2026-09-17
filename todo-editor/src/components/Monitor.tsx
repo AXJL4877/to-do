@@ -43,7 +43,7 @@ function clientToNorm(canvas: HTMLCanvasElement, clientX: number, clientY: numbe
   return { nx, ny }
 }
 
-export function Monitor({ mode, compact = false }: { mode: 'source' | 'program'; compact?: boolean }) {
+export function Monitor({ mode, compact = false }: { mode: 'source' | 'program' | 'edit'; compact?: boolean }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const viewportRef = useRef<HTMLDivElement>(null)
   const localPlayhead = useRef(0)
@@ -92,10 +92,17 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program';
   const monitorCompose = useApp((s) => s.monitorCompose)
   const setMonitorCompose = useApp((s) => s.setMonitorCompose)
   const captureFrame = useApp((s) => s.captureFrame)
+  const monitorView = useApp((s) => s.monitorView)
+
+  const isSeq = mode === 'program' || mode === 'edit'
+  const isEdit = mode === 'edit'
+  const isProgram = mode === 'program'
+  // 双窗时只由节目窗推墙钟+音频，编辑窗跟 live 画，避免双循环
+  const drivesClock = isProgram || (isEdit && monitorView !== 'dual')
 
   const { cache: imgCache, version: imgVersion } = useImageCache(media)
   const preview = getPreviewSize(settings, prefs.performance)
-  const use3d = mode === 'program' && monitorCompose === '3d' && webglOk()
+  const use3d = isEdit && monitorCompose === '3d' && webglOk()
 
   const on3dFallback = useCallback(() => {
     setMonitorCompose('2d')
@@ -113,7 +120,7 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program';
   }, [])
 
   useEffect(() => {
-    if (mode !== 'program') return
+    if (!isSeq) return
     const el = viewportRef.current
     if (!el) return
     const onWheel = (e: WheelEvent) => {
@@ -134,7 +141,7 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program';
       el.removeEventListener('mousedown', blockMid)
       el.removeEventListener('auxclick', blockMid)
     }
-  }, [mode])
+  }, [isSeq])
 
   function resetView() {
     setViewZoom(1)
@@ -143,7 +150,7 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program';
   }
 
   function onViewportPointerDown(e: React.PointerEvent) {
-    if (mode !== 'program' || e.button !== 1) return
+    if (!isSeq || e.button !== 1) return
     e.preventDefault()
     e.stopPropagation()
     const startX = e.clientX
@@ -165,7 +172,7 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program';
 
   const viewDirty = viewZoom !== 1 || viewPan.x !== 0 || viewPan.y !== 0
   const viewTransform =
-    mode === 'program' && viewDirty
+    isSeq && viewDirty
       ? `translate(${viewPan.x}px, ${viewPan.y}px) scale(${viewZoom})`
       : undefined
 
@@ -191,65 +198,59 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program';
     const ram = getProgramPreviewCache()
     ensurePreviewFingerprint(ram, fp, cw, ch)
 
-    const scrubbing = !opts?.playing
-    if (opts?.playing && !transformOverrides) {
-      const hasVisibleClip = seq.clips.some((c) => {
-        if (!c.enabled || t < c.start || t >= c.start + c.duration) return false
-        const track = seq.tracks.find((tr) => tr.id === c.trackId)
-        return !!track && !track.hidden && track.kind !== 'audio'
-      })
-      if (!hasVisibleClip) {
-        renderProgramFrame(canvas, seq, media, settings, t, imgCache.current, w, h, [], undefined, false)
-        return
-      }
+    // 节目窗：导出外观；优先 RAM 缓存
+    if (isProgram && !transformOverrides) {
       const hit = getCachedFrame(ram, frame)
       if (hit) {
         blitCachedFrame(canvas, hit, w, h)
         return
       }
-      renderAndCacheFrame(ram, frame, fps, canvas, seq, media, settings, imgCache.current, w, h)
-      return
-    }
-
-    // scrub / 暂停：只走 Canvas2D（compose 升级会异步盖黑）
-    if (scrubbing && !transformOverrides) {
+      if (opts?.playing) {
+        renderAndCacheFrame(ram, frame, fps, canvas, seq, media, settings, imgCache.current, w, h)
+        return
+      }
       renderProgramFrame(
         canvas, seq, media, settings, t, imgCache.current, w, h,
-        st.selectedClipIds, undefined, scrubbing && st.autoKeyframe, opts?.guides,
+        [], undefined, false, undefined, true,
       )
+      putCachedFrame(ram, frame, canvas, frame)
       return
     }
 
+    // 编辑窗：选中框 / K帧路径 / 可拖
+    const showKf = isEdit && st.autoKeyframe
     renderProgramFrame(
       canvas, seq, media, settings, t, imgCache.current, w, h,
-      scrubbing ? st.selectedClipIds : [],
+      isEdit ? st.selectedClipIds : [],
       transformOverrides,
-      scrubbing && st.autoKeyframe,
+      showKf,
       opts?.guides,
+      false,
     )
-  }, [mode, media, settings, sourceMediaId, sourceIn, sourceOut, preview.w, preview.h, imgCache, imgVersion, selectedClipIds, autoKeyframe])
+  }, [mode, isProgram, isEdit, media, settings, sourceMediaId, sourceIn, sourceOut, preview.w, preview.h, imgCache, imgVersion, selectedClipIds, autoKeyframe])
 
   useEffect(() => {
     if (use3d) return
-    if (mode === 'program' && playing) return
+    if (isSeq && playing) return
     if (dragRef.current) return
     // 仅当 store.playhead 本身变化时同步 live；勿在媒体缓存 bump 时把 live 拽回旧时间
     localPlayhead.current = playhead
     setLivePlayhead(playhead)
     paint(playhead)
-  }, [playhead, playing, mode, use3d]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [playhead, playing, mode, use3d, isSeq]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // 素材/选中/序列变化：按当前 live 重画，不改播放头
   useEffect(() => {
     if (use3d) return
-    if (mode === 'program' && playing) return
+    if (isSeq && playing) return
     if (dragRef.current) return
     paint(getLivePlayhead())
-  }, [paint, selectedClipIds, sequences, activeSeqId, autoKeyframe, use3d, mode, playing])
+  }, [paint, selectedClipIds, sequences, activeSeqId, autoKeyframe, use3d, mode, playing, isSeq])
 
-  // 拖 scrub / 跨窗 seek：跟 live 即时画
+  // 跟 live：非驱动钟的编辑窗在双窗播放时也要画；驱动钟自己在 tick 里画
   useEffect(() => {
-    if (use3d || mode !== 'program' || playing) return
+    if (use3d || !isSeq) return
+    if (drivesClock && playing) return
     return subscribeLivePlayhead(() => {
       if (dragRef.current) return
       const t = getLivePlayhead()
@@ -257,10 +258,11 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program';
       localPlayhead.current = t
       paint(t)
     })
-  }, [use3d, mode, playing, paint])
+  }, [use3d, isSeq, playing, paint, drivesClock])
 
+  // 墙钟播放环：仅 drivesClock 的窗负责推进 + 音频
   useEffect(() => {
-    if (use3d || mode !== 'program' || !playing) return
+    if (use3d || !drivesClock || !playing) return
     cancelComposeUpgrade()
     void stopNativePlaySession()
     setVideoSeekQuiet(true)
@@ -299,7 +301,6 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program';
       }
 
       const end = seqEnd(seq)
-      // ④ 主钟 = 墙钟量化后的 absT；不挂音频，单层解码慢也不堵播放头
       let t = quantizeAbsT(tStart + (now - wall0) / 1000, fps)
       if (t >= end) {
         if (st.loop) {
@@ -322,24 +323,20 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program';
         return !!track && !track.hidden && track.kind !== 'audio'
       })
       localPlayhead.current = t
-      // 同一工程帧只通知一次 UI，避免 60Hz RAF 重复刷
       if (frame !== lastShown) setLivePlayhead(t)
       if (frame % 2 === 0) broadcastLivePlayhead(t)
 
-      // 无片段：强制合成空画面，绝不复用上一时刻缓存
       if (!hasVisibleClip) {
         lastShown = frame
         renderProgramFrame(
           canvas, seq, media, settings, t, imgCache.current, preview.w, preview.h,
-          [], undefined, false,
+          [], undefined, false, undefined, isProgram,
         )
         syncProgramAudio(seq, media, t, true, fps)
         raf = requestAnimationFrame(tick)
         return
       }
 
-      // 有视频：每层独立 HTMLVideo 采样 + Canvas 叠画（传统预览的浏览器近似）
-      // 引擎 compose 每帧 spawn 太慢，不能进播放环；代理由 FFmpeg 离线生成
       if (clipUsesVideo(seq, t)) {
         const videoClips = seq.clips.filter((c) => {
           if (!c.enabled || !c.mediaId || !videoIds.has(c.mediaId)) return false
@@ -354,22 +351,34 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program';
         }
         const perf = previewPerfForStack(st.prefs.performance, videoLayers)
         const size = getPreviewSize(settings, perf)
-        // 叠≥2：按工程帧画；单层可跟 RAF 以吃满 free-run 新帧
         const shouldPaint = videoLayers >= 2 ? frame !== lastShown : true
         if (shouldPaint) {
           lastShown = frame
-          renderProgramFrame(
-            canvas, seq, media, settings, t, imgCache.current, size.w, size.h,
-            [], undefined, false,
-          )
-          if (videoLayers <= 1 && frame % 8 === 0) {
+          // 节目窗：先查缓存；未命中再合成并写入（叠层也写，绿条才能续上）
+          if (isProgram) {
             const { w: cw, h: ch } = cachePixelSize(size.w, size.h, st.prefs.previewCacheMaxEdge ?? 720)
             if (seq !== lastSeq) {
               lastSeq = seq
               fp = previewFingerprint(seq, settings, cw, ch)
               ensurePreviewFingerprint(cache, fp, cw, ch)
             }
-            putCachedFrame(cache, frame, canvas, frame)
+            const hit = getCachedFrame(cache, frame)
+            if (hit) blitCachedFrame(canvas, hit, size.w, size.h)
+            else {
+              renderProgramFrame(
+                canvas, seq, media, settings, t, imgCache.current, size.w, size.h,
+                [], undefined, false, undefined, true,
+              )
+              // 叠层隔帧写，单层更勤
+              if (videoLayers <= 1 || frame % 2 === 0) {
+                putCachedFrame(cache, frame, canvas, frame)
+              }
+            }
+          } else {
+            renderProgramFrame(
+              canvas, seq, media, settings, t, imgCache.current, size.w, size.h,
+              [], undefined, false, undefined, false,
+            )
           }
           syncProgramAudio(seq, media, t, true, fps)
         }
@@ -405,22 +414,18 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program';
       cancelAnimationFrame(raf)
       void stopNativePlaySession()
       const current = useApp.getState().playhead
-      // 普通暂停时 store 仍停在播放起点，提交最后播放帧；
-      // 若 scrub/跨窗 seek 已写入新时间，不能再用旧播放循环覆盖。
       const endT = Math.abs(current - tStart) < 1e-4 ? localPlayhead.current : current
       if (Math.abs(current - tStart) < 1e-4) {
         useApp.setState({ playhead: endT })
       }
       setLivePlayhead(endT)
-      // 暂停后视频已 pause，下一 tick 强制 Canvas2D 重画，避免黑屏
       requestAnimationFrame(() => paint(endT))
     }
-    // 故意不把 paint/imgVersion 放进依赖：否则 seeked→bump 会拆掉播放循环，播放头回跳抽搐
-  }, [playing, mode, loop, activeSeqId, use3d, media, settings, preview.w, preview.h, imgCache])
+  }, [playing, drivesClock, loop, activeSeqId, use3d, media, settings, preview.w, preview.h, imgCache, isProgram, paint])
 
-  // 节目监视器：拖拽时本地绘制，松手再写 store（避免每帧重渲染时间线）
+  // 编辑窗：拖拽时本地绘制，松手再写 store
   useEffect(() => {
-    if (mode !== 'program') return
+    if (!isEdit) return
     let raf = 0
     let pending: Record<string, { x: number; y: number }> | null = null
     let pendingGuides: SnapGuide[] = []
@@ -440,7 +445,6 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program';
       const { nx, ny } = clientToNorm(canvas, e.clientX, e.clientY)
       let ddx = nx - d.startNx
       let ddy = ny - d.startNy
-      // Alt：轴向锁定；Shift：智能标尺吸附（二者可并存：先轴向再吸附）
       if (e.altKey || (d.axis !== 'free' && !e.shiftKey)) {
         if (d.axis === 'free') d.axis = Math.abs(ddx) >= Math.abs(ddy) ? 'x' : 'y'
         if (d.axis === 'x') ddy = 0
@@ -505,7 +509,7 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program';
 
       const st = useApp.getState()
       const seq = st.sequences.find((q) => q.id === st.activeSeqId) ?? st.sequences[0]
-      const playhead = localPlayhead.current
+      const ph = localPlayhead.current
       const primaryId = d.ids[0]
       const primary = seq.clips.find((c) => c.id === primaryId)
       let guides: SnapGuide[] = []
@@ -513,12 +517,12 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program';
       if (e.shiftKey && primary) {
         let px = (d.origin[primaryId]?.x ?? 0) + ddx
         let py = (d.origin[primaryId]?.y ?? 0) + ddy
-        const moving = clipHalfNorm(primary, playhead, { x: px, y: py })
+        const moving = clipHalfNorm(primary, ph, { x: px, y: py })
         const idSet = new Set(d.ids)
         const others = seq.clips
           .filter((c) => !idSet.has(c.id) && c.enabled
-            && playhead >= c.start && playhead < c.start + c.duration)
-          .map((c) => clipHalfNorm(c, playhead))
+            && ph >= c.start && ph < c.start + c.duration)
+          .map((c) => clipHalfNorm(c, ph))
         const sn = snapWithGuides(px, py, moving, others, { showFrameGrid: true })
         ddx = sn.x - (d.origin[primaryId]?.x ?? 0)
         ddy = sn.y - (d.origin[primaryId]?.y ?? 0)
@@ -560,7 +564,7 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program';
       if (d?.moved && overrides) {
         const idSet = new Set(d.ids)
         const st = useApp.getState()
-        const playhead = st.playhead
+        const ph = st.playhead
         const forceKf = st.autoKeyframe
         useApp.setState((s) => {
           const seq = s.sequences.find((q) => q.id === s.activeSeqId) ?? s.sequences[0]
@@ -573,7 +577,7 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program';
                   if (!idSet.has(c.id)) return c
                   const o = overrides[c.id]
                   if (!o) return c
-                  return patchClipXY(c, playhead, o.x, o.y, { forceKf })
+                  return patchClipXY(c, ph, o.x, o.y, { forceKf })
                 }),
               }
             }),
@@ -590,17 +594,17 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program';
       window.removeEventListener('pointerup', onUp)
       if (raf) cancelAnimationFrame(raf)
     }
-  }, [mode, paint])
+  }, [isEdit, paint])
 
   function onCanvasPointerDown(e: React.PointerEvent<HTMLCanvasElement>) {
-    if (mode !== 'program' || e.button !== 0) return
+    // 节目窗禁止点选/拖动元素
+    if (!isEdit || e.button !== 0) return
     const canvas = canvasRef.current
     if (!canvas) return
     const st = useApp.getState()
     const seq = st.sequences.find((q) => q.id === st.activeSeqId) ?? st.sequences[0]
     const { nx, ny } = clientToNorm(canvas, e.clientX, e.clientY)
 
-    // 优先命中选中片段的运动路径关键帧点
     for (const id of st.selectedClipIds) {
       const clip = seq.clips.find((c) => c.id === id)
       if (!clip) continue
@@ -651,14 +655,19 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program';
     canvas.setPointerCapture(e.pointerId)
   }
 
+  const title =
+    mode === 'source' ? '源监视器'
+      : mode === 'edit' ? '编辑窗'
+        : '节目窗'
+
   return (
     <section className="panel panel-ink h-full min-h-0" data-testid={`${mode}-monitor`}>
       <div className={clsx('flex items-center justify-between border-b shrink-0', compact ? 'px-2 py-0.5' : 'px-3 py-1')} style={{ borderColor: 'var(--border-ink)' }}>
         <div className="flex items-center gap-2 min-w-0">
           <span className="eyebrow shrink-0" style={{ color: 'var(--text-on-ink-muted)', fontSize: compact ? 9 : undefined }}>
-            {mode === 'source' ? '源监视器' : '节目监视器'}
+            {title}
           </span>
-          {mode === 'program' && !compact && selectedClipIds.length > 0 && (
+          {isEdit && !compact && selectedClipIds.length > 0 && (
             <span
               className="text-[10px] tabular-nums truncate"
               style={{ color: autoKeyframe ? 'var(--accent)' : 'var(--text-on-ink-muted)' }}
@@ -668,8 +677,13 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program';
               {autoKeyframe ? 'K帧 · S缩放 · T透明' : '1 静态 · 2 K帧 · 3 转场'}
             </span>
           )}
+          {isProgram && !compact && (
+            <span className="text-[10px] truncate" style={{ color: 'var(--text-on-ink-muted)' }} title="与导出同一合成结果，不可拖元素">
+              导出外观
+            </span>
+          )}
         </div>
-        {mode === 'program' && !compact && (
+        {isEdit && !compact && (
           <div className="flex items-center gap-0.5 shrink-0">
             <button
               className={clsx('icon-btn', monitorCompose === '2d' && 'active')}
@@ -695,7 +709,7 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program';
               className={clsx('icon-btn', settings.safeFrame && 'active')}
               style={{ width: 26, height: 26, color: 'var(--text-on-ink)' }}
               data-testid="btn-safe-frame"
-              title="安全框"
+              title="安全框（仅编辑窗）"
               aria-label="安全框"
               onClick={() => updateSettings({ safeFrame: !settings.safeFrame })}
             >
@@ -714,13 +728,24 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program';
             )}
           </div>
         )}
+        {isProgram && !compact && viewDirty && (
+          <button
+            className="icon-btn text-[10px] tabular-nums"
+            style={{ width: 'auto', minWidth: 26, height: 26, padding: '0 6px', color: 'var(--text-on-ink)' }}
+            data-testid="btn-monitor-zoom-reset"
+            title="重置视口缩放/平移"
+            onClick={resetView}
+          >
+            {Math.round(viewZoom * 100)}%
+          </button>
+        )}
       </div>
 
       <div
         ref={viewportRef}
         className="relative flex-1 min-h-0 w-full overflow-hidden bg-black"
-        data-testid={mode === 'program' ? 'program-viewport' : 'source-viewport'}
-        title={mode === 'program' ? 'Ctrl+滚轮缩放 · 中键拖移视口' : undefined}
+        data-testid={mode === 'source' ? 'source-viewport' : isEdit ? 'edit-viewport' : 'program-viewport'}
+        title={isSeq ? 'Ctrl+滚轮缩放 · 中键拖移视口' : undefined}
         onPointerDown={onViewportPointerDown}
       >
         {use3d ? (
@@ -733,8 +758,8 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program';
         ) : (
           <canvas
             ref={canvasRef}
-            id={mode === 'program' ? 'program-canvas' : 'source-canvas'}
-            data-testid={mode === 'program' ? 'program-canvas' : 'source-canvas'}
+            id={isProgram ? 'program-canvas' : isEdit ? 'edit-canvas' : 'source-canvas'}
+            data-testid={isProgram ? 'program-canvas' : isEdit ? 'edit-canvas' : 'source-canvas'}
             width={preview.w}
             height={preview.h}
             className="absolute inset-0"
@@ -744,7 +769,7 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program';
               objectFit: 'contain',
               transform: viewTransform,
               transformOrigin: 'center center',
-              cursor: mode === 'program' ? 'move' : 'default',
+              cursor: isEdit ? 'move' : 'default',
               touchAction: 'none',
               background: '#000',
             }}

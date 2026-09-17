@@ -535,7 +535,8 @@ export type AppStore = {
     dockH: number
     panelDock: { media: 'left' | 'right' | 'bottom'; ai: 'left' | 'right' | 'bottom' | 'tab' }
   }
-  monitorView: 'program' | 'dual' | 'source'
+  /** dual = 编辑窗 | 节目窗；program/edit/source 为单窗 */
+  monitorView: 'program' | 'edit' | 'dual' | 'source'
   /** 节目监视器合成模式：2D Canvas 或 3D WebGL */
   monitorCompose: '2d' | '3d'
   /** K帧模式：拖位置自动在播放头打点，并显示运动路径 */
@@ -963,7 +964,7 @@ export const useApp = create<AppStore>((set, get) => {
     modal: null,
     layout: initialLayout,
     timelineZoom: 80,
-    monitorView: 'program',
+    monitorView: 'dual',
     monitorCompose: '2d',
     autoKeyframe: false,
 

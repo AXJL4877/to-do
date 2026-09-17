@@ -217,7 +217,7 @@ export function renderAndCacheFrame(
   const cw = cache.cacheW || displayW
   const ch = cache.cacheH || displayH
   // 先画到目标尺寸，再缩进缓存
-  renderProgramFrame(dest, seq, media, settings, t, imgCache, displayW, displayH, [], undefined, false)
+  renderProgramFrame(dest, seq, media, settings, t, imgCache, displayW, displayH, [], undefined, false, undefined, true)
   putCachedFrame(cache, frame, dest, frame)
   // put 里按 cache 尺寸重绘；若 display≠cache，再 blit 回去
   const stored = cache.frames.get(frame)

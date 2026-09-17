@@ -110,6 +110,8 @@ export function renderProgramFrame(
   transformOverrides?: Record<string, { x: number; y: number }>,
   showMotionPath = false,
   snapGuides?: SnapGuide[],
+  /** true：与导出一致，不画选中框/K帧路径/安全框等编辑装饰 */
+  exportLook = false,
 ) {
   const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true } as CanvasRenderingContext2DSettings)
     ?? canvas.getContext('2d')
@@ -154,22 +156,30 @@ export function renderProgramFrame(
     drawClip(ctx, clip, media, w, h, sx, sy, cache, playhead, ov, settings.fps, true, true, false)
   }
 
-  // 选中框（与画面同一套 transform 计算）
-  for (const clip of visible) {
-    if (!selectedIds.includes(clip.id)) continue
-    const ov = transformOverrides?.[clip.id]
-    drawSelection(ctx, clip, w, h, playhead, ov)
-  }
-
-  // K帧模式：运动路径（点 + 线）
-  if (showMotionPath) {
-    for (const clip of seq.clips) {
+  if (!exportLook) {
+    // 选中框（与画面同一套 transform 计算）
+    for (const clip of visible) {
       if (!selectedIds.includes(clip.id)) continue
-      drawMotionPath(ctx, clip, w, h)
+      const ov = transformOverrides?.[clip.id]
+      drawSelection(ctx, clip, w, h, playhead, ov)
+    }
+
+    // K帧模式：运动路径（点 + 线）
+    if (showMotionPath) {
+      for (const clip of seq.clips) {
+        if (!selectedIds.includes(clip.id)) continue
+        drawMotionPath(ctx, clip, w, h)
+      }
+    }
+
+    if (snapGuides?.length) drawSnapGuides(ctx, w, h, snapGuides)
+
+    if (settings.safeFrame) {
+      ctx.strokeStyle = 'rgba(255,220,100,0.4)'
+      ctx.lineWidth = 2
+      ctx.strokeRect(w * 0.05, h * 0.05, w * 0.9, h * 0.9)
     }
   }
-
-  if (snapGuides?.length) drawSnapGuides(ctx, w, h, snapGuides)
 
   // 无片段时给出可辨识的空态，避免「黑屏像坏了」
   if (visible.length === 0) {
@@ -178,12 +188,6 @@ export function renderProgramFrame(
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
     ctx.fillText('时间线此处无画面', w / 2, h / 2)
-  }
-
-  if (settings.safeFrame) {
-    ctx.strokeStyle = 'rgba(255,220,100,0.4)'
-    ctx.lineWidth = 2
-    ctx.strokeRect(w * 0.05, h * 0.05, w * 0.9, h * 0.9)
   }
 }
 
