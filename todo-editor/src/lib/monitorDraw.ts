@@ -2,7 +2,8 @@ import type { Clip, MediaItem, ProjectSettings, Sequence, Track } from '../types
 import { blendToComposite, clipCanvasFilter } from './clipFilters'
 import { sampleKeyframes, resolveClipTransform, effectiveTransform } from './keyframeEval'
 import type { SnapGuide } from './monitorSnap'
-import { videoFrameAt } from './videoCache'
+import { pauseUnusedVideoSlots, videoFrameAt } from './videoCache'
+import { mediaTimeAt, pictureClipsAt } from './programPlayer'
 
 export type ImageCache = Map<string, HTMLImageElement>
 export type { SnapGuide } from './monitorSnap'
@@ -24,12 +25,62 @@ export function sortClipsByStack(clips: Clip[], tracks: Track[]): Clip[] {
   return [...clips].sort((a, b) => clipStackRank(a, tracks) - clipStackRank(b, tracks))
 }
 
+/** 叠 N 轨时强制降预览分辨率 */
+export function previewPerfForStack(
+  base: 'quality' | 'balanced' | 'speed',
+  videoLayers: number,
+): 'quality' | 'balanced' | 'speed' {
+  if (videoLayers >= 3) return 'speed'
+  if (videoLayers >= 2) return 'balanced'
+  return base
+}
+
 export function getPreviewSize(settings: ProjectSettings, perf: 'quality' | 'balanced' | 'speed') {
-  const scale = perf === 'speed' ? 0.5 : perf === 'balanced' ? 0.66 : 1
+  // 叠层预览故意压分辨率；speed ≈ 360p 级，别按工程 4K 画
+  const scale = perf === 'speed' ? 0.28 : perf === 'balanced' ? 0.5 : 1
   return {
     w: Math.max(320, Math.round(settings.width * scale)),
     h: Math.max(180, Math.round(settings.height * scale)),
   }
+}
+
+function isVideoClip(clip: Clip, media: MediaItem[]): boolean {
+  const m = media.find((x) => x.id === clip.mediaId)
+  return !!m && m.kind === 'video'
+}
+
+/** 近似铺满且不透明：可挡住下层，下层不必解码/绘制 */
+function isOpaqueFullscreenCover(clip: Clip, playhead: number): boolean {
+  if (clip.text) return false
+  const tr = effectiveTransform(clip, playhead)
+  if (tr.opacity < 0.98) return false
+  if (clip.blend && clip.blend !== 'normal') return false
+  if (Math.abs(tr.scaleX) < 0.98 || Math.abs(tr.scaleY) < 0.98) return false
+  if (Math.abs(tr.x) > 0.05 || Math.abs(tr.y) > 0.05) return false
+  if (tr.cropL + tr.cropR + tr.cropT + tr.cropB > 0.04) return false
+  return true
+}
+
+/** 被上层遮挡时仍推进该层解码（超时用上一帧）；声不在这里出 */
+function keepVideoAudible(
+  clip: Clip,
+  media: MediaItem[],
+  playhead: number,
+  fps: number,
+  _trackMuted: boolean,
+  live: boolean,
+) {
+  const m = media.find((x) => x.id === clip.mediaId)
+  if (!m || m.kind !== 'video') return
+  const mediaT = mediaTimeAt(clip, playhead, fps)
+  const srcDur = m.duration > 0 ? m.duration : Infinity
+  if (!(mediaT >= 0 && mediaT < srcDur - 1e-3 && mediaT <= clip.outPoint + 1e-4)) return
+  videoFrameAt(m, mediaT, fps, clip.id, {
+    speed: Math.max(0.05, clip.speed || 1),
+    volume: 0,
+    reverse: !!clip.reverse,
+    live: true,
+  })
 }
 
 function drawContain(ctx: CanvasRenderingContext2D, img: CanvasImageSource, fw: number, fh: number, iw: number, ih: number) {
@@ -60,7 +111,8 @@ export function renderProgramFrame(
   showMotionPath = false,
   snapGuides?: SnapGuide[],
 ) {
-  const ctx = canvas.getContext('2d')
+  const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true } as CanvasRenderingContext2DSettings)
+    ?? canvas.getContext('2d')
   if (!ctx) return
   const w = rw ?? settings.width
   const h = rh ?? settings.height
@@ -72,27 +124,34 @@ export function renderProgramFrame(
   ctx.fillStyle = settings.canvasBg === 'color' ? settings.canvasColor : '#0b0d10'
   ctx.fillRect(0, 0, w, h)
 
-  // 下层先画、上层后画：时间轴越靠上（列表越前）越后画
-  const visible = sortClipsByStack(
-    seq.clips.filter((c) => {
-      if (!c.enabled) return false
-      if (playhead < c.start || playhead >= c.start + c.duration) return false
-      const tr = seq.tracks.find((t) => t.id === c.trackId)
-      if (!tr || tr.hidden) return false
-      // 音轨只出声，不进节目画面
-      if (tr.kind === 'audio') return false
-      return true
-    }),
-    seq.tracks,
-  )
+  // ① 调度：T 下全部 active 画面层；z-order 从下到上全合成（不 break、不只取一层）
+  const visible = sortClipsByStack(pictureClipsAt(seq, playhead), seq.tracks)
+
+  const videoLayers = visible.filter((c) => isVideoClip(c, media))
+  // 上层不透明铺满时可跳过下层绘制，但解码槽仍推进（超时用上一帧）
+  const skipDraw = new Set<string>()
+  let covered = false
+  for (let i = visible.length - 1; i >= 0; i--) {
+    const c = visible[i]
+    if (!isVideoClip(c, media)) continue
+    if (covered) skipDraw.add(c.id)
+    else if (isOpaqueFullscreenCover(c, playhead)) covered = true
+  }
+  // ② 每活跃视频 clip 独立 HTMLVideo 槽；未活跃的暂停释放
+  const liveIds = new Set(videoLayers.map((c) => c.id))
+  pauseUnusedVideoSlots(liveIds)
 
   const sx = w / settings.width
   const sy = h / settings.height
 
   for (const clip of visible) {
     const ov = transformOverrides?.[clip.id]
-    const trk = seq.tracks.find((x) => x.id === clip.trackId)
-    drawClip(ctx, clip, media, w, h, sx, sy, cache, playhead, ov, settings.fps, !!trk?.muted)
+    // 声一律走混音器；这里 volume=0，只采样画面
+    if (skipDraw.has(clip.id)) {
+      keepVideoAudible(clip, media, playhead, settings.fps, true, true)
+      continue
+    }
+    drawClip(ctx, clip, media, w, h, sx, sy, cache, playhead, ov, settings.fps, true, true, false)
   }
 
   // 选中框（与画面同一套 transform 计算）
@@ -357,6 +416,8 @@ function drawClip(
   xyOverride?: { x: number; y: number },
   fps = 30,
   trackMuted = false,
+  live = true,
+  audible = true,
 ) {
   const tr = effectiveTransform(clip, playhead, xyOverride)
   ctx.save()
@@ -389,20 +450,22 @@ function drawClip(
         drawMediaPlaceholder(ctx, clip.name, w, h, sy)
       }
     } else if (m && m.kind === 'video') {
-      const localT = Math.max(0, playhead - clip.start)
       const speed = Math.max(0.05, clip.speed || 1)
-      const mediaT = clip.reverse
-        ? Math.max(0, clip.outPoint - localT * speed)
-        : clip.inPoint + localT * speed
+      const mediaT = mediaTimeAt(clip, playhead, fps)
       // 勿把源时间 clamp 到片尾：超出素材时长应空，否则像「过了还有画面」
       const srcDur = m.duration > 0 ? m.duration : Infinity
       const inSrc = mediaT >= 0 && mediaT < srcDur - 1e-3
         && mediaT <= clip.outPoint + 1e-4
-      const vol = trackMuted || clip.audio.mute
+      const vol = !audible || trackMuted || clip.audio.mute
         ? 0
         : Math.max(0, Math.min(1, Math.pow(10, (clip.audio.gainDb || 0) / 20)))
       const frame = inSrc
-        ? videoFrameAt(m, mediaT, fps, clip.id, { speed, volume: vol, reverse: !!clip.reverse })
+        ? videoFrameAt(m, mediaT, fps, clip.id, {
+          speed,
+          volume: vol,
+          reverse: !!clip.reverse,
+          live,
+        })
         : null
       if (frame) {
         const iw = (frame as HTMLVideoElement).videoWidth

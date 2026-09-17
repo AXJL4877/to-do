@@ -10,7 +10,7 @@ import { ensureScene3d } from './lib/scene3d'
 import { desktop } from './lib/desktop'
 import { aiFetch } from './lib/aiFetch'
 import { setLivePlayhead } from './lib/livePlayhead'
-import { reviveMediaList, parseDesktopMedia } from './lib/importFiles'
+import { reviveMediaList, parseDesktopMedia, pathToFileUrl } from './lib/importFiles'
 import { buildEditGraph } from './lib/editGraph'
 
 function sampleAt(c: Clip, prop: string, localT: number): number {
@@ -576,6 +576,8 @@ export type AppStore = {
   setMediaProxyPath: (id: string, proxyPath: string | undefined) => void
   /** 桌面：对 media.path 生成代理；成功写 proxyPath */
   makeMediaProxy: (id: string, height?: 480 | 720) => Promise<boolean>
+  /** 叠层播放：缺代理的视频后台补 480p */
+  ensureStackProxies: (mediaIds: string[]) => void
   setSelectedMedia: (id: string | null) => void
   captureFrame: () => void
   setAiRef: (dataUrl: string | null) => void
@@ -1262,26 +1264,43 @@ export const useApp = create<AppStore>((set, get) => {
       notify('素材已重新链接')
     },
     setMediaProxyPath(id, proxyPath) {
+      const proxyUrl = proxyPath
+        ? (proxyPath.startsWith('file:') ? proxyPath : pathToFileUrl(proxyPath))
+        : undefined
       set({
-        media: get().media.map((m) => (m.id === id ? { ...m, proxyPath } : m)),
+        media: get().media.map((m) => (m.id === id ? { ...m, proxyPath, proxyUrl } : m)),
       })
     },
     async makeMediaProxy(id, height = 720) {
       const api = desktop()
       const m = get().media.find((x) => x.id === id)
       if (!api?.makeProxy || !m?.path) {
-        notify('无法生成代理（需桌面版与本地路径）')
+        if (height !== 480) notify('无法生成代理（需桌面版与本地路径）')
         return false
       }
       const r = await api.makeProxy(m.path, height)
       if (!r.ok || !r.proxyPath) {
-        notify(`代理失败: ${r.error || 'unknown'}`)
+        if (height !== 480) notify(`代理失败: ${r.error || 'unknown'}`)
         return false
       }
       get().setMediaProxyPath(id, r.proxyPath)
-      notify(r.cached ? '已使用缓存代理' : '代理已生成')
+      // 叠层补代理时不要弹 toast 刷屏
+      if (height !== 480) {
+        notify(r.cached ? '已使用缓存代理' : '代理已生成')
+      }
       queueMicrotask(() => get().saveProject({ silent: true }))
       return true
+    },
+    /** 叠层播放前：缺代理的视频后台生成 480p，不挡播 */
+    ensureStackProxies(mediaIds: string[]) {
+      const api = desktop()
+      if (!api?.makeProxy) return
+      for (const id of mediaIds) {
+        const m = get().media.find((x) => x.id === id)
+        if (!m?.path || m.kind !== 'video') continue
+        if (m.proxyPath || m.proxyUrl) continue
+        void get().makeMediaProxy(id, 480)
+      }
     },
     setSelectedMedia(id) {
       const m = get().media.find((x) => x.id === id)
@@ -1524,6 +1543,10 @@ export const useApp = create<AppStore>((set, get) => {
         selectedClipIds: [clip.id, ...extra.map((e) => e.id)],
         sourceMediaId: mediaId,
       })
+      // 上时间轴即配代理，节目窗只采代理
+      if (media.kind === 'video') {
+        get().ensureStackProxies([mediaId])
+      }
     },
 
     /** 给已在时间线上的视频补链接音轨 */
@@ -1643,10 +1666,8 @@ export const useApp = create<AppStore>((set, get) => {
     },
 
     trackAtY(contentY) {
-      // bodyRef 内容坐标：顶部 CAM 占 22px，不接素材
-      const CAM_H = 22
-      if (contentY < CAM_H) return null
-      let acc = CAM_H
+      // bodyRef 内容坐标：从第一条业务轨道起算
+      let acc = 0
       for (const tr of get().seq().tracks) {
         if (contentY >= acc && contentY < acc + tr.height) return tr.id
         acc += tr.height

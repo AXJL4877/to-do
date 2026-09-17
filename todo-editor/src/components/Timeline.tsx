@@ -140,10 +140,9 @@ export function Timeline({
   // 轨区高度 = 真实轨道总和，不留空白假轨道
   // 弹出窗：不吃主窗 timelineH 上限；主窗：轨道变多时自动抬高面板（有屏幕上限），超出才内滚
   const RULER_H = 28
-  const CAM_H = 22
   const CHROME_H = 58 // 工具条 + 底栏时间码
   const tracksSum = useMemo(() => seq.tracks.reduce((a, t) => a + t.height, 0), [seq.tracks])
-  const lanesNatural = RULER_H + CAM_H + tracksSum
+  const lanesNatural = RULER_H + tracksSum
   const dockMaxH = typeof window !== 'undefined'
     ? Math.max(280, Math.floor(window.innerHeight * 0.72))
     : 720
@@ -415,7 +414,7 @@ export function Timeline({
         const bottom = Math.max(y0, y1)
         const cur = st.sequences.find((s) => s.id === st.activeSeqId) ?? st.sequences[0]
         const hits: string[] = []
-        let y = 22
+        let y = 0
         for (const track of cur.tracks) {
           for (const clip of cur.clips.filter((c) => c.trackId === track.id)) {
             const cx0 = clip.start * pxPerSec
@@ -837,15 +836,6 @@ export function Timeline({
           }}
         >
           <div className="sticky top-0 z-10 h-7 border-b shrink-0" style={{ borderColor: 'var(--border)', background: 'var(--surface-2)' }} />
-          <div
-            className="flex items-center gap-0.5 px-1 border-b cursor-pointer select-none"
-            style={{ height: 22, borderColor: 'var(--border)', background: monitorCompose === '3d' ? 'var(--accent-dim)' : undefined }}
-            data-testid="track-header-camera"
-            onClick={() => { setPropTab('scene3d'); setMonitorCompose('3d') }}
-            title="虚拟相机"
-          >
-            <span className="text-[10px] font-medium w-full truncate select-none pointer-events-none">CAM</span>
-          </div>
           {seq.tracks.map((t) => (
             <div
               key={t.id}
@@ -941,23 +931,6 @@ export function Timeline({
           </div>
 
           <div ref={bodyRef} className="relative" style={{ width: lanePx }} onPointerDown={onBodyPointerDown} data-testid="timeline-tracks">
-            <div
-              className="relative border-b"
-              style={{ height: 22, borderColor: 'var(--border)', background: 'hsl(18 40% 50% / 0.08)' }}
-              data-testid="track-row-camera"
-              onClick={() => { setPropTab('scene3d'); setMonitorCompose('3d') }}
-            >
-              {Object.entries(seq.scene3d?.camera?.keyframes ?? {}).flatMap(([prop, kfs]) =>
-                (kfs ?? []).map((k) => (
-                  <span
-                    key={`${prop}-${k.id}`}
-                    className="absolute top-1/2 -translate-y-1/2 w-2 h-2 rotate-45"
-                    style={{ left: xAt(k.t) - 4, background: 'var(--accent)' }}
-                    title={`${prop} @ ${k.t.toFixed(2)}s`}
-                  />
-                )),
-              )}
-            </div>
             {seq.tracks.map((track) => (
               <div
                 key={track.id}

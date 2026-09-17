@@ -2,8 +2,9 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { Play, Pause, SkipBack, SkipForward, Repeat, Camera } from 'lucide-react'
 import { useApp, formatTime } from '../store'
 import { resolveClipTransform, patchClipXY } from '../lib/keyframeEval'
-import { getPreviewSize, hitTestMotionPathKf, hitTestProgramClips, renderProgramFrame, renderSourceFrame } from '../lib/monitorDraw'
+import { getPreviewSize, hitTestMotionPathKf, hitTestProgramClips, previewPerfForStack, renderProgramFrame, renderSourceFrame } from '../lib/monitorDraw'
 import { cancelComposeUpgrade } from '../lib/composePreview'
+import { quantizeAbsT } from '../lib/programPlayer'
 import { clipHalfNorm, snapWithGuides, type SnapGuide } from '../lib/monitorSnap'
 import {
   blitCachedFrame,
@@ -271,6 +272,7 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program';
     let lastShown = -1
     let lastSeq: typeof st0.sequences[0] | null = null
     let fp = ''
+    let proxiesKicked = false
     const cache = getProgramPreviewCache()
     notifiedCache.current = ''
     localPlayhead.current = tStart
@@ -297,7 +299,8 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program';
       }
 
       const end = seqEnd(seq)
-      let t = tStart + (now - wall0) / 1000
+      // ④ 主钟 = 墙钟量化后的 absT；不挂音频，单层解码慢也不堵播放头
+      let t = quantizeAbsT(tStart + (now - wall0) / 1000, fps)
       if (t >= end) {
         if (st.loop) {
           const span = Math.max(0.05, end - seq.workIn)
@@ -319,7 +322,8 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program';
         return !!track && !track.hidden && track.kind !== 'audio'
       })
       localPlayhead.current = t
-      setLivePlayhead(t)
+      // 同一工程帧只通知一次 UI，避免 60Hz RAF 重复刷
+      if (frame !== lastShown) setLivePlayhead(t)
       if (frame % 2 === 0) broadcastLivePlayhead(t)
 
       // 无片段：强制合成空画面，绝不复用上一时刻缓存
@@ -329,29 +333,46 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program';
           canvas, seq, media, settings, t, imgCache.current, preview.w, preview.h,
           [], undefined, false,
         )
-        syncProgramAudio(seq, media, t, true)
+        syncProgramAudio(seq, media, t, true, fps)
         raf = requestAnimationFrame(tick)
         return
       }
 
-      // 有视频：HTMLVideo + Canvas2D 跟手；勿每帧 pump 原生 BMP / WebGL 上传
+      // 有视频：每层独立 HTMLVideo 采样 + Canvas 叠画（传统预览的浏览器近似）
+      // 引擎 compose 每帧 spawn 太慢，不能进播放环；代理由 FFmpeg 离线生成
       if (clipUsesVideo(seq, t)) {
-        lastShown = frame
-        renderProgramFrame(
-          canvas, seq, media, settings, t, imgCache.current, preview.w, preview.h,
-          [], undefined, false,
-        )
-        // 每 4 帧写一次 RAM；时间线条合并空隙仍显示实心绿
-        if (frame % 4 === 0) {
-          const { w: cw, h: ch } = cachePixelSize(preview.w, preview.h, st.prefs.previewCacheMaxEdge ?? 720)
-          if (seq !== lastSeq) {
-            lastSeq = seq
-            fp = previewFingerprint(seq, settings, cw, ch)
-            ensurePreviewFingerprint(cache, fp, cw, ch)
-          }
-          putCachedFrame(cache, frame, canvas, frame)
+        const videoClips = seq.clips.filter((c) => {
+          if (!c.enabled || !c.mediaId || !videoIds.has(c.mediaId)) return false
+          if (t < c.start || t >= c.start + c.duration) return false
+          const track = seq.tracks.find((tr) => tr.id === c.trackId)
+          return !!track && !track.hidden && track.kind !== 'audio'
+        })
+        const videoLayers = videoClips.length
+        if (!proxiesKicked) {
+          proxiesKicked = true
+          st.ensureStackProxies(videoClips.map((c) => c.mediaId!).filter(Boolean))
         }
-        syncProgramAudio(seq, media, t, true)
+        const perf = previewPerfForStack(st.prefs.performance, videoLayers)
+        const size = getPreviewSize(settings, perf)
+        // 叠≥2：按工程帧画；单层可跟 RAF 以吃满 free-run 新帧
+        const shouldPaint = videoLayers >= 2 ? frame !== lastShown : true
+        if (shouldPaint) {
+          lastShown = frame
+          renderProgramFrame(
+            canvas, seq, media, settings, t, imgCache.current, size.w, size.h,
+            [], undefined, false,
+          )
+          if (videoLayers <= 1 && frame % 8 === 0) {
+            const { w: cw, h: ch } = cachePixelSize(size.w, size.h, st.prefs.previewCacheMaxEdge ?? 720)
+            if (seq !== lastSeq) {
+              lastSeq = seq
+              fp = previewFingerprint(seq, settings, cw, ch)
+              ensurePreviewFingerprint(cache, fp, cw, ch)
+            }
+            putCachedFrame(cache, frame, canvas, frame)
+          }
+          syncProgramAudio(seq, media, t, true, fps)
+        }
         raf = requestAnimationFrame(tick)
         return
       }
@@ -372,7 +393,7 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program';
           )
         }
       }
-      syncProgramAudio(seq, media, t, true)
+      syncProgramAudio(seq, media, t, true, fps)
 
       raf = requestAnimationFrame(tick)
     }

@@ -1,19 +1,27 @@
+/**
+ * 音频混音：T 下全部活跃音源 → 各自 HTMLAudio → 浏览器混到一声卡。
+ * 不阻塞；主钟在 Monitor 墙钟，这里只跟采。
+ * 代理画面无声（-an）：声走原片 url；HTMLVideo 永不承担出声。
+ */
 import type { Clip, MediaItem, Sequence } from '../types'
-import { muteAllVideos } from './videoCache'
+import { muteAllVideos, pauseAllVideos } from './videoCache'
+import { mediaTimeAt, videoNeedsDirectAudio } from './programPlayer'
 
-/** 纯音轨才走 HTMLAudio；视频声跟该 clip 的 HTMLVideo，避免同一文件解两遍 */
-const audioOnly = new Map<string, HTMLAudioElement>()
+const mixSlots = new Map<string, HTMLAudioElement>()
+const followFrame = new Map<string, number>()
+let videosMutedOnce = false
 
 function ensureAudio(clipId: string, url: string): HTMLAudioElement {
-  let a = audioOnly.get(clipId)
+  let a = mixSlots.get(clipId)
   if (!a) {
     a = new Audio()
     a.preload = 'auto'
-    audioOnly.set(clipId, a)
+    mixSlots.set(clipId, a)
   }
   if (a.dataset.src !== url) {
     a.dataset.src = url
     a.src = url
+    followFrame.delete(clipId)
   }
   return a
 }
@@ -26,40 +34,70 @@ function inRange(c: Clip, t: number) {
   return t >= c.start && t < c.start + c.duration
 }
 
-/** 成片音已由对应视频元素在播，这条链接音轨不要再解一遍 */
-function videoAlreadySounds(seq: Sequence, clip: Clip, t: number) {
-  const partner = seq.clips.find((x) => x.id === clip.linkedId)
-    ?? seq.clips.find((x) => x.linkedId === clip.id && x.id !== clip.id)
-  if (!partner || !inRange(partner, t) || partner.audio.mute) return false
-  const tr = seq.tracks.find((x) => x.id === partner.trackId)
-  return !!tr && tr.kind === 'video' && !tr.muted && !tr.hidden
+type MixWant = {
+  clipId: string
+  url: string
+  mediaT: number
+  vol: number
+  speed: number
+  frame: number
 }
 
-function audibleAt(seq: Sequence, media: MediaItem[], t: number): { clipId: string; url: string; mediaT: number; vol: number; speed: number }[] {
+function audibleAt(seq: Sequence, media: MediaItem[], t: number, fps: number): MixWant[] {
   const byId = new Map(media.map((m) => [m.id, m]))
-  const out: { clipId: string; url: string; mediaT: number; vol: number; speed: number }[] = []
+  const out: MixWant[] = []
+  const step = 1 / Math.max(1, fps)
+  const seen = new Set<string>()
+
+  const push = (c: Clip, url: string) => {
+    if (seen.has(c.id)) return
+    seen.add(c.id)
+    const speed = Math.max(0.25, Math.min(4, c.speed || 1))
+    const mediaT = mediaTimeAt(c, t, fps)
+    out.push({
+      clipId: c.id,
+      url,
+      mediaT,
+      vol: gainToVolume(c.audio.gainDb),
+      speed,
+      frame: Math.round(mediaT / step),
+    })
+  }
 
   for (const c of seq.clips) {
     if (!c.enabled || !c.mediaId || c.audio.mute || !inRange(c, t)) continue
     const track = seq.tracks.find((tr) => tr.id === c.trackId)
     if (!track || track.kind !== 'audio' || track.muted) continue
-    if (videoAlreadySounds(seq, c, t)) continue
     const m = byId.get(c.mediaId)
     if (!m?.url || m.offline) continue
-    const speed = Math.max(0.25, Math.min(4, c.speed || 1))
-    const mediaT = Math.max(0, (t - c.start) * speed + c.inPoint)
-    out.push({ clipId: c.id, url: m.url, mediaT, vol: gainToVolume(c.audio.gainDb), speed })
+    push(c, m.url)
   }
+
+  for (const c of seq.clips) {
+    if (!videoNeedsDirectAudio(seq, c, t, media)) continue
+    const m = byId.get(c.mediaId!)
+    if (!m?.url) continue
+    push(c, m.url)
+  }
+
   return out
 }
 
-export function syncProgramAudio(seq: Sequence, media: MediaItem[], t: number, playing: boolean) {
-  const want = playing ? audibleAt(seq, media, t) : []
-  const wantIds = new Set(want.map((w) => w.clipId))
+export function syncProgramAudio(seq: Sequence, media: MediaItem[], t: number, playing: boolean, fps = 30) {
+  // 只静音一次；绝不能每帧 pause 视频槽
+  if (!videosMutedOnce) {
+    muteAllVideos()
+    videosMutedOnce = true
+  }
 
-  for (const [id, a] of audioOnly) {
+  const want = playing ? audibleAt(seq, media, t, fps) : []
+  const wantIds = new Set(want.map((w) => w.clipId))
+  const step = 1 / Math.max(1, fps)
+
+  for (const [id, a] of mixSlots) {
     if (!wantIds.has(id)) {
       try { a.pause() } catch { /* */ }
+      followFrame.delete(id)
     }
   }
 
@@ -67,16 +105,23 @@ export function syncProgramAudio(seq: Sequence, media: MediaItem[], t: number, p
     const a = ensureAudio(w.clipId, w.url)
     a.volume = w.vol
     try { a.playbackRate = w.speed } catch { /* */ }
-    if (Math.abs(a.currentTime - w.mediaT) > 0.25) {
-      try { a.currentTime = w.mediaT } catch { /* */ }
+    // 连续播；偏离 >4 帧才 seek（与视频同策略）
+    if (followFrame.get(w.clipId) !== w.frame && !a.seeking) {
+      followFrame.set(w.clipId, w.frame)
+      const drift = Math.abs(a.currentTime - w.mediaT)
+      if (drift > step * 4 || Number.isNaN(a.currentTime)) {
+        try { a.currentTime = w.mediaT } catch { /* */ }
+      }
     }
     if (a.paused) void a.play().catch(() => { /* */ })
   }
 }
 
 export function stopProgramAudio() {
-  for (const a of audioOnly.values()) {
+  videosMutedOnce = false
+  for (const a of mixSlots.values()) {
     try { a.pause() } catch { /* */ }
   }
-  muteAllVideos()
+  followFrame.clear()
+  pauseAllVideos()
 }

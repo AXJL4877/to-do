@@ -1,12 +1,15 @@
 import type { MediaItem } from '../types'
 import { desktop } from './desktop'
 import { clearNativePlayBridge } from './nativePlayBridge'
+import { pathToFileUrl } from './importFiles'
 
 type Slot = {
   v: HTMLVideoElement
   snap: HTMLCanvasElement | null
   settled: number | null
   pending: number | null
+  /** 已跟采的片内帧号；同帧不重复 seek，避免元素拖着打转 */
+  followFrame: number | null
 }
 
 const slots = new Map<string, Slot>()
@@ -14,13 +17,24 @@ const warmup = new Map<string, HTMLVideoElement>()
 const nativeSnaps = new Map<string, { t: number; canvas: HTMLCanvasElement }>()
 const nativePending = new Map<string, number>()
 let onReady: (() => void) | null = null
-/** 节目正在播：各层 HTMLVideo 由序列钟带速 play，只在漂了才 seek */
-let clockPlay = false
+/**
+ * 节目播放中：元素只跟播放头采样。
+ * 禁止用 v.currentTime 反推播放头；seek 只在播放头换帧时触发。
+ */
+let composePlay = false
 
 export type VideoFrameOpts = {
   speed?: number
   volume?: number
   reverse?: boolean
+  /** false：只要画面采样（可暂停）；true/默认：需要持续解码出声时保持 play */
+  live?: boolean
+}
+
+function playUrl(m: MediaItem): string | undefined {
+  if (m.proxyUrl) return m.proxyUrl
+  if (m.proxyPath) return pathToFileUrl(m.proxyPath)
+  return m.url
 }
 
 export function setVideoCacheListener(cb: (() => void) | null) {
@@ -30,9 +44,10 @@ export function setVideoCacheListener(cb: (() => void) | null) {
 export function beginVideoCompose(_priorityMediaIds: string[] = []) {}
 
 export function setVideoSeekQuiet(on: boolean) {
-  clockPlay = on
+  composePlay = on
   for (const s of slots.values()) {
     s.pending = null
+    s.followFrame = null
     try {
       s.v.pause()
       s.v.muted = true
@@ -40,17 +55,42 @@ export function setVideoSeekQuiet(on: boolean) {
   }
 }
 
+/** 只静音，不停播（播放循环里每帧 mute+pause 会把叠层卡死） */
 export function muteAllVideos() {
   for (const s of slots.values()) {
-    try { s.v.muted = true; s.v.pause() } catch { /* */ }
+    try {
+      s.v.muted = true
+      s.v.volume = 0
+    } catch { /* */ }
   }
   for (const v of warmup.values()) {
-    try { v.muted = true; v.pause() } catch { /* */ }
+    try {
+      v.muted = true
+      v.volume = 0
+    } catch { /* */ }
+  }
+}
+
+/** 停播并静音（真正停节目时用） */
+export function pauseAllVideos() {
+  for (const s of slots.values()) {
+    try {
+      s.v.muted = true
+      s.v.volume = 0
+      if (!s.v.paused) s.v.pause()
+    } catch { /* */ }
+  }
+  for (const v of warmup.values()) {
+    try {
+      v.muted = true
+      v.volume = 0
+      if (!v.paused) v.pause()
+    } catch { /* */ }
   }
 }
 
 function bump() {
-  if (!clockPlay) onReady?.()
+  if (!composePlay) onReady?.()
 }
 
 function makeVideo(onSeeked: (el: HTMLVideoElement) => void): HTMLVideoElement {
@@ -72,13 +112,22 @@ function capture(s: Slot): boolean {
     sheet = document.createElement('canvas')
     s.snap = sheet
   }
-  if (sheet.width !== v.videoWidth || sheet.height !== v.videoHeight) {
-    sheet.width = v.videoWidth
-    sheet.height = v.videoHeight
+  // still 缓存压到预览级，避免叠层时每层存一份 4K 位图
+  const maxEdge = 720
+  let dw = v.videoWidth
+  let dh = v.videoHeight
+  if (Math.max(dw, dh) > maxEdge) {
+    const sc = maxEdge / Math.max(dw, dh)
+    dw = Math.max(1, Math.round(dw * sc))
+    dh = Math.max(1, Math.round(dh * sc))
+  }
+  if (sheet.width !== dw || sheet.height !== dh) {
+    sheet.width = dw
+    sheet.height = dh
   }
   const ctx = sheet.getContext('2d')
   if (!ctx) return false
-  ctx.drawImage(v, 0, 0)
+  ctx.drawImage(v, 0, 0, dw, dh)
   return sheet.width > 0
 }
 
@@ -96,15 +145,17 @@ function slotOf(clipId: string, m: MediaItem): Slot {
       if (capture(cur)) cur.settled = want ?? el.currentTime
       cur.pending = null
       bump()
-    }), snap: null, settled: null, pending: null }
+    }), snap: null, settled: null, pending: null, followFrame: null }
     slots.set(clipId, s)
   }
-  if (s.v.dataset.src !== m.url) {
-    s.v.dataset.src = m.url
-    s.v.src = m.url
+  const src = playUrl(m)
+  if (src && s.v.dataset.src !== src) {
+    s.v.dataset.src = src
+    s.v.src = src
     s.snap = null
     s.settled = null
     s.pending = null
+    s.followFrame = null
   }
   return s
 }
@@ -118,48 +169,60 @@ export function ensureVideo(m: MediaItem): HTMLVideoElement {
     })
     warmup.set(m.id, v)
   }
-  if (v.dataset.src !== m.url) {
-    v.dataset.src = m.url
-    v.src = m.url
+  const src = playUrl(m)
+  if (src && v.dataset.src !== src) {
+    v.dataset.src = src
+    v.src = src
   }
   try { v.muted = true; v.pause() } catch { /* */ }
   return v
 }
 
 function htmlFrame(clipId: string, m: MediaItem, t: number, step: number, opts?: VideoFrameOpts): CanvasImageSource | null {
-  if (!m.url) return null
+  if (!playUrl(m)) return null
   const s = slotOf(clipId, m)
   const v = s.v
   if (v.error) return still(s)
 
   const q = Math.round(t / step) * step
+  const frame = Math.round(q / step)
 
-  // 播放：序列钟 → mediaT，各层自己 play，漂了才纠；画面画 live
-  if (clockPlay && !opts?.reverse) {
-    const vol = Math.max(0, Math.min(1, opts?.volume ?? 0))
+  // 播放：只采样画面（声走 programAudio 混音）。
+  // ⑤ 不堵：seeking / 未就绪立刻退回上一帧；主钟不在这里等。
+  // seek 只跟播放头纠偏，元素绝不反推播放头。
+  if (composePlay && !opts?.reverse) {
     const rate = Math.max(0.25, Math.min(4, opts?.speed ?? 1))
     try {
       v.playbackRate = rate
-      v.volume = vol
-      v.muted = vol <= 0.001
+      v.volume = 0
+      v.muted = true
     } catch { /* */ }
-    const drift = Math.abs(v.currentTime - t)
-    if (drift > 0.25 && !v.seeking) {
-      try { v.currentTime = t } catch { /* */ }
+
+    if (s.followFrame !== frame && !v.seeking && v.readyState >= 1) {
+      s.followFrame = frame
+      // 连续解码；偏离超过 ~4 帧才纠（传统预览：跟主钟，不每帧硬钉）
+      const drift = Math.abs(v.currentTime - q)
+      if (drift > step * 4 || Number.isNaN(v.currentTime)) {
+        try { v.currentTime = q } catch { /* */ }
+      }
     }
+
     if (v.paused && !v.seeking && v.readyState >= 2) {
       void v.play().catch(() => { /* */ })
     }
-    if (v.readyState >= 2 && v.videoWidth > 0) return v
+
+    // 直接画 HTMLVideo，禁止每帧 capture→Canvas（那是 scrub 用的，叠层会拖死）
+    if (!v.seeking && v.readyState >= 2 && v.videoWidth > 0) return v
     return still(s)
   }
 
+  // 暂停/scrub：用户拖播放头 → 按播放头采样（同样不读元素时间当主钟）
   try {
     v.muted = true
     if (!v.paused) v.pause()
   } catch { /* */ }
 
-  const eps = Math.max(step * 2, 0.08)
+  const eps = step
   if (s.settled != null && Math.abs(s.settled - q) <= eps && still(s)) return still(s)
   if (v.seeking || s.pending != null) return still(s)
   if (v.readyState >= 2 && Math.abs(v.currentTime - q) <= eps) {
@@ -167,6 +230,7 @@ function htmlFrame(clipId: string, m: MediaItem, t: number, step: number, opts?:
     return still(s)
   }
   s.pending = q
+  s.followFrame = frame
   try { v.currentTime = q } catch { s.pending = null }
   return still(s)
 }
@@ -222,7 +286,7 @@ export function videoFrameAt(
   if (html) return html
   if (m.url && slots.has(id)) return still(slots.get(id)!)
 
-  if (!clockPlay && m.path && m.kind === 'video' && desktop()?.decodeMediaFrame) {
+  if (!composePlay && m.path && m.kind === 'video' && desktop()?.decodeMediaFrame) {
     const native = nativeFrameAt(id, m, t, step)
     if (native) return native
     const hit = nativeSnaps.get(id)
@@ -248,4 +312,15 @@ export function dropVideo(id: string) {
   nativeSnaps.delete(id)
   nativePending.delete(id)
   clearNativePlayBridge(id)
+}
+
+/** 停掉未在本帧使用的解码槽，释放叠层时的多余 HTMLVideo */
+export function pauseUnusedVideoSlots(activeClipIds: Set<string>) {
+  for (const [id, s] of slots) {
+    if (activeClipIds.has(id)) continue
+    try {
+      s.v.muted = true
+      if (!s.v.paused) s.v.pause()
+    } catch { /* */ }
+  }
 }
