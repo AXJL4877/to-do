@@ -1,8 +1,9 @@
 import type { MediaItem, ProjectSettings, Sequence } from '../types'
 import type { ImageCache } from './monitorDraw'
 import { renderProgramFrame } from './monitorDraw'
+import { anyVideoSeeking } from './videoCache'
 
-/** 节目监视器 RAM 预览缓存：播过的帧留下，未改工程再播直接 blit */
+/** 节目窗 RAM 帧缓存：固定分辨率，与监视器显示尺寸解耦，避免叠层改分辨率整表作废 */
 export type PreviewRamCache = {
   fingerprint: string
   frames: Map<number, HTMLCanvasElement>
@@ -14,12 +15,16 @@ export type PreviewRamCache = {
   cacheH: number
 }
 
-const MAX_BYTES = 512 * 1024 * 1024 // ~512MB
+const MAX_BYTES = 512 * 1024 * 1024
 
 let sharedCache = createPreviewCache()
 let cacheRev = 0
 let notifyTimer = 0
 const cacheSubs = new Set<() => void>()
+
+/** 预取：按播放头向前补帧 */
+let prefetchGen = 0
+let scratch: HTMLCanvasElement | null = null
 
 export function createPreviewCache(): PreviewRamCache {
   return {
@@ -65,12 +70,21 @@ export function notifyPreviewCacheChanged(immediate = false) {
   }, 300)
 }
 
-/** 内容指纹：变了就整表作废 */
+/** 缓存分辨率：始终相对工程画幅，不跟叠层临时预览尺寸走 */
+export function stableCacheSize(
+  settings: ProjectSettings,
+  maxEdge: number = 720,
+): { w: number; h: number } {
+  const edge = maxEdge > 0 ? maxEdge : 720
+  return cachePixelSize(settings.width, settings.height, edge)
+}
+
+/** 内容指纹：尺寸用稳定缓存边，显示缩放变化不刷掉已缓存帧 */
 export function previewFingerprint(
   seq: Sequence,
   settings: ProjectSettings,
-  w: number,
-  h: number,
+  cacheW: number,
+  cacheH: number,
 ): string {
   const clips = seq.clips.map((c) =>
     [
@@ -85,14 +99,13 @@ export function previewFingerprint(
     ].join(','),
   ).join('|')
   return [
-    seq.id, w, h, settings.width, settings.height, settings.fps,
-    settings.canvasBg, settings.canvasColor, settings.safeFrame ? 1 : 0,
+    seq.id, cacheW, cacheH, settings.width, settings.height, settings.fps,
+    settings.canvasBg, settings.canvasColor,
     seq.tracks.map((t) => `${t.id}:${t.kind}:${t.hidden ? 0 : 1}`).join(','),
     clips,
   ].join('#')
 }
 
-/** 缓存分辨率：按自定义最长边缩放；maxEdge=0 表示与预览同尺寸 */
 export function cachePixelSize(previewW: number, previewH: number, maxEdge: number = 720) {
   if (!maxEdge || maxEdge <= 0) return { w: previewW, h: previewH }
   const long = Math.max(previewW, previewH)
@@ -139,7 +152,6 @@ function frameBytes(cache: PreviewRamCache) {
   return Math.max(1, cache.cacheW * cache.cacheH * 4)
 }
 
-/** 超容量时丢掉离 keepNear 最远的帧，避免只剩尾巴一小段 */
 function evictFarthest(cache: PreviewRamCache, keepNear: number) {
   const bytes = frameBytes(cache)
   while (cache.bytes + bytes > cache.maxBytes && cache.frames.size > 0) {
@@ -156,6 +168,15 @@ function evictFarthest(cache: PreviewRamCache, keepNear: number) {
     cache.frames.delete(worst)
     cache.bytes -= bytes
   }
+}
+
+function scratchCanvas(w: number, h: number) {
+  if (!scratch) scratch = document.createElement('canvas')
+  if (scratch.width !== w || scratch.height !== h) {
+    scratch.width = w
+    scratch.height = h
+  }
+  return scratch
 }
 
 export function putCachedFrame(
@@ -194,7 +215,63 @@ export function blitCachedFrame(
   ctx.drawImage(cached, 0, 0, w, h)
 }
 
-/** 渲染并写入指定帧（供按帧补齐缓存） */
+/**
+ * 节目底图呈现。
+ * - 播放中：始终现场合成到 dest（不 blit 可能含黑帧的缓存），画面稳了再写入缓存
+ * - 暂停/scrub：优先 blit 缓存
+ */
+export function presentCachedProgramFrame(
+  cache: PreviewRamCache,
+  frame: number,
+  fps: number,
+  dest: HTMLCanvasElement,
+  seq: Sequence,
+  media: MediaItem[],
+  settings: ProjectSettings,
+  imgCache: ImageCache,
+  displayW: number,
+  displayH: number,
+  maxEdge = 720,
+  opts?: { playing?: boolean },
+): boolean {
+  const { w: cw, h: ch } = stableCacheSize(settings, maxEdge)
+  const fp = previewFingerprint(seq, settings, cw, ch)
+  ensurePreviewFingerprint(cache, fp, cw, ch)
+  const t = frame / Math.max(1, fps)
+
+  // 播放：现场画，禁止用缓存盖住当前帧（缓存可能是 seek 中的黑帧）
+  if (opts?.playing) {
+    renderProgramFrame(dest, seq, media, settings, t, imgCache, displayW, displayH, [], undefined, false, undefined, true)
+    if (!cache.frames.has(frame) && !anyVideoSeeking()) {
+      const sheet = scratchCanvas(cw, ch)
+      const sctx = sheet.getContext('2d')
+      if (sctx) {
+        sctx.drawImage(dest, 0, 0, cw, ch)
+        putCachedFrame(cache, frame, sheet, frame)
+      }
+    }
+    return false
+  }
+
+  const hit = getCachedFrame(cache, frame)
+  if (hit) {
+    blitCachedFrame(dest, hit, displayW, displayH)
+    return true
+  }
+
+  renderProgramFrame(dest, seq, media, settings, t, imgCache, displayW, displayH, [], undefined, false, undefined, true)
+  if (!anyVideoSeeking()) {
+    const sheet = scratchCanvas(cw, ch)
+    const sctx = sheet.getContext('2d')
+    if (sctx) {
+      sctx.drawImage(dest, 0, 0, cw, ch)
+      putCachedFrame(cache, frame, sheet, frame)
+    }
+  }
+  return false
+}
+
+/** @deprecated 用 presentCachedProgramFrame */
 export function renderAndCacheFrame(
   cache: PreviewRamCache,
   frame: number,
@@ -207,27 +284,66 @@ export function renderAndCacheFrame(
   displayW: number,
   displayH: number,
 ): boolean {
-  if (cache.frames.has(frame)) {
-    const hit = cache.frames.get(frame)!
-    blitCachedFrame(dest, hit, displayW, displayH)
-    cache.hits++
-    return true
-  }
-  const t = frame / Math.max(1, fps)
-  const cw = cache.cacheW || displayW
-  const ch = cache.cacheH || displayH
-  // 先画到目标尺寸，再缩进缓存
-  renderProgramFrame(dest, seq, media, settings, t, imgCache, displayW, displayH, [], undefined, false, undefined, true)
-  putCachedFrame(cache, frame, dest, frame)
-  // put 里按 cache 尺寸重绘；若 display≠cache，再 blit 回去
-  const stored = cache.frames.get(frame)
-  if (stored && (cw !== displayW || ch !== displayH)) {
-    blitCachedFrame(dest, stored, displayW, displayH)
-  }
-  return false
+  return presentCachedProgramFrame(
+    cache, frame, fps, dest, seq, media, settings, imgCache, displayW, displayH,
+  )
 }
 
-/** 连续帧合并为时间段；允许 ≤4 帧空隙（播放时降频写缓存仍画成实心绿条） */
+/** 播放时向前预取若干帧（每 idle 一片，不堵主线程） */
+export function prefetchProgramFrames(opts: {
+  cache: PreviewRamCache
+  fromFrame: number
+  fps: number
+  seq: Sequence
+  media: MediaItem[]
+  settings: ProjectSettings
+  imgCache: ImageCache
+  maxEdge?: number
+  ahead?: number
+}) {
+  const ahead = Math.max(1, Math.min(24, opts.ahead ?? 8))
+  const gen = ++prefetchGen
+  const maxEdge = opts.maxEdge ?? 720
+  const { w: cw, h: ch } = stableCacheSize(opts.settings, maxEdge)
+  const fp = previewFingerprint(opts.seq, opts.settings, cw, ch)
+  ensurePreviewFingerprint(opts.cache, fp, cw, ch)
+
+  let i = 1
+  const step = () => {
+    if (gen !== prefetchGen) return
+    while (i <= ahead) {
+      const f = opts.fromFrame + i
+      i++
+      if (opts.cache.frames.has(f)) continue
+      const t = f / Math.max(1, opts.fps)
+      const sheet = scratchCanvas(cw, ch)
+      renderProgramFrame(
+        sheet, opts.seq, opts.media, opts.settings, t, opts.imgCache,
+        cw, ch, [], undefined, false, undefined, true,
+      )
+      putCachedFrame(opts.cache, f, sheet, opts.fromFrame)
+      break
+    }
+    if (i <= ahead && gen === prefetchGen) {
+      const ric = (window as Window & {
+        requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number
+      }).requestIdleCallback
+      if (ric) ric(step, { timeout: 80 })
+      else window.setTimeout(step, 0)
+    }
+  }
+  const ric = (window as Window & {
+    requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number
+  }).requestIdleCallback
+  if (ric) ric(step, { timeout: 50 })
+  else window.setTimeout(step, 0)
+}
+
+export function cancelPrefetchProgramFrames() {
+  prefetchGen++
+}
+
+/** 连续帧合并为时间段；允许 ≤4 帧空隙 */
 export function cachedTimeRanges(cache: PreviewRamCache, fps: number): { start: number; end: number }[] {
   if (!cache.frames.size || fps <= 0) return []
   const frames = [...cache.frames.keys()].sort((a, b) => a - b)
@@ -248,7 +364,6 @@ export function cachedTimeRanges(cache: PreviewRamCache, fps: number): { start: 
   return ranges
 }
 
-/** 独立时间轴窗没有节目监视器，用主窗广播的区间画绿条 */
 let remoteBarRanges: { start: number; end: number }[] = []
 
 export function setRemotePreviewBarRanges(ranges: { start: number; end: number }[]) {
@@ -260,4 +375,3 @@ export function getPreviewBarRanges(fps: number): { start: number; end: number }
   const local = cachedTimeRanges(sharedCache, fps)
   return local.length ? local : remoteBarRanges
 }
-

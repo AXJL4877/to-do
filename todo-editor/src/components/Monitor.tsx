@@ -2,20 +2,19 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { Play, Pause, SkipBack, SkipForward, Repeat, Camera } from 'lucide-react'
 import { useApp, formatTime } from '../store'
 import { resolveClipTransform, patchClipXY } from '../lib/keyframeEval'
-import { getPreviewSize, hitTestMotionPathKf, hitTestProgramClips, previewPerfForStack, renderProgramFrame, renderSourceFrame } from '../lib/monitorDraw'
+import {
+  cancelPrefetchProgramFrames,
+  ensurePreviewFingerprint,
+  getProgramPreviewCache,
+  presentCachedProgramFrame,
+  prefetchProgramFrames,
+  previewFingerprint,
+  stableCacheSize,
+} from '../lib/previewCache'
+import { getPreviewSize, hitTestMotionPathKf, hitTestProgramClips, renderProgramFrame, renderProgramOverlay, renderSourceFrame } from '../lib/monitorDraw'
 import { cancelComposeUpgrade } from '../lib/composePreview'
 import { quantizeAbsT } from '../lib/programPlayer'
 import { clipHalfNorm, snapWithGuides, type SnapGuide } from '../lib/monitorSnap'
-import {
-  blitCachedFrame,
-  cachePixelSize,
-  ensurePreviewFingerprint,
-  getCachedFrame,
-  getProgramPreviewCache,
-  previewFingerprint,
-  putCachedFrame,
-  renderAndCacheFrame,
-} from '../lib/previewCache'
 import { useImageCache } from '../hooks/useImageCache'
 import { getLivePlayhead, setLivePlayhead, subscribeLivePlayhead } from '../lib/livePlayhead'
 import { setVideoSeekQuiet } from '../lib/videoCache'
@@ -58,6 +57,7 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program' 
     pending?: Record<string, { x: number; y: number }>
     pathT?: number
     pathOrigin?: { x: number; y: number }
+    primaryId?: string
   }>(null)
   /** 视口 CSS 像素（3D 用）；2D 用 object-fit 铺满视口 */
   const [display, setDisplay] = useState({ w: 0, h: 0 })
@@ -193,40 +193,45 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program' 
     const h = preview.h
     const fps = Math.max(1, st.settings.fps)
     const frame = Math.max(0, Math.floor(t * fps + 1e-6))
-    const { w: cw, h: ch } = cachePixelSize(w, h, st.prefs.previewCacheMaxEdge ?? 720)
-    const fp = previewFingerprint(seq, settings, cw, ch)
-    const ram = getProgramPreviewCache()
-    ensurePreviewFingerprint(ram, fp, cw, ch)
+    const maxEdge = st.prefs.previewCacheMaxEdge ?? 720
 
-    // 节目窗：导出外观；优先 RAM 缓存
-    if (isProgram && !transformOverrides) {
-      const hit = getCachedFrame(ram, frame)
-      if (hit) {
-        blitCachedFrame(canvas, hit, w, h)
-        return
-      }
-      if (opts?.playing) {
-        renderAndCacheFrame(ram, frame, fps, canvas, seq, media, settings, imgCache.current, w, h)
-        return
-      }
+    // 拖动中：编辑窗必须带 override，不能走缓存
+    if (isEdit && transformOverrides) {
       renderProgramFrame(
         canvas, seq, media, settings, t, imgCache.current, w, h,
-        [], undefined, false, undefined, true,
+        st.selectedClipIds, transformOverrides, st.autoKeyframe, opts?.guides, false,
       )
-      putCachedFrame(ram, frame, canvas, frame)
       return
     }
 
-    // 编辑窗：选中框 / K帧路径 / 可拖
-    const showKf = isEdit && st.autoKeyframe
-    renderProgramFrame(
-      canvas, seq, media, settings, t, imgCache.current, w, h,
-      isEdit ? st.selectedClipIds : [],
-      transformOverrides,
-      showKf,
-      opts?.guides,
-      false,
+    // 节目底图：播放中现场合成（防缓存黑帧闪烁）；暂停走 RAM 缓存
+    presentCachedProgramFrame(
+      getProgramPreviewCache(), frame, fps, canvas, seq, media, settings,
+      imgCache.current, w, h, maxEdge,
+      { playing: !!(opts?.playing || st.playing) },
     )
+
+    if (isEdit) {
+      renderProgramOverlay(
+        canvas, seq, settings, t, w, h,
+        st.selectedClipIds, st.autoKeyframe, opts?.guides,
+      )
+    }
+
+    // 仅真正静止时预热；播放中/刚停立刻预取会 seek 解码槽导致闪一下
+    if (!st.playing && !opts?.playing) {
+      prefetchProgramFrames({
+        cache: getProgramPreviewCache(),
+        fromFrame: frame,
+        fps,
+        seq,
+        media,
+        settings,
+        imgCache: imgCache.current,
+        maxEdge,
+        ahead: 6,
+      })
+    }
   }, [mode, isProgram, isEdit, media, settings, sourceMediaId, sourceIn, sourceOut, preview.w, preview.h, imgCache, imgVersion, selectedClipIds, autoKeyframe])
 
   useEffect(() => {
@@ -272,10 +277,12 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program' 
     const tStart = st0.playhead
     const wall0 = performance.now()
     let lastShown = -1
-    let lastSeq: typeof st0.sequences[0] | null = null
-    let fp = ''
     let proxiesKicked = false
     const cache = getProgramPreviewCache()
+    const maxEdge = st0.prefs.previewCacheMaxEdge ?? 720
+    const { w: cw0, h: ch0 } = stableCacheSize(settings, maxEdge)
+    const seq0 = st0.sequences.find((q) => q.id === st0.activeSeqId) ?? st0.sequences[0]
+    ensurePreviewFingerprint(cache, previewFingerprint(seq0, settings, cw0, ch0), cw0, ch0)
     notifiedCache.current = ''
     localPlayhead.current = tStart
     setLivePlayhead(tStart)
@@ -285,11 +292,6 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program' 
       Math.max(seq.workOut, ...seq.clips.map((c) => c.start + c.duration), 5)
 
     const videoIds = new Set(media.filter((m) => m.kind === 'video').map((m) => m.id))
-    const clipUsesVideo = (seq: typeof st0.sequences[0], t: number) =>
-      seq.clips.some((c) =>
-        !!c.mediaId && videoIds.has(c.mediaId)
-        && t >= c.start && t < c.start + c.duration,
-      )
 
     const tick = (now: number) => {
       const st = useApp.getState()
@@ -317,97 +319,44 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program' 
       }
 
       const frame = Math.max(0, Math.floor(t * fps + 1e-6))
-      const hasVisibleClip = seq.clips.some((c) => {
-        if (!c.enabled || t < c.start || t >= c.start + c.duration) return false
-        const track = seq.tracks.find((tr) => tr.id === c.trackId)
-        return !!track && !track.hidden && track.kind !== 'audio'
-      })
       localPlayhead.current = t
-      if (frame !== lastShown) setLivePlayhead(t)
-      if (frame % 2 === 0) broadcastLivePlayhead(t)
 
-      if (!hasVisibleClip) {
+      if (frame !== lastShown) {
         lastShown = frame
-        renderProgramFrame(
-          canvas, seq, media, settings, t, imgCache.current, preview.w, preview.h,
-          [], undefined, false, undefined, isProgram,
-        )
-        syncProgramAudio(seq, media, t, true, fps)
-        raf = requestAnimationFrame(tick)
-        return
-      }
-
-      if (clipUsesVideo(seq, t)) {
         const videoClips = seq.clips.filter((c) => {
           if (!c.enabled || !c.mediaId || !videoIds.has(c.mediaId)) return false
           if (t < c.start || t >= c.start + c.duration) return false
           const track = seq.tracks.find((tr) => tr.id === c.trackId)
           return !!track && !track.hidden && track.kind !== 'audio'
         })
-        const videoLayers = videoClips.length
-        if (!proxiesKicked) {
+        if (videoClips.length >= 1 && !proxiesKicked) {
           proxiesKicked = true
           st.ensureStackProxies(videoClips.map((c) => c.mediaId!).filter(Boolean))
         }
-        const perf = previewPerfForStack(st.prefs.performance, videoLayers)
-        const size = getPreviewSize(settings, perf)
-        const shouldPaint = videoLayers >= 2 ? frame !== lastShown : true
-        if (shouldPaint) {
-          lastShown = frame
-          // 节目窗：先查缓存；未命中再合成并写入（叠层也写，绿条才能续上）
-          if (isProgram) {
-            const { w: cw, h: ch } = cachePixelSize(size.w, size.h, st.prefs.previewCacheMaxEdge ?? 720)
-            if (seq !== lastSeq) {
-              lastSeq = seq
-              fp = previewFingerprint(seq, settings, cw, ch)
-              ensurePreviewFingerprint(cache, fp, cw, ch)
-            }
-            const hit = getCachedFrame(cache, frame)
-            if (hit) blitCachedFrame(canvas, hit, size.w, size.h)
-            else {
-              renderProgramFrame(
-                canvas, seq, media, settings, t, imgCache.current, size.w, size.h,
-                [], undefined, false, undefined, true,
-              )
-              // 叠层隔帧写，单层更勤
-              if (videoLayers <= 1 || frame % 2 === 0) {
-                putCachedFrame(cache, frame, canvas, frame)
-              }
-            }
-          } else {
-            renderProgramFrame(
-              canvas, seq, media, settings, t, imgCache.current, size.w, size.h,
-              [], undefined, false, undefined, false,
-            )
-          }
-          syncProgramAudio(seq, media, t, true, fps)
-        }
-        raf = requestAnimationFrame(tick)
-        return
-      }
+        // 显示尺寸固定，避免叠层数变化改 canvas 宽高清空缓冲 → 闪烁
+        const dw = preview.w
+        const dh = preview.h
 
-      if (frame !== lastShown) {
-        lastShown = frame
-        const { w: cw, h: ch } = cachePixelSize(preview.w, preview.h, st.prefs.previewCacheMaxEdge ?? 720)
-        if (seq !== lastSeq) {
-          lastSeq = seq
-          fp = previewFingerprint(seq, settings, cw, ch)
-          ensurePreviewFingerprint(cache, fp, cw, ch)
-        }
-        const hit = cache.frames.get(frame)
-        if (hit) blitCachedFrame(canvas, hit, preview.w, preview.h)
-        else {
-          renderAndCacheFrame(
-            cache, frame, fps, canvas, seq, media, settings, imgCache.current, preview.w, preview.h,
+        presentCachedProgramFrame(
+          cache, frame, fps, canvas, seq, media, settings,
+          imgCache.current, dw, dh, maxEdge, { playing: true },
+        )
+        if (isEdit) {
+          renderProgramOverlay(
+            canvas, seq, settings, t, dw, dh,
+            st.selectedClipIds, st.autoKeyframe,
           )
         }
+        setLivePlayhead(t)
+        if (frame % 2 === 0) broadcastLivePlayhead(t)
       }
-      syncProgramAudio(seq, media, t, true, fps)
 
+      syncProgramAudio(seq, media, t, true, fps)
       raf = requestAnimationFrame(tick)
     }
     raf = requestAnimationFrame(tick)
     return () => {
+      cancelPrefetchProgramFrames()
       cancelComposeUpgrade()
       stopProgramAudio()
       setVideoSeekQuiet(false)
@@ -421,7 +370,7 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program' 
       setLivePlayhead(endT)
       requestAnimationFrame(() => paint(endT))
     }
-  }, [playing, drivesClock, loop, activeSeqId, use3d, media, settings, preview.w, preview.h, imgCache, isProgram, paint])
+  }, [playing, drivesClock, loop, activeSeqId, use3d, media, settings, preview.w, preview.h, imgCache, isEdit, paint])
 
   // 编辑窗：拖拽时本地绘制，松手再写 store
   useEffect(() => {
@@ -561,7 +510,7 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program' 
       }
       const overrides = d?.pending
       pending = null
-      if (d?.moved && overrides) {
+      if (d?.kind === 'clip' && d.moved && overrides) {
         const idSet = new Set(d.ids)
         const st = useApp.getState()
         const ph = st.playhead
@@ -583,6 +532,8 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program' 
             }),
           }
         })
+      } else if (d?.kind === 'clip' && !d.moved && d.ids.length > 1 && d.primaryId) {
+        selectClips([d.primaryId])
       }
       paint(localPlayhead.current)
     }
@@ -634,11 +585,17 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program' 
       if (!e.shiftKey && !e.ctrlKey && !e.metaKey) selectClips([])
       return
     }
-    const ids = e.shiftKey || e.ctrlKey || e.metaKey
-      ? (st.selectedClipIds.includes(hit)
-          ? st.selectedClipIds
-          : [...st.selectedClipIds, hit])
-      : (st.selectedClipIds.includes(hit) ? st.selectedClipIds : [hit])
+    // 普通点击只选当前；多选里点中再拖才整组动；Shift/Ctrl 加选
+    let ids: string[]
+    if (e.shiftKey || e.ctrlKey || e.metaKey) {
+      ids = st.selectedClipIds.includes(hit)
+        ? st.selectedClipIds
+        : [...st.selectedClipIds, hit]
+    } else if (st.selectedClipIds.includes(hit) && st.selectedClipIds.length > 1) {
+      ids = [...st.selectedClipIds]
+    } else {
+      ids = [hit]
+    }
     selectClips(ids)
     const origin: Record<string, { x: number; y: number }> = {}
     for (const c of seq.clips) {
@@ -651,6 +608,7 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program' 
     dragRef.current = {
       kind: 'clip',
       ids, origin, startNx: nx, startNy: ny, axis: 'free', moved: false,
+      primaryId: hit,
     }
     canvas.setPointerCapture(e.pointerId)
   }

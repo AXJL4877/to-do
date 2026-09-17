@@ -128,6 +128,9 @@ export function Timeline({
     originTrackIds?: Record<string, string>
     primaryKind?: string
     spawn?: 'before' | 'after'
+    /** 多选时点中其一未拖动 → 松手收成当前 */
+    collapseOnClick?: boolean
+    collapseAlt?: boolean
   } | null>(null)
 
   const pxPerSec = timelineZoom
@@ -265,6 +268,7 @@ export function Timeline({
     const endPlayheadScrub = (commit: boolean) => {
       if (drag.current?.kind !== 'playhead') return
       const t = pendingPh
+      const moved = drag.current.moved
       pendingPh = null
       setLocalPlayheadScrubbing(false)
       drag.current = null
@@ -272,6 +276,8 @@ export function Timeline({
         useApp.getState().setPlayhead(t, { exact: true })
         broadcastPlayheadSeek(t)
       }
+      // 点空白轨（未拖播放头）→ 清空片段选中，才能再单独点选
+      if (!moved) useApp.getState().selectClips([])
     }
 
     const onMove = (e: PointerEvent) => {
@@ -339,7 +345,7 @@ export function Timeline({
         const startY = d.startY ?? e.clientY
         if (Math.abs(dx) > 2 || Math.abs(e.clientY - startY) > 2) d.moved = true
         const dt = dx / pxPerSec
-        const ids = d.moveIds?.length ? d.moveIds : (st.selectedClipIds.length ? st.selectedClipIds : [d.clipId])
+        const ids = d.moveIds?.length ? d.moveIds : [d.clipId]
         const kind = d.primaryKind
           ?? st.seq().tracks.find((t) => t.id === st.seq().clips.find((c) => c.id === d.clipId)?.trackId)?.kind
         const place = trackFromEvent(e.clientY, kind)
@@ -352,6 +358,7 @@ export function Timeline({
         d.lastDt = appliedDt
         d.lastTrackId = trackId
         d.spawn = place.spawn
+        // 禁止中途改成 selectedClipIds（否则会拖上全体）
         d.moveIds = ids
         const body = bodyRef.current
         if (body) {
@@ -452,15 +459,30 @@ export function Timeline({
       if (d?.kind === 'marquee' && !d.moved && !d.marqueeAdditive) {
         useApp.getState().selectClips([])
       }
-      if (d?.kind === 'move' && d.moved && d.clipId && d.moveIds?.length) {
-        useApp.getState().dragMoveClips(
-          d.moveIds,
-          d.originStarts,
-          d.lastDt ?? 0,
-          d.lastTrackId,
-          { primaryId: d.clipId, alt: true, spawn: d.spawn },
-        )
-        clearMovePreview(d.moveIds)
+      if (d?.kind === 'move' && d.clipId) {
+        if (d.moved && d.moveIds?.length) {
+          useApp.getState().dragMoveClips(
+            d.moveIds,
+            d.originStarts,
+            d.lastDt ?? 0,
+            d.lastTrackId,
+            { primaryId: d.clipId, alt: true, spawn: d.spawn },
+          )
+          clearMovePreview(d.moveIds)
+        } else if (d.collapseOnClick) {
+          // 多选中单击未拖 → 收成当前片段（+链接 A/V）
+          const st = useApp.getState()
+          const cur = st.sequences.find((s) => s.id === st.activeSeqId) ?? st.sequences[0]
+          const only = new Set<string>([d.clipId])
+          if (!d.collapseAlt) {
+            const c = cur.clips.find((x) => x.id === d.clipId)
+            if (c?.linkedId) only.add(c.linkedId)
+            for (const o of cur.clips) {
+              if (o.linkedId === d.clipId) only.add(o.id)
+            }
+          }
+          st.selectClips([...only])
+        }
       }
       drag.current = null
       setMarquee(null)
@@ -535,6 +557,19 @@ export function Timeline({
     try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId) } catch { /* */ }
   }
 
+  function expandLinkedAv(clipIds: string[], withLinked: boolean) {
+    if (!withLinked) return [...clipIds]
+    const linked = new Set(clipIds)
+    for (const id of clipIds) {
+      const c = seq.clips.find((x) => x.id === id)
+      if (c?.linkedId) linked.add(c.linkedId)
+      for (const o of seq.clips) {
+        if (o.linkedId === id) linked.add(o.id)
+      }
+    }
+    return [...linked]
+  }
+
   function onClipPointerDown(e: React.PointerEvent, clipId: string, trackLocked: boolean) {
     // 中键或 Alt+左键：平移时间线（Alt 不再占用「只选当前」）
     if (e.button === 1) {
@@ -596,11 +631,11 @@ export function Timeline({
         window.removeEventListener('pointermove', onMove)
         window.removeEventListener('pointerup', onUp)
         if (!boxed) {
-          const ids = base.includes(clipId)
+          const next = base.includes(clipId)
             ? base.filter((id) => id !== clipId)
             : [...base, clipId]
           lastAnchorId.current = clipId
-          selectClips(ids)
+          selectClips(next)
         }
       }
       window.addEventListener('pointermove', onMove)
@@ -623,19 +658,12 @@ export function Timeline({
       return
     }
     lastAnchorId.current = clipId
-    ids = selectedClipIds.includes(clipId) ? selectedClipIds : [clipId]
-    // 默认带着链接的 A/V 一起动，避免音画时间线错位（Alt 只动当前）
-    if (!e.altKey) {
-      const linked = new Set(ids)
-      for (const id of ids) {
-        const c = seq.clips.find((x) => x.id === id)
-        if (c?.linkedId) linked.add(c.linkedId)
-        for (const o of seq.clips) {
-          if (o.linkedId === id) linked.add(o.id)
-        }
-      }
-      ids = [...linked]
-    }
+    // 普通单击：只选当前（+链接 A/V）。多选后点其中之一再拖才整组移动；
+    // 若点下未拖动，松手时收成当前（见 onUp），避免「永远拖全体」。
+    const keepMulti = selectedClipIds.includes(clipId) && selectedClipIds.length > 1
+    ids = keepMulti ? [...selectedClipIds] : [clipId]
+    // Alt：只动当前，不带链接音画
+    ids = expandLinkedAv(ids, !e.altKey)
     selectClips(ids)
 
     if (tool === 'slip') {
@@ -661,6 +689,9 @@ export function Timeline({
       kind: 'move', clipId, startX: e.clientX, startY: e.clientY, startScrollLeft: 0,
       originStarts: starts, originTrackIds, primaryKind, moved: false, moveIds: ids,
       pointerId: e.pointerId,
+      // 多选时单击未拖：松手收成当前
+      collapseOnClick: keepMulti,
+      collapseAlt: e.altKey,
     }
     ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
   }

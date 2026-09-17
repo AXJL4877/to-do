@@ -55,6 +55,14 @@ export function setVideoSeekQuiet(on: boolean) {
   }
 }
 
+/** 播放中是否还有层在 seek（此时不宜写入 RAM 缓存，否则会缓存黑帧导致闪烁） */
+export function anyVideoSeeking() {
+  for (const s of slots.values()) {
+    if (s.v.seeking) return true
+  }
+  return false
+}
+
 /** 只静音，不停播（播放循环里每帧 mute+pause 会把叠层卡死） */
 export function muteAllVideos() {
   for (const s of slots.values()) {
@@ -150,6 +158,10 @@ function slotOf(clipId: string, m: MediaItem): Slot {
   }
   const src = playUrl(m)
   if (src && s.v.dataset.src !== src) {
+    // 播放中途换代理源会闪黑；等停播再切
+    if (composePlay && s.v.dataset.src) {
+      return s
+    }
     s.v.dataset.src = src
     s.v.src = src
     s.snap = null
@@ -211,8 +223,11 @@ function htmlFrame(clipId: string, m: MediaItem, t: number, step: number, opts?:
       void v.play().catch(() => { /* */ })
     }
 
-    // 直接画 HTMLVideo，禁止每帧 capture→Canvas（那是 scrub 用的，叠层会拖死）
-    if (!v.seeking && v.readyState >= 2 && v.videoWidth > 0) return v
+    // 直接画 HTMLVideo；seeking 时优先上一帧，避免占位符闪白/闪黑
+    if (v.readyState >= 2 && v.videoWidth > 0) {
+      if (!v.seeking) return v
+      return still(s) ?? v
+    }
     return still(s)
   }
 
