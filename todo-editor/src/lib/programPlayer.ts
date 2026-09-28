@@ -20,13 +20,32 @@ export function frameIndex(absT: number, fps: number): number {
   return Math.round(quantizeAbsT(absT, fps) * Math.max(1, fps))
 }
 
-/** 绝对时间 → 该 clip 片内时间（帧对齐） */
-export function mediaTimeAt(clip: Clip, absT: number, fps: number): number {
-  const speed = Math.max(0.05, clip.speed || 1)
+/** 与 C++ quantize_timeline_t 一致：floor(t*fps + 1e-6)/fps */
+export function quantizeTimelineT(t: number, fps: number): number {
+  const f = Math.max(1, fps)
+  return Math.floor(t * f + 1e-6) / f
+}
+
+/**
+ * 时间线 → 源媒体时间（不量化；与 C++ media_time 逐行一致）。
+ * freeze 字段存在时优先返回 freeze（含 0）。
+ */
+export function mediaTimeCore(clip: Clip, absT: number): number {
+  if (clip.freeze !== undefined) return clip.freeze
+  const speed = Math.max(0.05, clip.speed <= 0 ? 1 : (clip.speed || 1))
   const local = Math.max(0, absT - clip.start)
-  const raw = clip.reverse
-    ? Math.max(0, clip.outPoint - local * speed)
-    : clip.inPoint + local * speed
+  if (clip.reverse) {
+    const span = clip.outPoint > clip.inPoint
+      ? (clip.outPoint - clip.inPoint)
+      : Math.max(0.04, clip.duration) * speed
+    return Math.max(0, clip.inPoint + span - local * speed)
+  }
+  return Math.max(0, clip.inPoint + local * speed)
+}
+
+/** HTMLVideo 预览用：对 mediaTimeCore 结果按 fps 帧网格量化 */
+export function mediaTimeAt(clip: Clip, absT: number, fps: number): number {
+  const raw = mediaTimeCore(clip, absT)
   const step = 1 / Math.max(1, fps)
   return Math.max(0, Math.round(raw / step) * step)
 }
