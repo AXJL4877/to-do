@@ -1,0 +1,96 @@
+{
+  "spec": "todo-style-pack/1",
+  "id": "builtin.papercut-cn",
+  "name": "中国剪纸",
+  "version": "1.0.0",
+  "author": "TO DO",
+  "description": "传统中国剪纸：单张纸刀刻、线线相连、镂空纹样、纯平面无光影。用中文描述主体即可。",
+  "tags": ["国风", "剪纸", "扁平", "节日"],
+  "previews": [
+    "previews/01-koi.png",
+    "previews/02-magpie.png",
+    "previews/03-tiger.png",
+    "previews/04-dragonboat.png"
+  ],
+  "outputs": ["image"],
+  "inputs": [
+    {
+      "id": "subject",
+      "type": "text",
+      "label": "画面主体",
+      "required": true,
+      "maxLength": 120,
+      "placeholder": "例如：一条衔着灯笼的锦鲤，周围有浪花"
+    },
+    {
+      "id": "palette",
+      "type": "select",
+      "label": "纸色",
+      "default": "red",
+      "options": [
+        { "value": "red", "label": "中国红", "prompt": "cut from a single sheet of solid vermilion red paper, one flat red color only" },
+        { "value": "redGold", "label": "红金", "prompt": "cut from solid vermilion red paper with a few thin gold paper accents layered behind, only red and gold" },
+        { "value": "black", "label": "墨黑", "prompt": "cut from a single sheet of solid black paper, one flat black color only" },
+        { "value": "multi", "label": "彩色套色", "prompt": "multi-layer colored paper-cut in traditional folk colors (red, yellow, green, blue), each color a flat paper layer" }
+      ]
+    },
+    {
+      "id": "layout",
+      "type": "select",
+      "label": "构图",
+      "default": "single",
+      "options": [
+        { "value": "single", "label": "单体居中", "prompt": "a single isolated motif centered in the frame with generous empty margin around it" },
+        { "value": "round", "label": "圆形团花", "prompt": "composed inside a circular medallion (tuanhua), radially symmetric decorative border" },
+        { "value": "window", "label": "方形窗花", "prompt": "square window-flower (chuanghua) composition with a decorative square border and corner ornaments" },
+        { "value": "banner", "label": "横幅", "prompt": "wide horizontal banner composition, motif repeated or extended left to right" }
+      ]
+    },
+    {
+      "id": "background",
+      "type": "select",
+      "label": "底色",
+      "default": "white",
+      "options": [
+        { "value": "white", "label": "纯白底", "prompt": "placed on a pure flat white background, nothing else in the background" },
+        { "value": "rice", "label": "宣纸底", "prompt": "placed on a plain off-white rice paper background with very subtle paper fiber texture" }
+      ]
+    }
+  ],
+  "prompt": {
+    "template": "Traditional Chinese paper-cut art (jianzhi) depicting {{subject}}. {{layout}}. The artwork is {{palette}}. Hand-cut with a knife: every line is continuous and connected to the rest of the paper, intricate hollow-out patterns with classic sawtooth and crescent-moon cut motifs, bold graphic silhouettes, folk-art stylization. Strictly flat 2D, viewed straight on, no perspective, no gradients, no shading, no lighting effects, no depth, crisp clean cut edges. {{background}}.",
+    "avoid": [
+      "photograph",
+      "realistic rendering",
+      "3D",
+      "painting",
+      "watercolor",
+      "ink wash",
+      "gradient",
+      "drop shadow",
+      "glow",
+      "text",
+      "letters",
+      "Chinese characters",
+      "watermark",
+      "signature",
+      "photo frame",
+      "hands",
+      "scissors"
+    ]
+  },
+  "cutout": {
+    "method": "keyWhite",
+    "threshold": 0.08,
+    "trim": true,
+    "default": true,
+    "lockInputs": { "background": "white" }
+  },
+  "image": {
+    "models": ["gpt-image-2"],
+    "aspectRatios": ["1:1", "16:9", "9:16", "4:3", "3:4"],
+    "defaultAspectRatio": "1:1",
+    "resolutions": ["1K", "2K"],
+    "defaultResolution": "1K"
+  }
+}

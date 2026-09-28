@@ -60,6 +60,8 @@ export interface MediaItem {
   favorite: boolean; offline: boolean; proxyUrl?: string
   /** 本机文件路径（桌面版持久化；blob URL 重启会失效） */
   path?: string
+  /** 相对工程文件的路径（保存时由主进程写入，打开时绝对路径失效再用它找回） */
+  relPath?: string
   /** 低分辨率代理文件（userData/cache/proxies；useProxy 时预览优先） */
   proxyPath?: string
   /** 探测结果：是否含音轨（视频入轨时自动带 A 轨） */

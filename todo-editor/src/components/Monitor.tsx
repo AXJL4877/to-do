@@ -694,7 +694,7 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program' 
               title="选中后拖位置；Shift 智能标尺吸附；Alt 轴向锁定"
               data-testid="monitor-prop-hint"
             >
-              {autoKeyframe ? 'K帧 · S缩放 · T透明' : '1 静态 · 2 K帧 · 3 转场'}
+              {autoKeyframe ? 'K帧 · S缩放 · R旋转 · T透明' : 'S缩放 · R旋转 · 2 K帧 · 3 转场'}
             </span>
           )}
           {isProgram && !compact && (

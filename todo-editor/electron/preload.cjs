@@ -7,8 +7,16 @@ contextBridge.exposeInMainWorld('todoDesktop', {
   getPaths: () => ipcRenderer.invoke('desktop:get-paths'),
   getAiBaseUrl: () => ipcRenderer.sendSync('desktop:ai-base-url') || '',
   aiBaseUrl: () => ipcRenderer.sendSync('desktop:ai-base-url') || '',
-  saveProjectFile: (defaultName, json) => ipcRenderer.invoke('desktop:save-project', { defaultName, json }),
-  openProjectFile: () => ipcRenderer.invoke('desktop:open-project'),
+  saveProjectFile: (defaultName, json, filePath) => ipcRenderer.invoke('desktop:save-project', { defaultName, json, filePath }),
+  openProjectFile: (filePath) => ipcRenderer.invoke('desktop:open-project', { filePath }),
+  recentProjects: () => ipcRenderer.invoke('desktop:recent-projects'),
+  removeRecentProject: (filePath) => ipcRenderer.invoke('desktop:remove-recent-project', filePath),
+  onRequestClose: (cb) => {
+    const handler = () => cb()
+    ipcRenderer.on('desktop:request-close', handler)
+    return () => ipcRenderer.removeListener('desktop:request-close', handler)
+  },
+  closeReady: () => ipcRenderer.send('desktop:close-ready'),
   pickMediaFiles: () => ipcRenderer.invoke('desktop:pick-media'),
   probeMedia: (filePath, timeoutMs) => ipcRenderer.invoke('desktop:probe-media', { filePath, timeoutMs }),
   decodeMediaFrame: (filePath, timeSec, timeoutMs) => ipcRenderer.invoke('desktop:decode-media-frame', { filePath, timeSec, timeoutMs }),

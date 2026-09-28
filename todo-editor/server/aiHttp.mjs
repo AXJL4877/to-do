@@ -22,6 +22,7 @@ import {
 } from './aiJobs.mjs'
 import { listModels } from './huniuClient.mjs'
 import { readAiConfig, writeAiConfig } from './huniuConfig.mjs'
+import { listStylePacks, stylePreviewPath } from './stylePacks.mjs'
 
 export { kickWorker as kickAiWorker }
 
@@ -200,6 +201,31 @@ export async function handleAiHttp(req, res) {
       }
 
       sendJson(res, 405, { ok: false, error: 'method not allowed' })
+      return true
+    }
+
+    const previewMatch = url.match(/^\/api\/ai-styles\/([^/?]+)\/previews\/(\d+)/)
+    if (previewMatch) {
+      const file = stylePreviewPath(decodeURIComponent(previewMatch[1]), Number(previewMatch[2]))
+      if (!file || !existsSync(file)) {
+        sendJson(res, 404, { ok: false, error: 'not found' })
+        return true
+      }
+      const buf = readFileSync(file)
+      res.statusCode = 200
+      res.setHeader('Content-Type', mimeFor(file))
+      res.setHeader('Content-Length', String(buf.length))
+      res.setHeader('Cache-Control', 'private, max-age=3600')
+      res.end(buf)
+      return true
+    }
+
+    if (url === '/api/ai-styles' || url.startsWith('/api/ai-styles?')) {
+      if (req.method !== 'GET') {
+        sendJson(res, 405, { ok: false, error: 'GET only' })
+        return true
+      }
+      sendJson(res, 200, { ok: true, ...listStylePacks() })
       return true
     }
 

@@ -1,4 +1,6 @@
+import { useEffect } from 'react'
 import { useApp } from '../store'
+import { isDesktopApp } from '../lib/desktop'
 import { SHORTCUTS } from '../lib/shortcuts'
 import { usePreviewSuspend } from '../hooks/usePreviewSuspend'
 
@@ -11,6 +13,7 @@ function MoreActions() {
       title: '文件',
       items: [
         { id: 'openfile', label: '打开工程…', run: () => { void useApp.getState().openProjectFromFile(); setModal(null) } },
+        { id: 'saveas', label: '工程另存为…', run: () => { void useApp.getState().saveProjectToFile({ saveAs: true }); setModal(null) } },
         { id: 'pickmedia', label: '导入媒体…', run: () => { void useApp.getState().pickDesktopMedia(); setModal(null) } },
         { id: 'frame', label: '导出当前帧', run: () => { void useApp.getState().exportProgramFrame(); setModal(null) } },
         { id: 'localsave', label: '仅本地草稿', run: () => { useApp.getState().saveProject(); setModal(null) } },
@@ -94,6 +97,19 @@ export function Modals() {
   const enqueueExport = useApp((s) => s.enqueueExport)
   const clearCache = useApp((s) => s.clearCache)
   const setActiveSequence = useApp((s) => s.setActiveSequence)
+  const projectName = useApp((s) => s.projectName)
+  const projectPath = useApp((s) => s.projectPath)
+  const dirty = useApp((s) => s.dirty)
+  const recentProjects = useApp((s) => s.recentProjects)
+  const openProjectFromFile = useApp((s) => s.openProjectFromFile)
+  const saveProjectToFile = useApp((s) => s.saveProjectToFile)
+  const removeRecentProject = useApp((s) => s.removeRecentProject)
+  const refreshRecentProjects = useApp((s) => s.refreshRecentProjects)
+  const isDesktop = isDesktopApp()
+
+  useEffect(() => {
+    if (modal === 'drafts') void refreshRecentProjects()
+  }, [modal, refreshRecentProjects])
 
   if (!modal) return null
 
@@ -110,13 +126,57 @@ export function Modals() {
           {modal === 'more' && <MoreActions />}
           {modal === 'drafts' && (
             <>
-              <div className="flex gap-2">
-                <button className="btn btn-primary" data-testid="btn-new-project" onClick={() => newProject()}>新建项目</button>
-                <button className="btn btn-ghost" data-testid="btn-save-as" onClick={() => saveAs(`${useApp.getState().projectName} 副本`)}>另存为</button>
+              <div className="text-[12px] grid gap-0.5" data-testid="project-current">
+                <div>
+                  当前：<b>{projectName}</b>
+                  {dirty ? <span style={{ color: 'var(--accent)' }}> · 未保存</span> : null}
+                </div>
+                <div className="truncate" style={{ color: 'var(--text-muted)' }} title={projectPath ?? ''}>
+                  {projectPath ?? (isDesktop ? '尚未保存为工程文件（仅本地草稿），按 Ctrl+S 保存' : '浏览器版：保存在本地草稿')}
+                </div>
               </div>
+              <div className="flex gap-2 flex-wrap">
+                <button className="btn btn-primary" data-testid="btn-new-project" onClick={() => newProject()}>新建项目</button>
+                {isDesktop && (
+                  <button className="btn btn-ghost" data-testid="btn-open-project" onClick={() => { void openProjectFromFile() }}>打开工程…</button>
+                )}
+                <button
+                  className="btn btn-ghost"
+                  data-testid="btn-save-as"
+                  onClick={() => (isDesktop
+                    ? void saveProjectToFile({ saveAs: true })
+                    : saveAs(`${useApp.getState().projectName} 副本`))}
+                >
+                  另存为
+                </button>
+              </div>
+              {isDesktop && recentProjects.length > 0 && (
+                <div className="field" data-testid="recent-projects">
+                  <label>最近工程</label>
+                  <div className="grid gap-1">
+                    {recentProjects.map((r) => (
+                      <div key={r.path} className="flex items-center gap-2">
+                        <button
+                          className="btn btn-ghost flex-1 justify-start min-w-0"
+                          disabled={!r.exists}
+                          title={r.path}
+                          onClick={() => { void openProjectFromFile(r.path) }}
+                        >
+                          <span className="truncate">{r.path.split(/[\\/]/).pop()}</span>
+                          {!r.exists ? <span style={{ color: 'var(--text-muted)' }}>（已丢失）</span> : null}
+                        </button>
+                        <button className="btn btn-ghost" title="从列表移除" onClick={() => { void removeRecentProject(r.path) }}>×</button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>本地草稿</div>
               {drafts.map((d) => (
                 <div key={d.id} className="flex items-center gap-2 p-2 rounded-lg border" style={{ borderColor: 'var(--border)' }} data-testid={`draft-${d.id}`}>
-                  <button className="btn btn-ghost flex-1 justify-start" onClick={() => openDraft(d.id)}>{d.name}</button>
+                  <button className="btn btn-ghost flex-1 justify-start" title={d.path ?? '仅本地草稿'} onClick={() => openDraft(d.id)}>
+                    {d.name}{d.path ? <span style={{ color: 'var(--text-muted)' }}> · 文件</span> : null}
+                  </button>
                   <button className="btn btn-ghost" onClick={() => renameDraft(d.id, `${d.name}*`)}>重命名</button>
                   <button className="btn btn-ghost" onClick={() => duplicateDraft(d.id)}>复制</button>
                   <button className="btn btn-ghost" onClick={() => deleteDraft(d.id)}>删</button>

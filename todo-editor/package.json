@@ -13,6 +13,7 @@
     "proxy:test": "node scripts/test-proxy.mjs",
     "export:test": "node scripts/test-export.mjs",
     "probe:test": "node scripts/test-probe-transition.mjs",
+    "project:test": "node scripts/test-project-file.mjs",
     "pack:paths": "node scripts/test-pack-paths.mjs",
     "pack:smoke": "node scripts/test-pack-smoke.mjs",
     "media:gen": "node scripts/gen-test-media.mjs",
@@ -20,6 +21,7 @@
     "golden": "node scripts/golden.mjs",
     "golden:check": "node scripts/golden.mjs --check",
     "preview:test": "node scripts/test-preview-protocol.mjs",
+    "styles:check": "node scripts/style-pack-selfcheck.mjs",
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
@@ -43,7 +45,15 @@
     "asarUnpack": [
       "server/**/*"
     ],
-    "extraResources": [{ "from": "native/bin", "to": "native", "filter": ["**/*"] }],
+    "extraResources": [
+      {
+        "from": "native/bin",
+        "to": "native",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
     "win": {
       "icon": "build/icon.ico",
       "target": [
@@ -64,7 +74,9 @@
   },
   "dependencies": {
     "clsx": "^2.1.1",
+    "jpeg-js": "^0.4.4",
     "lucide-react": "^0.511.0",
+    "pngjs": "^7.0.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "three": "^0.186.0",

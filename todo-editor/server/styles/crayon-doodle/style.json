@@ -1,0 +1,95 @@
+{
+  "spec": "todo-style-pack/1",
+  "id": "builtin.crayon-doodle",
+  "name": "蜡笔手绘",
+  "version": "1.0.0",
+  "author": "TO DO",
+  "description": "手绘蜡笔 / 油画棒简笔画：蜡质笔触、白纸留白、稚拙歪扭的线条，像手绘动画短片的一帧。用中文描述画面即可。",
+  "tags": ["手绘", "蜡笔", "简笔画", "童趣"],
+  "previews": [
+    "previews/01-tailor.jpg",
+    "previews/02-horse.jpg",
+    "previews/03-cafe.jpg",
+    "previews/04-cat.jpg"
+  ],
+  "outputs": ["image"],
+  "inputs": [
+    {
+      "id": "subject",
+      "type": "text",
+      "label": "画面内容",
+      "required": true,
+      "maxLength": 120,
+      "placeholder": "例如：一个穿西装的男人站在挂满彩色衬衫的服装店里"
+    },
+    {
+      "id": "palette",
+      "type": "select",
+      "label": "用色",
+      "default": "vivid",
+      "options": [
+        { "value": "vivid", "label": "缤纷蜡笔", "prompt": "bright saturated oil pastel colors (magenta, lime green, orange, cobalt blue, violet, yellow) used boldly side by side" },
+        { "value": "pencil", "label": "铅笔+点彩", "prompt": "mostly a loose graphite pencil sketch in grey hatching, with only a few bold crayon color accents (such as turquoise, cobalt blue and red) on key elements" },
+        { "value": "warm", "label": "暖色调", "prompt": "a warm crayon palette of orange, ochre, brick red, golden yellow and brown, with small touches of dark green" },
+        { "value": "cool", "label": "冷色调", "prompt": "a cool crayon palette of cobalt blue, turquoise, teal, leaf green and violet, with small touches of warm skin tones" }
+      ]
+    },
+    {
+      "id": "detail",
+      "type": "select",
+      "label": "笔法",
+      "default": "naive",
+      "options": [
+        { "value": "doodle", "label": "简笔涂鸦", "prompt": "Extremely simple doodle drawing with very few strokes, basic childlike shapes, minimal detail, like a quick crayon sketch by a child" },
+        { "value": "naive", "label": "童趣插画", "prompt": "Naive picture-book illustration with simplified shapes, wobbly hand-drawn outlines and charmingly imperfect proportions" },
+        { "value": "rich", "label": "饱满涂色", "prompt": "Densely colored oil pastel drawing, thick layered wax strokes covering most of the shapes, energetic scribbled texture" }
+      ]
+    },
+    {
+      "id": "background",
+      "type": "select",
+      "label": "背景",
+      "default": "paper",
+      "options": [
+        { "value": "paper", "label": "白纸留白", "prompt": "Drawn on plain white drawing paper with lots of uncolored paper showing and a subtle paper grain" },
+        { "value": "filled", "label": "满幅场景", "prompt": "The whole frame is filled with a crayon-colored scene and background, loosely scribbled right up to the edges" },
+        { "value": "white", "label": "纯白底", "prompt": "A single isolated subject on a pure flat white background, no background strokes, no scenery, no paper texture" }
+      ]
+    }
+  ],
+  "prompt": {
+    "template": "Hand-drawn crayon and oil pastel illustration of {{subject}}. {{detail}}. Colors: {{palette}}. Visible waxy crayon strokes with directional hatching, rough broken edges where the wax skips over the paper tooth, uneven hand pressure, colors scribbled and layered rather than smoothly blended, slightly wobbly outlines, like a single frame from a hand-drawn crayon animation short film. Flat 2D artwork viewed straight on, no photographic lighting, no digital smoothness. {{background}}.",
+    "avoid": [
+      "photograph",
+      "photorealistic",
+      "3D render",
+      "CGI",
+      "vector art",
+      "clean digital lines",
+      "smooth gradients",
+      "airbrush",
+      "anime style",
+      "glossy",
+      "text",
+      "letters",
+      "watermark",
+      "signature",
+      "frame border",
+      "crayons or pencils visible in the picture"
+    ]
+  },
+  "cutout": {
+    "method": "keyWhite",
+    "threshold": 0.1,
+    "trim": true,
+    "default": false,
+    "lockInputs": { "background": "white" }
+  },
+  "image": {
+    "models": ["gpt-image-2"],
+    "aspectRatios": ["16:9", "9:16", "1:1", "4:3", "3:4"],
+    "defaultAspectRatio": "16:9",
+    "resolutions": ["1K", "2K"],
+    "defaultResolution": "1K"
+  }
+}

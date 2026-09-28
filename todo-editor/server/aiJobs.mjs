@@ -12,6 +12,8 @@ import {
   submitImageGeneration,
 } from './huniuClient.mjs'
 import { readAiConfig } from './huniuConfig.mjs'
+import { compileStyleById } from './stylePacks.mjs'
+import { cutoutFile } from './imageCutout.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const DATA_DIR = process.env.TODO_DATA_DIR
@@ -70,6 +72,7 @@ const updateJob = db.prepare(`
     duration=?, error=?, updated_at=? WHERE id=?
 `)
 const setPhase = db.prepare(`UPDATE ai_jobs SET phase=?, updated_at=? WHERE id=?`)
+const setParams = db.prepare(`UPDATE ai_jobs SET params=?, updated_at=? WHERE id=?`)
 const deleteJob = db.prepare('DELETE FROM ai_jobs WHERE id=?')
 const cancelQueued = db.prepare(`DELETE FROM ai_jobs WHERE id=? AND status='queued'`)
 const ackDone = db.prepare(`
@@ -123,6 +126,7 @@ function rowToJob(r) {
 }
 
 export function enqueueAiJob(body) {
+  if (body.styleId) return enqueueStyledJob(body)
   const kind = body.kind === 'video' ? 'video' : 'image'
   const prompt = String(body.prompt || '').trim()
   if (!prompt) throw new Error('缺少提示词')
@@ -147,6 +151,40 @@ export function enqueueAiJob(body) {
   }
 
   insertJob.run(id, kind, prompt, JSON.stringify(params), refPath, now, now)
+  kickWorker()
+  return rowToJob(getJob.get(id))
+}
+
+/** 风格包任务：提示词 / 画幅 / 模型全部由风格包编译，忽略前端自由字段 */
+function enqueueStyledJob(body) {
+  if (body.kind && body.kind !== 'image') throw new Error('风格包目前只支持生图')
+  const compiled = compileStyleById(body.styleId, {
+    inputs: body.styleInputs,
+    aspectRatio: body.size,
+    resolution: body.quality,
+    model: body.model,
+    cutout: body.cutout,
+  })
+  const id = `i_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`
+  const now = Date.now()
+  const params = {
+    size: compiled.size,
+    model: compiled.model,
+    quality: compiled.quality,
+    duration: 5,
+    autoTimeline: !!body.autoTimeline,
+    width: null,
+    height: null,
+    style: compiled.meta,
+    cutout: compiled.cutout,
+  }
+  let refPath = compiled.refPath
+  if (body.imageDataUrl) {
+    const b64 = String(body.imageDataUrl).replace(/^data:image\/\w+;base64,/, '')
+    refPath = path.join(AI_OUT, `${id}_ref.png`)
+    writeFileSync(refPath, Buffer.from(b64, 'base64'))
+  }
+  insertJob.run(id, 'image', compiled.prompt, JSON.stringify(params), refPath, now, now)
   kickWorker()
   return rowToJob(getJob.get(id))
 }
@@ -221,7 +259,9 @@ async function runImageJob(job) {
   let imageDataUrl = ''
   if (row?.ref_path && existsSync(row.ref_path)) {
     const buf = readFileSync(row.ref_path)
-    imageDataUrl = `data:image/png;base64,${buf.toString('base64')}`
+    const ext = path.extname(row.ref_path).slice(1).toLowerCase()
+    const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'webp' ? 'image/webp' : 'image/png'
+    imageDataUrl = `data:${mime};base64,${buf.toString('base64')}`
   }
 
   const submitted = await submitImageGeneration(config, {
@@ -233,10 +273,35 @@ async function runImageJob(job) {
   })
 
   setPhase.run('下载图片…', Date.now(), job.id)
-  const file = await saveImageResult(config, submitted, filePath)
-  const name = path.basename(file)
+  if (!params.cutout) {
+    const file = await saveImageResult(config, submitted, filePath)
+    const name = path.basename(file)
+    updateJob.run(
+      'done', '完成', name, `/ai-generated/${name}`, 'image',
+      null, null, Date.now(), job.id,
+    )
+    return
+  }
+
+  const rawPath = path.join(AI_OUT, `${job.id}_raw`)
+  await saveImageResult(config, submitted, rawPath)
+  setPhase.run('抠像中…', Date.now(), job.id)
+  let name = path.basename(filePath)
+  let phase = '完成 · 透明底'
+  try {
+    const { width, height } = cutoutFile(rawPath, filePath, params.cutout)
+    params.width = width
+    params.height = height
+    setParams.run(JSON.stringify(params), Date.now(), job.id)
+  } catch (e) {
+    // 抠像失败保留原图，不丢生成结果
+    const ext = readFileSync(rawPath)[0] === 0xff ? '.jpg' : '.png'
+    name = `${job.id}${ext}`
+    writeFileSync(path.join(AI_OUT, name), readFileSync(rawPath))
+    phase = `完成 · 未抠像（${String(e instanceof Error ? e.message : e).slice(0, 60)}）`
+  }
   updateJob.run(
-    'done', '完成', name, `/ai-generated/${name}`, 'image',
+    'done', phase, name, `/ai-generated/${name}`, 'image',
     null, null, Date.now(), job.id,
   )
 }

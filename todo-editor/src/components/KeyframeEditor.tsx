@@ -3,7 +3,7 @@ import { useApp } from '../store'
 import { setLivePlayhead } from '../lib/livePlayhead'
 import { broadcastPlayheadSeek } from '../lib/storeSync'
 import { PrKeyframeRow, livePropValue } from './PrKeyframeRow'
-import type { Clip, Ease, Keyframe } from '../types'
+import type { Clip, Ease, Keyframe, KfHandle } from '../types'
 
 const EASE_PRESETS: { id: Ease; label: string }[] = [
   { id: 'linear', label: '线性' },
@@ -34,6 +34,9 @@ const PROP_META: {
 type Props = {
   scrollRef: RefObject<HTMLDivElement | null>
 }
+
+const KF_H_MIN = 90
+const KF_H_MAX = 480
 
 function hasPropKfs(clip: Clip, id: string) {
   if (id === 'xy') return (clip.keyframes.x?.length ?? 0) > 0 || (clip.keyframes.y?.length ?? 0) > 0
@@ -97,10 +100,32 @@ export function KeyframeEditor({ scrollRef }: Props) {
 
   const visible = !!(clip && armedProps.length && meta && activeProp)
 
+  const [kfH, setKfH] = useState(() => {
+    const v = Number(localStorage.getItem('todo-kf-h'))
+    return Number.isFinite(v) && v >= KF_H_MIN ? Math.min(KF_H_MAX, v) : 150
+  })
   useEffect(() => {
-    document.documentElement.style.setProperty('--kf-h', visible ? '108px' : '0px')
+    document.documentElement.style.setProperty('--kf-h', visible ? `${kfH}px` : '0px')
     return () => { document.documentElement.style.setProperty('--kf-h', '0px') }
-  }, [visible])
+  }, [visible, kfH])
+
+  const startResize = (e: React.PointerEvent) => {
+    e.preventDefault()
+    const y0 = e.clientY
+    const h0 = kfH
+    let last = h0
+    const move = (ev: PointerEvent) => {
+      last = Math.max(KF_H_MIN, Math.min(KF_H_MAX, h0 + ev.clientY - y0))
+      setKfH(last)
+    }
+    const up = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      localStorage.setItem('todo-kf-h', String(Math.round(last)))
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
 
   useEffect(() => {
     const tl = scrollRef.current
@@ -147,6 +172,10 @@ export function KeyframeEditor({ scrollRef }: Props) {
     })
     return { ...clip, keyframes: { ...clip.keyframes, x: merged } }
   }, [clip])
+  const xySpeedTracks = useMemo(
+    () => (clip ? [clip.keyframes.x ?? [], clip.keyframes.y ?? []] : []),
+    [clip],
+  )
 
   if (!visible || !clip || !meta || !activeProp || !xyGraphClip) return null
 
@@ -231,6 +260,27 @@ export function KeyframeEditor({ scrollRef }: Props) {
     st.removeKeyframesByIds({ x: xIds, y: yIds })
   }
 
+  /** 位置按时刻成对：合并图上的 id → 该时刻 x/y 两条轨的关键帧 */
+  const autoBezierXy = (ids: string[]) => {
+    const xs = clip.keyframes.x ?? []
+    const ys = clip.keyframes.y ?? []
+    const times = ids
+      .map((id) => (xs.find((k) => k.id === id) ?? ys.find((k) => k.id === id))?.t)
+      .filter((t): t is number => t != null)
+    const at = (list: Keyframe[]) => list.filter((k) => times.some((t) => Math.abs(k.t - t) < 1e-4)).map((k) => k.id)
+    useApp.getState().autoBezierKeyframes({ x: at(xs), y: at(ys) })
+  }
+
+  /** 位置手柄：同一时刻的 x/y 写入同一归一化手柄，运动路径保持直线、只改快慢 */
+  const setXyHandle = (_p: string, kfId: string, which: 'oh' | 'ih', h: KfHandle) => {
+    const xs = clip.keyframes.x ?? []
+    const ys = clip.keyframes.y ?? []
+    const hit = xs.find((k) => k.id === kfId) ?? ys.find((k) => k.id === kfId)
+    if (!hit) return
+    for (const k of xs) if (Math.abs(k.t - hit.t) < 1e-4) setKeyframeHandle('x', k.id, which, h)
+    for (const k of ys) if (Math.abs(k.t - hit.t) < 1e-4) setKeyframeHandle('y', k.id, which, h)
+  }
+
   const removePropByIds = (ids: string[]) => {
     if (!ids.length || !activeProp || activeProp === 'xy') return
     useApp.getState().removeKeyframesByIds({ [activeProp]: ids })
@@ -256,14 +306,20 @@ export function KeyframeEditor({ scrollRef }: Props) {
 
   return (
     <div
-      className="shrink-0 border-b flex flex-col min-h-0"
+      className="relative shrink-0 border-b flex flex-col min-h-0"
       style={{
         background: 'var(--surface-1)',
         borderColor: 'var(--border)',
-        height: 'var(--kf-h, 108px)',
+        height: 'var(--kf-h, 150px)',
       }}
       data-testid="keyframe-editor"
     >
+      <div
+        className="absolute left-0 right-0 bottom-[-3px] h-[6px] z-20 cursor-row-resize hover:bg-[var(--accent-dim)]"
+        title="拖动调整曲线区高度"
+        data-testid="kf-editor-resize"
+        onPointerDown={startResize}
+      />
       <div className="flex items-center gap-1.5 px-2 py-0.5 min-h-0 flex-wrap">
         <div className="flex flex-wrap gap-0.5 shrink-0">
           {armedProps.map((p) => (
@@ -277,6 +333,16 @@ export function KeyframeEditor({ scrollRef }: Props) {
               {p.label}
             </button>
           ))}
+          <button
+            type="button"
+            className="btn btn-ghost text-[10px] h-5 px-1.5"
+            style={{ color: 'var(--accent)' }}
+            title="选中片段的位置/缩放/旋转/透明等所有关键帧一键自动贝塞尔（F3）"
+            data-testid="kf-auto-bezier-all"
+            onClick={() => useApp.getState().autoBezierAll()}
+          >
+            一键贝塞尔
+          </button>
         </div>
         <div className="flex-1 min-w-0 flex items-center gap-2 overflow-x-auto">
           {isXy ? (
@@ -363,7 +429,7 @@ export function KeyframeEditor({ scrollRef }: Props) {
           style={{ borderColor: 'var(--border)', background: 'var(--surface-2)' }}
         >
           <span className="text-[10px] font-medium truncate" style={{ color: 'var(--text-muted)' }}>
-            {isXy ? '位置' : '曲线'}
+            {isXy ? '位置速度' : `${meta.label}速度`}
           </span>
         </div>
         <div
@@ -397,9 +463,11 @@ export function KeyframeEditor({ scrollRef }: Props) {
               onSeek={(t) => seekKeepVisible(t, { exact: true })}
               onMoveKeyframe={isXy ? moveXyTime : setKeyframeTime}
               onSetEase={isXy ? setXyEase : setKeyframeEase}
-              onSetHandle={isXy ? undefined : setKeyframeHandle}
+              onSetHandle={isXy ? setXyHandle : setKeyframeHandle}
               onEnableBezier={isXy ? undefined : enableBezierAt}
               onRemoveKeyframes={isXy ? removeXyByIds : removePropByIds}
+              speedTracks={isXy ? xySpeedTracks : undefined}
+              onAutoBezier={isXy ? autoBezierXy : (ids) => useApp.getState().autoBezierKeyframes({ [activeProp]: ids })}
             />
           </div>
         </div>

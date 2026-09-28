@@ -220,7 +220,7 @@ export const TimelineClip = memo(function TimelineClip({
         useApp.getState().openPropWheelOnMonitor()
       }}
       onContextMenu={onContextMenu}
-      title="1 静态 · 2 K帧模式 · 3 转场；K帧下 S缩放 T透明"
+      title="S缩放 · R旋转 · 1 静态 · 2 K帧模式 · 3 转场；K帧下 T透明"
     >
       <div
         className="absolute left-0 top-0 bottom-0 w-1.5 cursor-ew-resize opacity-0 group-hover:opacity-100 z-20"

@@ -8,6 +8,7 @@ const { exportSequence } = require('./exportSequence.cjs')
 const { createNativePlayer, rgb24ToBmpDataUrl } = require('./nativePlayer.cjs')
 const { makeProxy } = require('./makeProxy.cjs')
 const { createPreviewEngine } = require('./previewEngine.cjs')
+const { createRecentProjects, writeProjectFile, readProjectFile } = require('./projectFile.cjs')
 
 const isDev = !app.isPackaged
 
@@ -29,6 +30,9 @@ let aiServerProc = null
 let aiBaseUrl = ''
 /** @type {ReturnType<typeof createPreviewEngine> | null} */
 let previewEngine = null
+/** 主窗关闭前先让渲染层落盘工程；渲染层回 close-ready 或超时后才真正关闭 */
+let allowMainClose = false
+let closeRequested = false
 
 // 硬件加速默认开启；仅在环境变量显式关闭时禁用
 if (process.env.TODO_DISABLE_GPU === '1') {
@@ -78,7 +82,22 @@ function createWindow() {
   })
 
   mainWindow = win
+  allowMainClose = false
+  closeRequested = false
   win.once('ready-to-show', () => win.show())
+  win.on('close', (e) => {
+    if (allowMainClose || win.webContents.isLoading()) return
+    e.preventDefault()
+    if (closeRequested) return
+    closeRequested = true
+    win.webContents.send('desktop:request-close')
+    setTimeout(() => {
+      if (win.isDestroyed()) return
+      allowMainClose = true
+      win.close()
+    }, 8000)
+  })
+  win.webContents.on('render-process-gone', () => { allowMainClose = true })
   win.on('closed', () => {
     mainWindow = null
     if (timelineWindow && !timelineWindow.isDestroyed()) timelineWindow.close()
@@ -273,6 +292,8 @@ function userDataPaths() {
   }
   return { root, projects, cache, exports: exportsDir }
 }
+
+const recentProjects = createRecentProjects(() => path.join(app.getPath('userData'), 'recent-projects.json'))
 
 function aiServerScript() {
   if (app.isPackaged) {
@@ -541,29 +562,60 @@ app.whenReady().then(async () => {
     }
   })
 
-  ipcMain.handle('desktop:save-project', async (_e, { defaultName, json }) => {
-    const { projects } = userDataPaths()
-    const { canceled, filePath } = await dialog.showSaveDialog({
-      title: '保存工程',
-      defaultPath: path.join(projects, defaultName || 'project.todo.json'),
-      filters: [{ name: 'TO DO 工程', extensions: ['todo.json', 'json'] }],
-    })
-    if (canceled || !filePath) return { ok: false, canceled: true }
-    fs.writeFileSync(filePath, typeof json === 'string' ? json : JSON.stringify(json, null, 2), 'utf8')
+  ipcMain.handle('desktop:save-project', async (_e, { defaultName, json, filePath: target }) => {
+    let filePath = typeof target === 'string' && target ? target : ''
+    if (!filePath) {
+      const { projects } = userDataPaths()
+      const r = await dialog.showSaveDialog(mainWindow ?? undefined, {
+        title: '保存工程',
+        defaultPath: path.join(projects, defaultName || 'project.todo.json'),
+        filters: [{ name: 'TO DO 工程', extensions: ['todo.json', 'json'] }],
+      })
+      if (r.canceled || !r.filePath) return { ok: false, canceled: true }
+      filePath = r.filePath
+    }
+    try {
+      writeProjectFile(filePath, json)
+    } catch (e) {
+      return { ok: false, error: e.message, path: filePath }
+    }
+    recentProjects.push(filePath)
     return { ok: true, path: filePath }
   })
 
-  ipcMain.handle('desktop:open-project', async () => {
-    const { projects } = userDataPaths()
-    const { canceled, filePaths } = await dialog.showOpenDialog({
-      title: '打开工程',
-      defaultPath: projects,
-      properties: ['openFile'],
-      filters: [{ name: 'TO DO 工程', extensions: ['todo.json', 'json'] }],
-    })
-    if (canceled || !filePaths[0]) return { ok: false, canceled: true }
-    const raw = fs.readFileSync(filePaths[0], 'utf8')
-    return { ok: true, path: filePaths[0], json: JSON.parse(raw) }
+  ipcMain.handle('desktop:open-project', async (_e, opts) => {
+    let filePath = typeof opts?.filePath === 'string' ? opts.filePath : ''
+    if (!filePath) {
+      const { projects } = userDataPaths()
+      const r = await dialog.showOpenDialog(mainWindow ?? undefined, {
+        title: '打开工程',
+        defaultPath: projects,
+        properties: ['openFile'],
+        filters: [{ name: 'TO DO 工程', extensions: ['todo.json', 'json'] }],
+      })
+      if (r.canceled || !r.filePaths[0]) return { ok: false, canceled: true }
+      filePath = r.filePaths[0]
+    }
+    if (!fs.existsSync(filePath)) {
+      recentProjects.remove(filePath)
+      return { ok: false, notFound: true, path: filePath, error: '工程文件不存在' }
+    }
+    try {
+      const { data, relinked, missing } = readProjectFile(filePath)
+      recentProjects.push(filePath)
+      return { ok: true, path: filePath, json: data, relinked, missing }
+    } catch (e) {
+      return { ok: false, path: filePath, error: e.message }
+    }
+  })
+
+  ipcMain.handle('desktop:recent-projects', () => recentProjects.list()
+    .map((p) => ({ path: p, exists: fs.existsSync(p) })))
+  ipcMain.handle('desktop:remove-recent-project', (_e, filePath) => recentProjects.remove(String(filePath || '')))
+
+  ipcMain.on('desktop:close-ready', () => {
+    allowMainClose = true
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close()
   })
 
   ipcMain.handle('desktop:pick-media', async () => {

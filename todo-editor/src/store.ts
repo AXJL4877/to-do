@@ -1,10 +1,10 @@
 import { create } from 'zustand'
 import {
-  type Camera3D, type Clip, type ClipMeta, type EffectPreset, type ExportJob, type MediaItem, type ProjectSettings, type Sequence,
+  type Camera3D, type Clip, type ClipMeta, type Keyframe, type EffectPreset, type ExportJob, type MediaItem, type ProjectSettings, type Sequence,
   type Tool, type Track, type TrackKind, type Transform3D, type TransitionType,
   defaultAudio, defaultColor, defaultScene3d, defaultText, defaultTransform, defaultTransform3d, uid,
 } from './types'
-import { patchClipTransform, patchClipXY, resolveClipTransform, sampleKeyframes, seedPositionKeyframes, defaultHandles, snapToFrame } from './lib/keyframeEval'
+import { autoBezierKeyframes, splitKeyframes, patchClipTransform, patchClipXY, resolveClipTransform, sampleKeyframes, seedPositionKeyframes, defaultHandles, snapToFrame } from './lib/keyframeEval'
 import { clearPreviewCache, getProgramPreviewCache, notifyPreviewCacheChanged } from './lib/previewCache'
 import { ensureScene3d } from './lib/scene3d'
 import { desktop } from './lib/desktop'
@@ -467,10 +467,30 @@ type Snap = { sequences: Sequence[]; activeSeqId: string }
 let clipboard: Clip[] = []
 let attrClipboard: Pick<Clip, 'transform' | 'color' | 'audio'> | null = null
 
+export type DraftEntry = { id: string; name: string; updatedAt: number; path?: string }
+
+/** 工程文件 JSON 版本；v2 起素材带 relPath、文件带 savedAt */
+const PROJECT_FILE_VERSION = 2
+/** 工程内容相关字段：任一变化即视为未保存 */
+const DIRTY_KEYS = ['sequences', 'activeSeqId', 'media', 'folders', 'settings', 'presets', 'fonts', 'monitorCompose'] as const
+/** >0 时的 set 不标脏（加载/保存本身引起的字段变化） */
+let dirtyMute = 0
+let fileSaving: Promise<boolean> | null = null
+
+function projectNameFromPath(p: string) {
+  const base = p.split(/[\\/]/).pop() || p
+  return base.replace(/\.todo\.json$/i, '').replace(/\.json$/i, '') || base
+}
+
 export type AppStore = {
-  drafts: { id: string; name: string; updatedAt: number }[]
+  drafts: DraftEntry[]
   projectId: string
   projectName: string
+  /** 桌面版：当前工程文件路径；null = 尚未存成文件（仅本地草稿） */
+  projectPath: string | null
+  /** 自上次保存到文件（或本地草稿）后有未保存改动 */
+  dirty: boolean
+  recentProjects: { path: string; exists: boolean }[]
   settings: ProjectSettings
   prefs: {
     defaultDuration: number
@@ -550,10 +570,17 @@ export type AppStore = {
   undo: () => void
   redo: () => void
   newProject: (name?: string) => void
-  openDraft: (id: string) => void
+  /** 草稿绑定了工程文件时（桌面版）优先从文件打开；localOnly 强制读本地草稿 */
+  openDraft: (id: string, opts?: { localOnly?: boolean }) => void
   saveProject: (opts?: { silent?: boolean }) => void
-  saveProjectToFile: () => Promise<void>
-  openProjectFromFile: () => Promise<void>
+  /** 有 projectPath 时直接写回；saveAs 或无路径时弹另存为。返回是否写入成功 */
+  saveProjectToFile: (opts?: { saveAs?: boolean; silent?: boolean }) => Promise<boolean>
+  /** 不传路径弹打开对话框 */
+  openProjectFromFile: (filePath?: string) => Promise<boolean>
+  /** 切换/关闭前落盘：有文件写文件，否则写本地草稿 */
+  flushProject: () => Promise<void>
+  refreshRecentProjects: () => Promise<void>
+  removeRecentProject: (filePath: string) => Promise<void>
   pickDesktopMedia: () => Promise<void>
   saveAs: (name: string) => void
   renameDraft: (id: string, name: string) => void
@@ -598,8 +625,8 @@ export type AppStore = {
   closePropWheel: () => void
   /** 在节目监视器中心打开属性轮盘 */
   openPropWheelOnMonitor: (ring?: 'static' | 'dynamic' | 'transition') => void
-  /** 监视器中心直接打开属性拨盘（K帧模式下 S/T） */
-  openPropDialOnMonitor: (prop: 'scale' | 'opacity') => void
+  /** 监视器中心直接打开属性拨盘（S/R；K帧模式下打关键帧） */
+  openPropDialOnMonitor: (prop: 'scale' | 'opacity' | 'rotation') => void
   setEditMode: (m: 'insert' | 'overwrite') => void
   setSourceIO: (a: number, b: number) => void
   addClipFromMedia: (
@@ -632,6 +659,11 @@ export type AppStore = {
   updateSelectedTransform: (p: Partial<Clip['transform']>) => void
   /** 在播放头写入/更新动态属性关键帧（优先于静态） */
   setDynamicAtPlayhead: (prop: string, value: number) => void
+  /** S/R 鼠标手势：开始时记一次历史；amount 对 scale 是倍率、对 rotation 是角度增量 */
+  transformGesture: null | { prop: 'scale' | 'rotation'; keyed: boolean }
+  beginTransformGesture: (prop: 'scale' | 'rotation') => boolean
+  updateTransformGesture: (amount: number) => void
+  endTransformGesture: (commit: boolean) => void
   updateSelectedColor: (p: Partial<Clip['color']>) => void
   updateSelectedAudio: (p: Partial<Clip['audio']>) => void
   updateSelectedText: (p: Partial<NonNullable<Clip['text']>>) => void
@@ -666,6 +698,10 @@ export type AppStore = {
     handle: import('./types').KfHandle,
   ) => void
   enableBezierAt: (prop: string, kfId: string) => void
+  /** F3：选中关键帧转自动贝塞尔（速度连续、不过冲） */
+  autoBezierKeyframes: (byProp: Record<string, string[]>) => void
+  /** 选中片段所有属性的全部关键帧一键自动贝塞尔 */
+  autoBezierAll: () => void
   toggleKeyframeAtPlayhead: (prop: string, value: number) => void
   gotoAdjacentKeyframe: (prop: string, dir: -1 | 1) => void
   applyMotionPreset: (preset: 'fadeIn' | 'pushIn' | 'slideLeft' | 'pop' | 'fadeOut', opts?: { durationSec?: number }) => void
@@ -724,6 +760,15 @@ function loadLayout(): AppStore['layout'] {
 }
 
 const initialLayout = loadLayout()
+
+const MONITOR_VIEWS = ['program', 'edit', 'dual', 'source'] as const
+function loadMonitorView(): AppStore['monitorView'] {
+  try {
+    const raw = localStorage.getItem('todo-monitor-view')
+    if (raw && (MONITOR_VIEWS as readonly string[]).includes(raw)) return raw as AppStore['monitorView']
+  } catch { /* ignore */ }
+  return 'dual'
+}
 
 /** 保证有可编辑的选中片段；失效选中时自动选中播放头下最上层片段 */
 function ensureClipSelected(
@@ -797,6 +842,70 @@ function flushPendingDragMove(get: () => AppStore, set: (p: Partial<AppStore> | 
     dragMoveRaf = 0
   }
   if (pendingDragMove) flushDragMove(get, set)
+}
+
+/**
+ * 在片段局部时间 L 切成两段：关键帧按切点精确拆分（右段时间归零），画面在切点前后完全不变；
+ * 素材入/出点按速度与倒放换算；左段不带出场转场、右段不带入场转场。
+ */
+function splitClipAt(c: Clip, L: number): [Clip, Clip] {
+  const speed = Math.max(0.05, c.speed <= 0 ? 1 : (c.speed || 1))
+  const cutMedia = L * speed
+  const leftKf: Record<string, Keyframe[]> = {}
+  const rightKf: Record<string, Keyframe[]> = {}
+  for (const [prop, list] of Object.entries(c.keyframes)) {
+    if (!list?.length) continue
+    const { left, right } = splitKeyframes(list, L)
+    leftKf[prop] = left
+    rightKf[prop] = right
+  }
+  const sp = splitKeyframes(c.speedKeyframes, L)
+  const span = c.outPoint > c.inPoint ? c.outPoint - c.inPoint : c.duration * speed
+  const media = c.reverse
+    ? { left: { inPoint: c.inPoint + span - cutMedia, outPoint: c.inPoint + span }, right: { inPoint: c.inPoint, outPoint: c.inPoint + span - cutMedia } }
+    : { left: { inPoint: c.inPoint, outPoint: c.inPoint + cutMedia }, right: { inPoint: c.inPoint + cutMedia, outPoint: c.inPoint + span } }
+  const left: Clip = {
+    ...c, duration: L, ...media.left,
+    keyframes: leftKf, speedKeyframes: sp.left, transitionOut: undefined,
+    effects: c.effects.filter((e) => e.start < L).map((e) => ({ ...e, end: Math.min(e.end, L) })),
+  }
+  const right: Clip = {
+    ...c, id: uid('clip'), start: c.start + L, duration: c.duration - L, ...media.right,
+    keyframes: rightKf, speedKeyframes: sp.right, transitionIn: undefined,
+    effects: c.effects.filter((e) => e.end > L).map((e) => ({ ...e, id: uid('fx'), start: Math.max(0, e.start - L), end: e.end - L })),
+  }
+  return [left, right]
+}
+
+/** S/R 手势开始时每个选中片段的原值（scale: a=scaleX b=scaleY；rotation: a=b=角度） */
+const gestureOrigins = new Map<string, { a: number; b: number }>()
+
+function staticPropValue(c: Clip, prop: string, fallback: number) {
+  switch (prop) {
+    case 'x': return c.transform.x
+    case 'y': return c.transform.y
+    case 'scale': return c.transform.scaleX
+    case 'rotation': return c.transform.rotation
+    case 'opacity': return c.transform.opacity
+    case 'volume': return c.audio.gainDb
+    case 'fontSize': return c.text?.fontSize ?? 48
+    default: return fallback
+  }
+}
+
+/** 在播放头写入/覆盖关键帧；首条关键帧且不在起点时先钉住起点静态值，避免整段瞬间跳到新值 */
+function upsertDynamicKf(c: Clip, prop: string, value: number, playhead: number, fps: number): Clip {
+  const localT = snapToFrame(Math.max(0, playhead - c.start), fps)
+  const near = 0.51 / fps
+  const list = [...(c.keyframes[prop] ?? [])]
+  if (list.length === 0 && localT > near) {
+    list.push({ id: uid('kf'), t: 0, value: staticPropValue(c, prop, value), ease: 'linear' })
+  }
+  const idx = list.findIndex((k) => Math.abs(k.t - localT) < near)
+  if (idx >= 0) list[idx] = { ...list[idx], value, t: localT }
+  else list.push({ id: uid('kf'), t: localT, value, ease: 'linear' })
+  list.sort((a, b) => a.t - b.t)
+  return { ...c, keyframes: { ...c.keyframes, [prop]: list } }
 }
 
 function pushHistoryCoalesced(get: () => AppStore, set: (p: Partial<AppStore> | ((s: AppStore) => Partial<AppStore>)) => void) {
@@ -889,27 +998,46 @@ export const useApp = create<AppStore>((set, get) => {
 
   const first = makeSeq()
 
-  const loadDraftsIndex = (): { id: string; name: string; updatedAt: number }[] => {
+  const loadDraftsIndex = (): DraftEntry[] => {
     try {
       const raw = localStorage.getItem('todo-drafts-index')
       if (raw) {
-        const list = JSON.parse(raw) as { id: string; name: string; updatedAt: number }[]
+        const list = JSON.parse(raw) as DraftEntry[]
         if (Array.isArray(list) && list.length) return list
       }
     } catch { /* */ }
     return [{ id: 'draft_demo', name: '演示草稿', updatedAt: Date.now() }]
   }
 
-  const persistDraftsIndex = (drafts: { id: string; name: string; updatedAt: number }[]) => {
+  const persistDraftsIndex = (drafts: DraftEntry[]) => {
     localStorage.setItem('todo-drafts-index', JSON.stringify(drafts))
   }
 
+  /** 加载/新建/保存引起的状态替换：不标脏，并把 dirty 置回 false */
+  const setClean = (patch: Partial<AppStore>) => {
+    dirtyMute++
+    try { set({ ...patch, dirty: false }) } finally { dirtyMute-- }
+  }
+
+  const projectPayload = (s: AppStore) => ({
+    version: PROJECT_FILE_VERSION,
+    projectName: s.projectName,
+    settings: s.settings, media: s.media, folders: s.folders, sequences: s.sequences,
+    activeSeqId: s.activeSeqId, prefs: s.prefs, presets: s.presets, fonts: s.fonts,
+    monitorCompose: s.monitorCompose, playhead: s.playhead,
+  })
+
   const drafts0 = loadDraftsIndex()
+  const lastId = localStorage.getItem('todo-last-draft')
+  const draftStart = drafts0.find((d) => d.id === lastId) ?? drafts0[0]
 
   return {
     drafts: drafts0,
-    projectId: drafts0[0]?.id ?? 'draft_demo',
-    projectName: drafts0[0]?.name ?? '演示草稿',
+    projectId: draftStart?.id ?? 'draft_demo',
+    projectName: draftStart?.name ?? '演示草稿',
+    projectPath: draftStart?.path ?? null,
+    dirty: false,
+    recentProjects: [],
     settings: defaultSettings(),
     prefs: {
       defaultDuration: 5, cachePath: './cache', performance: 'balanced',
@@ -965,9 +1093,10 @@ export const useApp = create<AppStore>((set, get) => {
     modal: null,
     layout: initialLayout,
     timelineZoom: 80,
-    monitorView: 'dual',
+    monitorView: loadMonitorView(),
     monitorCompose: '2d',
     autoKeyframe: false,
+    transformGesture: null,
 
     seq() {
       return get().sequences.find((q) => q.id === get().activeSeqId) ?? get().sequences[0]
@@ -1020,12 +1149,14 @@ export const useApp = create<AppStore>((set, get) => {
     },
 
     newProject(name = '未命名项目') {
+      void get().flushProject()
       const s = makeSeq()
       const id = uid('draft')
       const drafts = [...get().drafts, { id, name, updatedAt: Date.now() }]
       persistDraftsIndex(drafts)
-      set({
-        projectId: id, projectName: name, settings: defaultSettings(), media: [],
+      localStorage.setItem('todo-last-draft', id)
+      setClean({
+        projectId: id, projectName: name, projectPath: null, settings: defaultSettings(), media: [],
         sequences: [s], activeSeqId: s.id, selectedClipIds: [], playhead: 0,
         drafts,
         history: [], future: [], modal: null,
@@ -1033,9 +1164,17 @@ export const useApp = create<AppStore>((set, get) => {
       notify('已新建项目')
     },
 
-    openDraft(id) {
+    openDraft(id, opts) {
       const d = get().drafts.find((x) => x.id === id)
       if (!d) return
+      if (d.path && desktop() && !opts?.localOnly) {
+        void get().openProjectFromFile(d.path).then((ok) => {
+          if (!ok) get().openDraft(id, { localOnly: true })
+        })
+        return
+      }
+      if (id !== get().projectId) void get().flushProject()
+      localStorage.setItem('todo-last-draft', id)
       const raw = localStorage.getItem(`todo-draft-${id}`)
       if (raw) {
         try {
@@ -1047,15 +1186,16 @@ export const useApp = create<AppStore>((set, get) => {
           const selectedClipIds = savedIds.filter((cid) => seq?.clips.some((c) => c.id === cid))
           const media = reviveMediaList((data.media as MediaItem[]) ?? [])
           const offlineN = media.filter((m) => m.offline).length
-          set({
-            projectId: id, projectName: d.name, settings: { ...defaultSettings(), ...(data.settings as ProjectSettings) }, media,
+          setClean({
+            projectId: id, projectName: d.name, projectPath: d.path ?? null,
+            settings: { ...defaultSettings(), ...(data.settings as ProjectSettings) }, media,
             folders: data.folders ?? get().folders,
             sequences,
             activeSeqId,
             prefs: data.prefs ?? get().prefs, presets: data.presets ?? [], fonts: data.fonts ?? get().fonts,
             selectedClipIds,
             playhead: typeof data.playhead === 'number' ? data.playhead : 0,
-            modal: null,
+            history: [], future: [], modal: null,
             monitorCompose: data.monitorCompose === '3d' ? '3d' : '2d',
           })
           notify(offlineN
@@ -1065,56 +1205,112 @@ export const useApp = create<AppStore>((set, get) => {
         } catch { /* */ }
       }
       const s = makeSeq()
-      set({ projectId: id, projectName: d.name, sequences: [s], activeSeqId: s.id, media: [], modal: null })
+      setClean({
+        projectId: id, projectName: d.name, projectPath: d.path ?? null,
+        sequences: [s], activeSeqId: s.id, media: [], history: [], future: [], modal: null,
+      })
     },
 
     saveProject(opts) {
       const s = get()
       const sequences = s.sequences.map((q) => enforceNoOverlap(q))
-      set({ sequences })
-      localStorage.setItem(`todo-draft-${s.projectId}`, JSON.stringify({
-        settings: s.settings, media: s.media, folders: s.folders, sequences,
-        activeSeqId: s.activeSeqId, prefs: s.prefs, presets: s.presets, fonts: s.fonts,
-        monitorCompose: s.monitorCompose,
-        selectedClipIds: s.selectedClipIds,
-        playhead: s.playhead,
-      }))
-      const drafts = s.drafts.map((d) => (d.id === s.projectId ? { ...d, name: s.projectName, updatedAt: Date.now() } : d))
+      dirtyMute++
+      try { set({ sequences }) } finally { dirtyMute-- }
+      try {
+        localStorage.setItem(`todo-draft-${s.projectId}`, JSON.stringify({
+          settings: s.settings, media: s.media, folders: s.folders, sequences,
+          activeSeqId: s.activeSeqId, prefs: s.prefs, presets: s.presets, fonts: s.fonts,
+          monitorCompose: s.monitorCompose,
+          selectedClipIds: s.selectedClipIds,
+          playhead: s.playhead,
+        }))
+      } catch {
+        if (!opts?.silent || !s.projectPath) notify('本地草稿空间不足，请保存为工程文件（Ctrl+S）')
+        return
+      }
+      localStorage.setItem('todo-last-draft', s.projectId)
+      const drafts = s.drafts.map((d) => (d.id === s.projectId
+        ? { ...d, name: s.projectName, updatedAt: Date.now(), ...(s.projectPath ? { path: s.projectPath } : {}) }
+        : d))
       persistDraftsIndex(drafts)
-      set({ drafts })
+      // 桌面版以工程文件为准：本地草稿只是崩溃兜底，不清脏
+      set(desktop() ? { drafts } : { drafts, dirty: false })
       if (!opts?.silent) notify('项目已保存')
     },
 
-    async saveProjectToFile() {
+    async saveProjectToFile(opts) {
       const api = desktop()
       get().saveProject({ silent: true })
-      const s = get()
-      const payload = {
-        version: 1,
-        settings: s.settings, media: s.media, folders: s.folders, sequences: s.sequences,
-        activeSeqId: s.activeSeqId, prefs: s.prefs, presets: s.presets, fonts: s.fonts,
-        monitorCompose: s.monitorCompose, projectName: s.projectName,
-      }
       if (!api) {
-        notify('项目已保存')
-        return
+        if (!opts?.silent) notify('项目已保存')
+        return true
       }
-      const r = await api.saveProjectFile(`${s.projectName || 'project'}.todo.json`, payload)
-      if (r.ok && r.path) notify(`已保存到文件`)
+      const s = get()
+      const startId = s.projectId
+      const target = opts?.saveAs ? null : s.projectPath
+      const payload = projectPayload(s)
+      // 覆盖写入期间可继续编辑：先清脏，写入中的新改动会重新标脏
+      if (target) setClean({})
+      const prev = fileSaving
+      const run = (async () => {
+        if (prev) await prev
+        return api.saveProjectFile(`${s.projectName || 'project'}.todo.json`, payload, target)
+      })()
+      const job = run.then((r) => r.ok, () => false)
+      fileSaving = job
+      let r: Awaited<ReturnType<typeof api.saveProjectFile>>
+      try { r = await run } catch (e) { r = { ok: false, error: String(e) } }
+      if (fileSaving === job) fileSaving = null
+      if (!r.ok || !r.path) {
+        if (target && get().projectId === startId) set({ dirty: true })
+        if (!r.canceled) notify(`保存失败：${r.error ?? '未知错误'}`)
+        return false
+      }
+      const savedPath = r.path
+      if (get().projectId !== startId) return true
+      const name = projectNameFromPath(savedPath)
+      const drafts = get().drafts.map((d) => (d.id === startId ? { ...d, name, path: savedPath, updatedAt: Date.now() } : d))
+      persistDraftsIndex(drafts)
+      if (target) set({ projectPath: savedPath, projectName: name, drafts })
+      else setClean({ projectPath: savedPath, projectName: name, drafts })
+      void get().refreshRecentProjects()
+      if (!opts?.silent) notify(target ? '已保存' : `已保存为「${name}」`)
+      return true
     },
 
-    async openProjectFromFile() {
+    async openProjectFromFile(filePath) {
       const api = desktop()
-      if (!api) { notify('请在桌面版中打开工程文件'); return }
-      const r = await api.openProjectFile()
-      if (!r.ok || !r.json) return
+      if (!api) { notify('请在桌面版中打开工程文件'); return false }
+      const r = await api.openProjectFile(filePath)
+      if (!r.ok || !r.json || !r.path) {
+        if (r.notFound) {
+          notify(`工程文件不存在：${r.path ?? filePath ?? ''}`)
+          void get().refreshRecentProjects()
+        } else if (!r.canceled) {
+          notify(`打开失败：${r.error ?? '未知错误'}`)
+        }
+        return false
+      }
+      const openedPath = r.path
+      const cur = get()
+      const sameFile = !!cur.projectPath && cur.projectPath.toLowerCase() === openedPath.toLowerCase()
+      if (sameFile && cur.dirty) {
+        notify('该工程已打开（有未保存改动，未重新载入）')
+        return true
+      }
+      if (!sameFile) await get().flushProject()
       const data = r.json as Record<string, unknown>
-      const id = uid('draft')
-      const name = String(data.projectName || '导入工程')
+      const existing = get().drafts.find((d) => d.path && d.path.toLowerCase() === openedPath.toLowerCase())
+      const id = existing?.id ?? uid('draft')
+      const name = projectNameFromPath(openedPath)
       const sequences = ((data.sequences as Sequence[]) || [makeSeq()]).map(migrateSequence)
       const media = reviveMediaList((data.media as MediaItem[]) ?? [])
-      set({
-        projectId: id, projectName: name,
+      const drafts = existing
+        ? get().drafts.map((d) => (d.id === id ? { ...d, name, path: openedPath, updatedAt: Date.now() } : d))
+        : [...get().drafts, { id, name, path: openedPath, updatedAt: Date.now() }]
+      persistDraftsIndex(drafts)
+      setClean({
+        projectId: id, projectName: name, projectPath: openedPath,
         settings: { ...defaultSettings(), ...(data.settings as ProjectSettings) },
         media,
         folders: (data.folders as AppStore['folders']) ?? get().folders,
@@ -1123,11 +1319,40 @@ export const useApp = create<AppStore>((set, get) => {
         presets: (data.presets as EffectPreset[]) ?? get().presets,
         fonts: (data.fonts as AppStore['fonts']) ?? get().fonts,
         monitorCompose: data.monitorCompose === '3d' ? '3d' : '2d',
-        selectedClipIds: [], playhead: 0, history: [], future: [], modal: null,
-        drafts: [...get().drafts, { id, name, updatedAt: Date.now() }],
+        selectedClipIds: [], playhead: typeof data.playhead === 'number' ? data.playhead : 0,
+        history: [], future: [], modal: null,
+        drafts,
       })
       get().saveProject({ silent: true })
-      notify('工程已打开')
+      void get().refreshRecentProjects()
+      const extra = [
+        r.relinked ? `${r.relinked} 个素材已按相对路径找回` : '',
+        r.missing ? `${r.missing} 个素材缺失，需重新链接` : '',
+      ].filter(Boolean).join(' · ')
+      notify(extra ? `已打开「${name}」· ${extra}` : `已打开「${name}」`)
+      return true
+    },
+
+    async flushProject() {
+      const s = get()
+      if (s.dirty && s.projectPath && desktop()) {
+        await s.saveProjectToFile({ silent: true })
+        return
+      }
+      s.saveProject({ silent: true })
+    },
+
+    async refreshRecentProjects() {
+      const api = desktop()
+      if (!api?.recentProjects) return
+      try { set({ recentProjects: await api.recentProjects() }) } catch { /* */ }
+    },
+
+    async removeRecentProject(filePath) {
+      const api = desktop()
+      if (!api?.removeRecentProject) return
+      await api.removeRecentProject(filePath)
+      await get().refreshRecentProjects()
     },
 
     async pickDesktopMedia() {
@@ -1164,7 +1389,7 @@ export const useApp = create<AppStore>((set, get) => {
       const id = uid('draft')
       const drafts = [...get().drafts, { id, name, updatedAt: Date.now() }]
       persistDraftsIndex(drafts)
-      set({ projectId: id, projectName: name, drafts })
+      set({ projectId: id, projectName: name, projectPath: null, drafts })
       get().saveProject()
     },
 
@@ -1416,12 +1641,13 @@ export const useApp = create<AppStore>((set, get) => {
     },
     openPropDialOnMonitor(prop) {
       if (!ensureClipSelected(get, set, notify)) return
-      if (!get().autoKeyframe) get().setAutoKeyframe(true)
       const clip = get().seq().clips.find((c) => get().selectedClipIds.includes(c.id))
       if (!clip) return
-      const live = resolveClipTransform(clip, get().playhead)
-      const origin = prop === 'scale' ? live.scaleX : live.opacity
-      const label = prop === 'scale' ? '缩放 · K' : '透明 · K'
+      const mode = get().autoKeyframe ? 'dynamic' : 'static'
+      const tf = mode === 'dynamic' ? resolveClipTransform(clip, get().playhead) : clip.transform
+      const origin = prop === 'scale' ? tf.scaleX : prop === 'rotation' ? tf.rotation : tf.opacity
+      const name = prop === 'scale' ? '缩放' : prop === 'rotation' ? '旋转' : '透明'
+      const label = mode === 'dynamic' ? `${name} · K` : name
       const el =
         document.querySelector<HTMLElement>('[data-testid="program-monitor"]')
         ?? document.querySelector<HTMLElement>('[data-testid="monitor-area"]')
@@ -1435,8 +1661,8 @@ export const useApp = create<AppStore>((set, get) => {
       document.querySelector<HTMLElement>('[data-testid="app-shell"]')?.focus({ preventScroll: true })
       set({
         propWheel: {
-          x, y, ring: 'dynamic', at: Date.now(),
-          dial: { prop, mode: 'dynamic', label, origin },
+          x, y, ring: mode, at: Date.now(),
+          dial: { prop, mode, label, origin },
         },
       })
     },
@@ -1694,7 +1920,10 @@ export const useApp = create<AppStore>((set, get) => {
       localStorage.setItem('todo-layout', JSON.stringify(layout))
     },
 
-    setMonitorView(v) { set({ monitorView: v }) },
+    setMonitorView(v) {
+      set({ monitorView: v })
+      try { localStorage.setItem('todo-monitor-view', v) } catch { /* ignore */ }
+    },
     setMonitorCompose(m) {
       set({ monitorCompose: m })
       if (m === '3d') {
@@ -1718,7 +1947,7 @@ export const useApp = create<AppStore>((set, get) => {
       const t = get().playhead
       patchSelected((c) => seedPositionKeyframes(c, t))
       set({ autoKeyframe: true })
-      notify('K帧模式 · S缩放 · T透明 · 拖位置打点')
+      notify('K帧模式 · S缩放 · R旋转 · T透明 · 拖位置打点')
     },
     toggleAutoKeyframe() {
       get().setAutoKeyframe(!get().autoKeyframe)
@@ -1809,16 +2038,22 @@ export const useApp = create<AppStore>((set, get) => {
       get().pushHistory()
       patchSeq((s) => {
         const next: Clip[] = []
+        const rightOf = new Map<string, string>()
         for (const c of s.clips) {
           const hit = t > c.start + 1 / fps / 2 && t < c.start + c.duration - 1 / fps / 2
           if (!hit) { next.push(c); continue }
-          const left = t - c.start
-          next.push({ ...c, duration: left, outPoint: c.inPoint + left })
-          next.push({
-            ...c, id: uid('clip'), start: t, duration: c.duration - left, inPoint: c.inPoint + left,
-          })
+          const [a, b] = splitClipAt(c, t - c.start)
+          rightOf.set(c.id, b.id)
+          next.push(a, b)
         }
-        return { ...s, clips: next }
+        // 联动的音视频同时被切开时，右段与右段互相关联
+        const rights = new Set(rightOf.values())
+        const clips = next.map((c) =>
+          rights.has(c.id) && c.linkedId && rightOf.has(c.linkedId)
+            ? { ...c, linkedId: rightOf.get(c.linkedId) }
+            : c,
+        )
+        return { ...s, clips }
       })
       notify(`已在 ${formatTime(t, fps)} 分割 ${hits.length} 个片段`)
     },
@@ -1966,33 +2201,55 @@ export const useApp = create<AppStore>((set, get) => {
       if (!get().selectedClipIds.length) return
       pushHistoryCoalesced(get, set)
       const t = get().playhead
-      const staticVal = (c: Clip) => {
-        switch (prop) {
-          case 'x': return c.transform.x
-          case 'y': return c.transform.y
-          case 'scale': return c.transform.scaleX
-          case 'rotation': return c.transform.rotation
-          case 'opacity': return c.transform.opacity
-          case 'volume': return c.audio.gainDb
-          case 'fontSize': return c.text?.fontSize ?? 48
-          default: return value
-        }
+      const fps = get().settings.fps
+      patchSelected((c) => upsertDynamicKf(c, prop, value, t, fps))
+    },
+
+    beginTransformGesture(prop) {
+      if (!ensureClipSelected(get, set, notify)) return false
+      const t = get().playhead
+      const ids = new Set(get().selectedClipIds)
+      gestureOrigins.clear()
+      for (const c of get().seq().clips) {
+        if (!ids.has(c.id)) continue
+        const live = resolveClipTransform(c, t)
+        gestureOrigins.set(c.id, prop === 'scale'
+          ? { a: live.scaleX, b: live.scaleY }
+          : { a: live.rotation, b: live.rotation })
       }
+      if (!gestureOrigins.size) return false
+      get().pushHistory()
+      set({ transformGesture: { prop, keyed: get().autoKeyframe } })
+      return true
+    },
+    updateTransformGesture(amount) {
+      const g = get().transformGesture
+      if (!g) return
+      const t = get().playhead
+      const fps = get().settings.fps
       patchSelected((c) => {
-        const fps = get().settings.fps
-        const localT = snapToFrame(Math.max(0, t - c.start), fps)
-        const near = 0.51 / fps
-        let list = [...(c.keyframes[prop] ?? [])]
-        // 首条关键帧且不在起点：先钉住起点静态值，避免整段瞬间跳到新值
-        if (list.length === 0 && localT > near) {
-          list.push({ id: uid('kf'), t: 0, value: staticVal(c), ease: 'linear' })
+        const o = gestureOrigins.get(c.id)
+        if (!o) return c
+        if (g.prop === 'scale') {
+          const sx = Math.max(0.01, o.a * amount)
+          const sy = Math.max(0.01, o.b * amount)
+          if (g.keyed) return upsertDynamicKf(c, 'scale', sx, t, fps)
+          return patchClipTransform(c, t, { scaleX: sx, scaleY: sy })
         }
-        const idx = list.findIndex((k) => Math.abs(k.t - localT) < near)
-        if (idx >= 0) list[idx] = { ...list[idx], value, t: localT }
-        else list.push({ id: uid('kf'), t: localT, value, ease: 'linear' })
-        list.sort((a, b) => a.t - b.t)
-        return { ...c, keyframes: { ...c.keyframes, [prop]: list } }
+        const r = o.a + amount
+        if (g.keyed) return upsertDynamicKf(c, 'rotation', r, t, fps)
+        return patchClipTransform(c, t, { rotation: r })
       })
+    },
+    endTransformGesture(commit) {
+      if (!get().transformGesture) return
+      if (!commit) {
+        const { history } = get()
+        const prev = history[history.length - 1]
+        if (prev) set({ sequences: prev.sequences, activeSeqId: prev.activeSeqId, history: history.slice(0, -1) })
+      }
+      gestureOrigins.clear()
+      set({ transformGesture: null })
     },
     updateSelectedColor(p) {
       pushHistoryCoalesced(get, set)
@@ -2318,6 +2575,48 @@ export const useApp = create<AppStore>((set, get) => {
 
     enableBezierAt(prop, kfId) {
       get().setKeyframeEase(prop, kfId, 'bezier')
+    },
+
+    autoBezierKeyframes(byProp) {
+      const entries = Object.entries(byProp).filter(([, ids]) => ids.length)
+      if (!entries.length) return
+      get().pushHistory()
+      let n = 0
+      patchSelected((c) => {
+        let keyframes = c.keyframes
+        for (const [prop, ids] of entries) {
+          const list = keyframes[prop]
+          if (!list?.length) continue
+          const idSet = new Set(ids)
+          n += list.filter((k) => idSet.has(k.id)).length
+          keyframes = { ...keyframes, [prop]: autoBezierKeyframes(list, idSet) }
+        }
+        return keyframes === c.keyframes ? c : { ...c, keyframes }
+      })
+      if (n) notify(`自动贝塞尔 · ${n} 个关键帧`)
+    },
+    autoBezierAll() {
+      const ids = new Set(get().selectedClipIds)
+      const clips = get().seq().clips.filter((c) => ids.has(c.id))
+      const hasAny = clips.some((c) => Object.values(c.keyframes).some((l) => (l?.length ?? 0) >= 2))
+      if (!hasAny) {
+        notify(clips.length ? '选中片段没有可平滑的关键帧' : '请先选中片段')
+        return
+      }
+      get().pushHistory()
+      let n = 0
+      const props = new Set<string>()
+      patchSelected((c) => {
+        let keyframes = c.keyframes
+        for (const [prop, list] of Object.entries(c.keyframes)) {
+          if (!list || list.length < 2) continue
+          n += list.length
+          props.add(prop === 'x' || prop === 'y' ? 'xy' : prop)
+          keyframes = { ...keyframes, [prop]: autoBezierKeyframes(list, new Set(list.map((k) => k.id))) }
+        }
+        return keyframes === c.keyframes ? c : { ...c, keyframes }
+      })
+      notify(`一键贝塞尔 · ${props.size} 个属性 · ${n} 个关键帧`)
     },
 
     toggleKeyframeAtPlayhead(prop, value) {
@@ -2663,6 +2962,11 @@ export const useApp = create<AppStore>((set, get) => {
       place()
     },
   }
+})
+
+useApp.subscribe((s, p) => {
+  if (dirtyMute > 0 || s.dirty) return
+  if (DIRTY_KEYS.some((k) => s[k] !== p[k])) useApp.setState({ dirty: true })
 })
 
 export function formatTime(t: number, fps = 30) {

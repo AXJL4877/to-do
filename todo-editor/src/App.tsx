@@ -9,7 +9,8 @@ import { AiPanel } from './components/AiPanel'
 import { Modals } from './components/Modals'
 import { Monitor } from './components/Monitor'
 import { PropWheel } from './components/PropWheel'
-import { tryDeletePickedKeyframes } from './lib/kfDelete'
+import { TransformGesture } from './components/TransformGesture'
+import { tryAutoBezierPickedKeyframes, tryDeletePickedKeyframes, trySelectAllKeyframes } from './lib/kfDelete'
 import { initStoreSync, isAiPopout, isTimelinePopout, isLocalPlayheadScrubbing } from './lib/storeSync'
 import { setLivePlayhead } from './lib/livePlayhead'
 import { desktop } from './lib/desktop'
@@ -72,7 +73,12 @@ export default function App() {
     const s = useApp.getState()
     const raw = localStorage.getItem(`todo-draft-${s.projectId}`)
     let restored = false
-    if (raw) {
+    void s.refreshRecentProjects()
+    if (desktop() && s.drafts.find((d) => d.id === s.projectId)?.path) {
+      useApp.setState({ dirty: false })
+      s.openDraft(s.projectId)
+      restored = true
+    } else if (raw) {
       try {
         const data = JSON.parse(raw)
         if (
@@ -85,16 +91,37 @@ export default function App() {
         }
       } catch { /* */ }
     }
-    if (!restored) seedDemo()
+    if (!restored) {
+      seedDemo()
+      useApp.setState({ dirty: false })
+    }
     requestAnimationFrame(() => {
       document.querySelector<HTMLElement>('[data-testid="app-shell"]')?.focus({ preventScroll: true })
     })
     const autosave = window.setInterval(() => {
       const st = useApp.getState()
-      if (st.sequences.some((q) => q.clips.length) || st.media.length) st.saveProject({ silent: true })
+      if (!st.dirty) return
+      if (st.projectPath && desktop()) void st.saveProjectToFile({ silent: true })
+      else if (st.sequences.some((q) => q.clips.length) || st.media.length) st.saveProject({ silent: true })
     }, 30000)
-    return () => clearInterval(autosave)
+    const d = desktop()
+    const offClose = d?.onRequestClose?.(() => {
+      void useApp.getState().flushProject().finally(() => d.closeReady?.())
+    })
+    return () => {
+      clearInterval(autosave)
+      offClose?.()
+    }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const projectName = useApp((s) => s.projectName)
+  const projectPath = useApp((s) => s.projectPath)
+  const dirty = useApp((s) => s.dirty)
+  useEffect(() => {
+    if (POPOUT) return
+    const noFile = desktop() && !projectPath ? '（未存为工程文件）' : ''
+    document.title = `${dirty ? '● ' : ''}${projectName}${noFile} — TO DO`
+  }, [projectName, projectPath, dirty])
 
   useEffect(() => {
     if (POPOUT) return
@@ -139,6 +166,7 @@ export default function App() {
     const onKey = (e: KeyboardEvent) => {
       const s = useApp.getState()
       const mod = e.ctrlKey || e.metaKey
+      if (s.transformGesture) return
 
       if (mod && e.code === 'KeyZ') {
         if (isPlainTextField(e.target)) return
@@ -156,7 +184,7 @@ export default function App() {
       if (mod && e.code === 'KeyS') {
         if (isPlainTextField(e.target)) return
         e.preventDefault()
-        void s.saveProjectToFile()
+        void s.saveProjectToFile({ saveAs: e.shiftKey })
         return
       }
       if (mod && e.code === 'KeyO') {
@@ -181,13 +209,21 @@ export default function App() {
       if (e.key === 'l' || e.key === 'L') { s.togglePlay(); s.setPlayhead(s.playhead + 1 / s.settings.fps) }
       if (e.key === 'ArrowLeft') s.stepFrame(-1)
       if (e.key === 'ArrowRight') s.stepFrame(1)
-      if (e.key === 's' || e.key === 'S') {
-        if (s.autoKeyframe) {
+      const hasSelection = s.selectedClipIds.length > 0
+      if (!mod && (e.key === 's' || e.key === 'S')) {
+        if (hasSelection || s.autoKeyframe) {
           e.preventDefault()
-          s.openPropDialOnMonitor('scale')
+          s.closePropWheel()
+          s.beginTransformGesture('scale')
           return
         }
         s.setSnap(!s.settings.snap)
+      }
+      if (!mod && (e.key === 'r' || e.key === 'R') && (hasSelection || s.autoKeyframe)) {
+        e.preventDefault()
+        s.closePropWheel()
+        s.beginTransformGesture('rotation')
+        return
       }
       if (e.key === 't' || e.key === 'T') {
         if (s.autoKeyframe) {
@@ -208,7 +244,10 @@ export default function App() {
       if (mod && e.code === 'KeyI') { e.preventDefault(); fileRef.current?.click() }
       if (mod && e.code === 'KeyD') { e.preventDefault(); s.duplicateSelected() }
 
-      if (mod && !e.shiftKey && e.code === 'KeyA') { e.preventDefault(); s.selectAllClips() }
+      if (mod && !e.shiftKey && e.code === 'KeyA') {
+        e.preventDefault()
+        if (!trySelectAllKeyframes()) s.selectAllClips()
+      }
       if (mod && e.shiftKey && e.code === 'KeyA') { e.preventDefault(); s.selectClips([]) }
       if (mod && e.code === 'KeyC' && !e.shiftKey) { e.preventDefault(); s.copySelected() }
       if (mod && e.code === 'KeyX') { e.preventDefault(); s.cutSelected() }
@@ -247,6 +286,11 @@ export default function App() {
         const seq = s.seq()
         const end = Math.max(seq.workOut, ...seq.clips.map((c) => c.start + c.duration), 0)
         s.setPlayhead(end)
+      }
+      if (e.key === 'F3') {
+        e.preventDefault()
+        if (!tryAutoBezierPickedKeyframes()) s.autoBezierAll()
+        return
       }
       if (e.key === 'Delete' || e.key === 'Backspace') {
         if (tryDeletePickedKeyframes()) {
@@ -382,6 +426,7 @@ export default function App() {
         </button>
       )}
       <PropWheel />
+      <TransformGesture />
       <input ref={fileRef} type="file" multiple accept="video/*,audio/*,image/*" className="hidden" data-testid="global-import" onChange={(e) => {
         const files = e.target.files
         if (!files?.length) return

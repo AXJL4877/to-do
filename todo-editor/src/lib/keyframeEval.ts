@@ -119,6 +119,207 @@ export function sampleCurvePoints(
   return out
 }
 
+/**
+ * 速度曲线采样：单轨 → 带符号的变化率（单位/秒）；多轨（XY）→ 合速度大小。
+ * 关键帧两侧各取单侧差分，保证 hold / 折角处的跳变画成竖边而不是尖刺。
+ */
+export function sampleSpeedCurve(
+  tracks: Keyframe[][],
+  duration: number,
+  steps = 160,
+): { t: number; v: number }[] {
+  const live = tracks.filter((k) => k.length)
+  if (!live.length || duration <= 0) return []
+  const sortedTracks = live.map((k) => [...k].sort((a, b) => a.t - b.t))
+  const keyTimes = [...new Set(sortedTracks.flat().map((k) => k.t))].sort((a, b) => a - b)
+  let minGap = duration
+  for (let i = 1; i < keyTimes.length; i++) minGap = Math.min(minGap, keyTimes[i] - keyTimes[i - 1] || minGap)
+  const h = Math.max(1e-5, Math.min(1e-3, minGap / 20))
+  const signed = sortedTracks.length === 1
+
+  const valueAt = (t: number) => sortedTracks.map((k) => sampleKeyframes(k, t, k[0].value))
+  const speed = (t0: number, t1: number) => {
+    const a = valueAt(t0)
+    const b = valueAt(t1)
+    const dt = t1 - t0
+    if (signed) return (b[0] - a[0]) / dt
+    return Math.hypot(...a.map((v, i) => b[i] - v)) / dt
+  }
+
+  const out: { t: number; v: number }[] = []
+  const nearKey = (t: number) => keyTimes.some((k) => Math.abs(k - t) < 3 * h)
+  const samples = new Set<number>()
+  for (let i = 0; i <= steps; i++) {
+    const t = (i / steps) * duration
+    if (!nearKey(t)) samples.add(t)
+  }
+  for (const k of keyTimes) {
+    if (k - 3 * h >= 0) samples.add(k - 2 * h)
+    if (k + 3 * h <= duration) samples.add(k + 2 * h)
+  }
+  for (const t of [...samples].sort((a, b) => a - b)) {
+    out.push({ t, v: speed(Math.max(0, t - h), Math.min(duration, t + h)) })
+  }
+  return out
+}
+
+/** 关键帧两侧的单侧速度（入 / 出），用于放置菱形与手柄 */
+export function keyframeSideSpeeds(tracks: Keyframe[][], t: number, duration: number) {
+  const live = tracks.filter((k) => k.length).map((k) => [...k].sort((a, b) => a.t - b.t))
+  const signed = live.length === 1
+  const h = 1e-4
+  const valueAt = (x: number) => live.map((k) => sampleKeyframes(k, x, k[0].value))
+  const rate = (t0: number, t1: number) => {
+    const a = valueAt(t0)
+    const b = valueAt(t1)
+    return signed ? (b[0] - a[0]) / (t1 - t0) : Math.hypot(...a.map((v, i) => b[i] - v)) / (t1 - t0)
+  }
+  return {
+    inSpeed: t - 2 * h >= 0 ? rate(t - 2 * h, t - h) : null,
+    outSpeed: t + 2 * h <= duration ? rate(t + h, t + 2 * h) : null,
+  }
+}
+
+/**
+ * 自动贝塞尔（Fritsch–Carlson 单调三次）：首尾、极值点与定格边界切线为 0，
+ * 其余按两侧割线的加权调和平均，间隔不均也不过冲，速度在关键帧处连续。
+ * 只改 ids 内的关键帧（定格保持定格），邻居若不是 bezier 会按原缓动转成等效手柄。
+ */
+export function autoBezierKeyframes(list: Keyframe[], ids: Set<string>): Keyframe[] {
+  const s = [...list].sort((a, b) => a.t - b.t)
+  if (s.length < 2) return s
+  const secant = (i: number) => {
+    const dt = s[i + 1].t - s[i].t
+    return dt > 1e-9 ? (s[i + 1].value - s[i].value) / dt : 0
+  }
+  const slope = (i: number) => {
+    if (i === 0 || i === s.length - 1) return 0
+    if (s[i - 1].ease === 'hold' || s[i].ease === 'hold') return 0
+    const d0 = secant(i - 1)
+    const d1 = secant(i)
+    if (d0 * d1 <= 0) return 0
+    const h0 = s[i].t - s[i - 1].t
+    const h1 = s[i + 1].t - s[i].t
+    const w1 = 2 * h1 + h0
+    const w2 = h1 + 2 * h0
+    return (w1 + w2) / (w1 / d0 + w2 / d1)
+  }
+  const out = s.map((k) => ({ ...k }))
+  for (let i = 0; i < s.length; i++) {
+    if (!ids.has(s[i].id)) continue
+    const m = slope(i)
+    const k = out[i]
+    if (k.ease !== 'hold') k.ease = 'bezier'
+    if (i < s.length - 1) {
+      const spanT = s[i + 1].t - s[i].t
+      const spanV = s[i + 1].value - s[i].value
+      k.oh = { x: 1 / 3, y: Math.abs(spanV) > 1e-9 ? (m * spanT) / (3 * spanV) : 0 }
+    } else {
+      k.oh = k.oh ?? defaultHandles('linear').oh
+    }
+    if (i > 0) {
+      const spanT = s[i].t - s[i - 1].t
+      const spanV = s[i].value - s[i - 1].value
+      k.ih = { x: -1 / 3, y: Math.abs(spanV) > 1e-9 ? -(m * spanT) / (3 * spanV) : 0 }
+      const prev = out[i - 1]
+      if (prev.ease !== 'bezier' && prev.ease !== 'hold' && !ids.has(prev.id)) {
+        const d = defaultHandles(prev.ease)
+        out[i - 1] = { ...prev, ease: 'bezier', oh: d.oh, ih: prev.ih ?? d.ih }
+      }
+    } else {
+      k.ih = k.ih ?? defaultHandles('linear').ih
+    }
+  }
+  return out
+}
+
+/** 段 a→b 在单位方内的三次贝塞尔控制点（缓入/缓出/线性可精确表示；缓入出需先拆成两段） */
+function segmentControls(a: Keyframe, b: Keyframe): [number, number, number, number] {
+  switch (a.ease) {
+    case 'bezier': {
+      const oh = a.oh ?? defaultHandles('easeInOut').oh
+      const ih = b.ih ?? defaultHandles(b.ease === 'bezier' ? 'easeInOut' : b.ease).ih
+      return [
+        Math.max(0.001, Math.min(0.999, oh.x)), oh.y,
+        Math.max(0.001, Math.min(0.999, 1 + ih.x)), 1 + ih.y,
+      ]
+    }
+    case 'easeIn': return [1 / 3, 0, 2 / 3, 1 / 3]
+    case 'easeOut': return [1 / 3, 2 / 3, 2 / 3, 1]
+    default: return [1 / 3, 1 / 3, 2 / 3, 2 / 3]
+  }
+}
+
+/**
+ * 在片段局部时间 T 把关键帧轨切成两段，保证每一帧的取值与切前完全一致：
+ * 左段保留 T 之前的关键帧并在 T 补帧；右段时间平移到从 0 开始并在 0 补帧；
+ * 切点所在的曲线段按原形状细分（de Casteljau），不是简单截断。
+ */
+export function splitKeyframes(list: Keyframe[] | undefined, T: number): { left: Keyframe[]; right: Keyframe[] } {
+  const s = [...(list ?? [])].sort((a, b) => a.t - b.t)
+  if (!s.length) return { left: [], right: [] }
+  const eps = 1e-6
+  const shift = (k: Keyframe): Keyframe => ({ ...k, t: Math.max(0, k.t - T) })
+  if (T <= s[0].t + eps) {
+    return { left: [{ id: uid('kf'), t: 0, value: s[0].value, ease: 'linear' }], right: s.map(shift) }
+  }
+  const last = s[s.length - 1]
+  if (T >= last.t - eps) {
+    return { left: s, right: [{ id: uid('kf'), t: 0, value: last.value, ease: 'linear' }] }
+  }
+  const i = s.findIndex((k, j) => j < s.length - 1 && T >= k.t - eps && T < s[j + 1].t - eps)
+  const a = s[i]
+  if (Math.abs(a.t - T) <= eps) {
+    return { left: s.slice(0, i + 1), right: [{ ...a, id: uid('kf') }, ...s.slice(i + 1)].map(shift) }
+  }
+  const b = s[i + 1]
+  // 改 a 的缓动前先钉住它实际生效的入手柄，否则前一段（若为曲线）会因默认手柄变化而变形
+  const pinnedIh = a.ih ?? defaultHandles(a.ease === 'bezier' ? 'easeInOut' : a.ease).ih
+
+  // 缓入出 = 前半缓入 + 后半缓出（中点处补帧），这样每段都是精确的三次曲线
+  if (a.ease === 'easeInOut') {
+    const mid: Keyframe = { id: uid('kf'), t: (a.t + b.t) / 2, value: (a.value + b.value) / 2, ease: 'easeOut' }
+    const expanded = [...s.slice(0, i), { ...a, ease: 'easeIn' as Ease, ih: pinnedIh }, mid, ...s.slice(i + 1)]
+    return splitKeyframes(expanded, T)
+  }
+
+  const value = sampleKeyframes(s, T, a.value)
+  if (a.ease === 'hold') {
+    return {
+      left: [...s.slice(0, i + 1), { id: uid('kf'), t: T, value: a.value, ease: 'hold' }],
+      right: [{ id: uid('kf'), t: 0, value: a.value, ease: 'hold' }, ...s.slice(i + 1).map(shift)],
+    }
+  }
+
+  const tn = (T - a.t) / (b.t - a.t)
+  const [x1, y1, x2, y2] = segmentControls(a, b)
+  let lo = 0
+  let hi = 1
+  for (let n = 0; n < 40; n++) {
+    const mid = (lo + hi) / 2
+    if (cubic1d(0, x1, x2, 1, mid) < tn) lo = mid
+    else hi = mid
+  }
+  const u = (lo + hi) / 2
+  const lerp = (p: number, q: number) => p + (q - p) * u
+  const ax = lerp(0, x1), ay = lerp(0, y1)
+  const bx = lerp(x1, x2), by = lerp(y1, y2)
+  const cx = lerp(x2, 1), cy = lerp(y2, 1)
+  const dx = lerp(ax, bx), dy = lerp(ay, by)
+  const ex = lerp(bx, cx), ey = lerp(by, cy)
+  const X = lerp(dx, ex), Y = lerp(dy, ey)
+  const ny = (v: number, span: number) => (Math.abs(span) > 1e-9 ? v / span : 0)
+
+  const leftA: Keyframe = { ...a, ease: 'bezier', ih: pinnedIh, oh: { x: ax / X, y: ny(ay, Y) } }
+  const cutL: Keyframe = { id: uid('kf'), t: T, value, ease: 'linear', ih: { x: (dx - X) / X, y: ny(dy - Y, Y) } }
+  const cutR: Keyframe = { id: uid('kf'), t: 0, value, ease: 'bezier', oh: { x: (ex - X) / (1 - X), y: ny(ey - Y, 1 - Y) } }
+  const rightB: Keyframe = { ...shift(b), ih: { x: (cx - 1) / (1 - X), y: ny(cy - 1, 1 - Y) } }
+  return {
+    left: [...s.slice(0, i), leftA, cutL],
+    right: [cutR, rightB, ...s.slice(i + 2).map(shift)],
+  }
+}
+
 export function valueRange(kfs: Keyframe[]) {
   if (!kfs.length) return { vmin: 0, vmax: 1 }
   const vals = kfs.map((k) => k.value)

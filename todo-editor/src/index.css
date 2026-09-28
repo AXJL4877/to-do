@@ -126,6 +126,18 @@ button { cursor: pointer; }
   cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none'%3E%3Cpath d='M4 20 L14 6' stroke='%231a1a1a' stroke-width='2.2' stroke-linecap='round'/%3E%3Cpath d='M14 6 L17 4 L19 6 L17 9 Z' fill='%231a1a1a'/%3E%3Cpath d='M12.5 8.5 L16 12' stroke='%23E26A2C' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E") 4 20, crosshair !important;
 }
 
+/* 编辑器界面文字不可拖选（框选/拖动时不再误选中面板文字）；输入框仍可选 */
+[data-testid="app-shell"], [data-testid="keyframe-editor"] {
+  user-select: none;
+  -webkit-user-select: none;
+}
+[data-testid="app-shell"] input,
+[data-testid="app-shell"] textarea,
+[data-testid="app-shell"] [contenteditable="true"] {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
 /* 片段名称禁止拖选，避免拖片段时误选中文字 */
 .nle-timeline [data-testid^="clip-"],
 .nle-timeline [data-testid^="clip-"] * {
@@ -354,6 +366,21 @@ button { cursor: pointer; }
   cursor: grab; box-shadow: 0 0 0 4px hsl(18 76% 46% / 0.18);
 }
 .pr-kf-handle:hover { background: var(--accent-dim); }
+.pr-kf-handle--speed {
+  width: 26px; height: 26px; border: none; background: transparent; box-shadow: none;
+  display: grid; place-items: center; z-index: 6;
+}
+.pr-kf-handle--speed::after {
+  content: ''; width: 12px; height: 12px; border-radius: 999px;
+  border: 2px solid var(--accent); background: var(--surface-1);
+  box-shadow: 0 0 0 3px hsl(18 76% 46% / 0.18);
+  transition: transform 90ms ease, background 90ms ease;
+}
+.pr-kf-handle--speed:hover { background: transparent; }
+.pr-kf-handle--speed:hover::after,
+.pr-kf-handle--speed.is-dragging::after { background: var(--accent); transform: scale(1.25); }
+.pr-kf-mark.is-bezier { color: hsl(18 60% 55%); }
+.pr-kf-mark.is-bezier:hover, .pr-kf-mark.is-bezier.selected { color: var(--accent); }
 .pr-kf-handle:active { cursor: grabbing; }
 .pr-kf-marquee {
   position: absolute; z-index: 5; pointer-events: none;
@@ -401,6 +428,45 @@ button { cursor: pointer; }
   .modal-backdrop, .modal, .toast { animation: none !important; opacity: 1 !important; }
   .ai-progress-bar, .ai-result-card, .ai-error-in, .menu-pop { animation: none !important; }
 }
+
+/* —— AI 风格库 —— */
+.style-card {
+  position: relative; display: flex; flex-direction: column; text-align: left;
+  border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--surface-1);
+  transition: transform 200ms var(--spring-ui), border-color 140ms, box-shadow 160ms;
+}
+.style-card:hover { transform: translateY(-2px); box-shadow: 0 6px 18px hsl(220 20% 8% / 0.08); }
+.style-card.is-focused { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-dim); }
+.style-card-media { position: relative; aspect-ratio: 4 / 3; background: #fff; overflow: hidden; }
+.style-card-media img {
+  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
+  transition: opacity 260ms var(--ease-out-expo), transform 400ms var(--ease-out-expo);
+}
+.style-card:hover .style-card-media img { transform: scale(1.04); }
+.style-card-body { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px 10px; }
+.style-card-name { font-size: 12px; font-weight: 600; color: var(--text-primary); }
+.style-card-sub { font-size: 10px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.style-card-count {
+  position: absolute; right: 6px; bottom: 6px; padding: 1px 6px; border-radius: 999px;
+  font-size: 10px; color: #fff; background: hsl(220 22% 8% / 0.55);
+}
+.style-card-badge {
+  position: absolute; left: 6px; top: 6px; display: inline-flex; align-items: center; gap: 2px;
+  padding: 1px 6px; border-radius: 999px; font-size: 10px; font-weight: 500; color: #fff; background: var(--accent);
+}
+.style-tag {
+  padding: 1px 7px; border-radius: 999px; font-size: 10px;
+  background: var(--accent-dim); color: var(--accent);
+}
+.ai-result-card img {
+  background: repeating-conic-gradient(hsl(38 8% 88%) 0% 25%, #fff 0% 50%) 0 0 / 12px 12px;
+}
+.ai-style-trigger {
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 5px; text-align: left;
+  border: 1px solid var(--border); border-radius: 9px; background: var(--surface-0);
+  transition: border-color 140ms, background 140ms;
+}
+.ai-style-trigger:hover { border-color: var(--accent); background: var(--surface-1); }
 
 /* —— AI+ 与渐进菜单动效 —— */
 .ai-gen-btn.is-busy { pointer-events: none; }

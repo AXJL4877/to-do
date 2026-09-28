@@ -6,8 +6,26 @@ export type DesktopApi = {
   /** 独立 AI HTTP 服务根地址，如 http://127.0.0.1:PORT */
   getAiBaseUrl: () => string
   aiBaseUrl: () => string
-  saveProjectFile: (defaultName: string, json: unknown) => Promise<{ ok: boolean; canceled?: boolean; path?: string }>
-  openProjectFile: () => Promise<{ ok: boolean; canceled?: boolean; path?: string; json?: unknown }>
+  /** 传 filePath 直接覆盖写入；不传弹另存为 */
+  saveProjectFile: (defaultName: string, json: unknown, filePath?: string | null) => Promise<{ ok: boolean; canceled?: boolean; path?: string; error?: string }>
+  /** 传 filePath 直接读取；不传弹打开对话框 */
+  openProjectFile: (filePath?: string) => Promise<{
+    ok: boolean
+    canceled?: boolean
+    notFound?: boolean
+    path?: string
+    json?: unknown
+    error?: string
+    /** 绝对路径失效、按 relPath 找回的素材数 */
+    relinked?: number
+    /** 两种路径都找不到的素材数 */
+    missing?: number
+  }>
+  recentProjects?: () => Promise<{ path: string; exists: boolean }[]>
+  removeRecentProject?: (filePath: string) => Promise<string[]>
+  /** 主窗关闭前：渲染层落盘后须调用 closeReady */
+  onRequestClose?: (cb: () => void) => () => void
+  closeReady?: () => void
   pickMediaFiles: () => Promise<{
     ok: boolean
     canceled?: boolean

@@ -86,7 +86,7 @@ export function PropWheel() {
   useEffect(() => {
     if (!wheel) return
     if (wheel.dial) {
-      setRing('dynamic')
+      setRing(wheel.dial.mode)
       setEntryShortcut(true)
       setDial({
         prop: wheel.dial.prop,
@@ -111,7 +111,8 @@ export function PropWheel() {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault()
-        if (dial) setDial(null)
+        if (dial && wheel.dial) closePropWheel()
+        else if (dial) setDial(null)
         else if (!entryShortcut && ring !== 'root') setRing('root')
         else closePropWheel()
       }
@@ -121,7 +122,7 @@ export function PropWheel() {
         if (dialPending.current != null) flushDial(dial.prop)
         const wasDynamic = dial.mode === 'dynamic'
         setDial(null)
-        if (wasDynamic) closePropWheel()
+        if (wasDynamic || wheel.dial) closePropWheel()
       }
     }
     window.addEventListener('keydown', onKey)
@@ -451,8 +452,8 @@ export function PropWheel() {
     e?.preventDefault()
     if (dialPending.current != null && dial) flushDial(dial.prop)
     setDial(null)
-    // S/T 打开的动态拨盘：确定后关掉轮盘，K帧模式保持
-    if (dial?.mode === 'dynamic') closePropWheel()
+    // S/R/T 快捷键打开的拨盘：确定后关掉轮盘，K帧模式保持
+    if (dial?.mode === 'dynamic' || wheel?.dial) closePropWheel()
   }
 
   return (

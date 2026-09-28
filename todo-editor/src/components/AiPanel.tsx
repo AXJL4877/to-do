@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AudioLines, Camera, ImagePlus, Loader2, Music, Plus, Settings, Sparkles, Trash2, Video, Wand2, X } from 'lucide-react'
+import { AudioLines, Camera, ImagePlus, LayoutGrid, Loader2, Music, Plus, Settings, Sparkles, Trash2, Video, Wand2, X } from 'lucide-react'
 import { useApp } from '../store'
 import { AiFloatLaunch } from './AiFloat'
 import { isAiPopout } from '../lib/storeSync'
 import { aiFetch, aiUrl } from '../lib/aiFetch'
+import { AiStyleForm, defaultStyleValues, styleValuesReady, type StylePack, type StyleValues } from './AiStyleForm'
+import { AiStylePicker } from './AiStylePicker'
 import clsx from 'clsx'
 
 const FALLBACK_SIZE_OPTIONS = [
@@ -54,6 +56,7 @@ type AiJob = {
     autoTimeline?: boolean
     width?: number | null
     height?: number | null
+    style?: { id: string; name: string; version: string; summary: string; cutout?: boolean } | null
   }
   resultName?: string | null
   resultUrl?: string | null
@@ -161,6 +164,10 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
   const [justAdded, setJustAdded] = useState<string | null>(null)
   const [cold, setCold] = useState<ColdAsset[]>([])
   const [jobs, setJobs] = useState<AiJob[]>([])
+  const [styles, setStyles] = useState<StylePack[]>([])
+  const [styleId, setStyleId] = useState('')
+  const [styleValues, setStyleValues] = useState<StyleValues | null>(null)
+  const [pickerOpen, setPickerOpen] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const audioFileRef = useRef<HTMLInputElement>(null)
   const importing = useRef(new Set<string>())
@@ -171,6 +178,26 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
   const sizeOptions = selectedModel?.sizeOptions?.length ? selectedModel.sizeOptions : [...FALLBACK_SIZE_OPTIONS]
   const qualityOptions = selectedModel?.qualityOptions?.length ? selectedModel.qualityOptions : [...FALLBACK_QUALITY_OPTIONS]
   const audioProfile = audioModelProfile(model)
+  const activeStyle = mode === 'image' ? styles.find((s) => s.id === styleId) ?? null : null
+
+  async function refreshStyles() {
+    try {
+      const r = await aiFetch('/api/ai-styles')
+      const data = await r.json()
+      if (data.ok) {
+        setStyles((data.styles as StylePack[])
+          .filter((s) => s.outputs.includes('image'))
+          .map((s) => ({ ...s, previews: s.previews.map((p) => aiUrl(p)) })))
+      }
+    } catch { /* */ }
+  }
+
+  function pickStyle(id: string) {
+    if (id === styleId) return
+    setStyleId(id)
+    const pack = styles.find((s) => s.id === id)
+    setStyleValues(pack ? defaultStyleValues(pack) : null)
+  }
 
   async function refreshCold() {
     try {
@@ -308,6 +335,7 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
 
   useEffect(() => {
     void refreshJobs()
+    void refreshStyles()
     void refreshConfig().then(refreshModels)
     const t = window.setInterval(() => {
       void refreshJobs()
@@ -353,7 +381,8 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
 
   async function enqueue() {
     const p = prompt.trim()
-    if (!p || submitting) return
+    if (submitting) return
+    if (activeStyle ? !styleValues || !styleValuesReady(activeStyle, styleValues) : !p) return
     if (!config?.hasApiKey) {
       setConfigOpen(true)
       setError('请先配置虎妞 API Key')
@@ -365,7 +394,17 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
       const res = await aiFetch('/api/ai-jobs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        body: JSON.stringify(activeStyle && styleValues ? {
+          kind: 'image',
+          styleId: activeStyle.id,
+          styleInputs: styleValues.inputs,
+          size: styleValues.aspectRatio,
+          quality: styleValues.resolution,
+          model: styleValues.model,
+          cutout: styleValues.cutout,
+          imageDataUrl: refDataUrl ?? undefined,
+          autoTimeline,
+        } : {
           kind: mode,
           prompt: p,
           imageDataUrl: refDataUrl ?? undefined,
@@ -394,7 +433,9 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
     void refreshJobs()
   }
 
-  const canGen = !!prompt.trim() && !submitting
+  const canGen = !submitting && (activeStyle
+    ? !!styleValues && styleValuesReady(activeStyle, styleValues)
+    : !!prompt.trim())
   const isAudioMode = mode === 'audio'
 
   return (
@@ -461,6 +502,29 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
         </button>
       </div>
 
+      {mode === 'image' && styles.length > 0 && (
+        <div className="field">
+          <label>风格</label>
+          <button type="button" className="ai-style-trigger" data-testid="ai-style" onClick={() => setPickerOpen(true)}>
+            <span className="shrink-0 w-10 h-10 rounded-md overflow-hidden grid place-items-center bg-white border" style={{ borderColor: 'var(--border)' }}>
+              {activeStyle?.previews[0]
+                ? <img src={activeStyle.previews[0]} alt="" className="w-full h-full object-cover" />
+                : <Sparkles size={16} style={{ color: 'var(--accent)' }} />}
+            </span>
+            <span className="min-w-0 flex-1 flex flex-col">
+              <span className="text-[12px] font-semibold truncate">{activeStyle ? activeStyle.name : '自由生成'}</span>
+              <span className="text-[10px] truncate" style={{ color: 'var(--text-muted)' }}>
+                {activeStyle ? activeStyle.tags.join(' · ') || activeStyle.author : `不限风格 · ${styles.length} 个风格可选`}
+              </span>
+            </span>
+            <LayoutGrid size={14} className="shrink-0 mr-1" style={{ color: 'var(--text-muted)' }} />
+          </button>
+        </div>
+      )}
+      {pickerOpen && (
+        <AiStylePicker styles={styles} currentId={styleId} onPick={pickStyle} onClose={() => setPickerOpen(false)} />
+      )}
+
       {mode !== 'audio' && (
       <div className="field">
         <label>参考图（可选 · {mode === 'video' ? '有则图生视频' : '有则图生图'}）</label>
@@ -515,7 +579,11 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
         </div>
       )}
 
-      {mode !== 'audio' && (
+      {activeStyle && styleValues && (
+        <AiStyleForm pack={activeStyle} value={styleValues} onChange={setStyleValues} />
+      )}
+
+      {mode !== 'audio' && !activeStyle && (
       <div className="field">
         <label>提示词</label>
         <textarea
@@ -528,6 +596,7 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
       </div>
       )}
 
+      {!activeStyle && (
       <div className="field">
         <label>模型</label>
         <select data-testid="ai-model" value={model} onChange={(e) => setModel(e.target.value)}>
@@ -544,8 +613,9 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
           </button>
         </div>
       </div>
+      )}
 
-      {mode === 'image' ? (
+      {activeStyle ? null : mode === 'image' ? (
         <>
           <div className="field">
             <label>尺寸</label>
@@ -698,7 +768,7 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
         onClick={() => void enqueue()}
       >
         {submitting ? <Loader2 size={13} className="animate-spin" /> : mode === 'video' ? <Video size={13} /> : mode === 'audio' ? <AudioLines size={13} /> : <Sparkles size={13} />}
-        {submitting ? '入队中…' : mode === 'audio' ? '生音频 · 待接入' : refDataUrl ? (mode === 'video' ? '图生视频 · 入队' : '图生图 · 入队') : (mode === 'video' ? '文生视频 · 入队' : '文生图 · 入队')}
+        {submitting ? '入队中…' : activeStyle ? `${activeStyle.name} · 入队` : mode === 'audio' ? '生音频 · 待接入' : refDataUrl ? (mode === 'video' ? '图生视频 · 入队' : '图生图 · 入队') : (mode === 'video' ? '文生视频 · 入队' : '文生图 · 入队')}
       </button>
 
       {error && (
@@ -724,7 +794,11 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
                       {statusLabel(j)}
                     </span>
                   </div>
-                  <p className="m-0 truncate opacity-80">{j.prompt}</p>
+                  <p className="m-0 truncate opacity-80">
+                    {j.params.style
+                      ? `〔${j.params.style.name}${j.params.style.cutout ? ' · 透明底' : ''}〕${j.params.style.summary}`
+                      : j.prompt}
+                  </p>
                   {j.error && <p className="m-0 mt-0.5" style={{ color: 'var(--error)' }}>{friendlyAiError(j.error)}</p>}
                 </div>
                 {(j.status === 'queued' || j.status === 'error' || j.status === 'imported' || j.status === 'done') && (
@@ -760,7 +834,7 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
                   {m.kind === 'video' ? (
                     <video src={m.url} className="w-full h-16 object-cover" muted playsInline preload="metadata" />
                   ) : (
-                    <img src={m.url} alt={m.name} className="w-full h-16 object-cover" />
+                    <img src={m.url} alt={m.name} className="w-full h-16 object-contain" />
                   )}
                 </button>
                 <button

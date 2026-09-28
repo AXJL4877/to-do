@@ -4,13 +4,13 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { NumInput } from './NumInput'
 import {
   defaultHandles,
-  sampleCurvePoints,
+  keyframeSideSpeeds,
   sampleKeyframes,
-  valueRange,
+  sampleSpeedCurve,
 } from '../lib/keyframeEval'
 import type { Clip, Ease, Keyframe, KfHandle } from '../types'
 import { useApp } from '../store'
-import { clearKfDeleteContext, setKfDeleteContext } from '../lib/kfDelete'
+import { clearKfDeleteContext, setKfDeleteContext, setKfGraphHovered } from '../lib/kfDelete'
 import { setLocalPlayheadScrubbing } from '../lib/storeSync'
 import { KfPlayheadLine } from './PlayheadOverlay'
 
@@ -49,6 +49,8 @@ type Props = {
   pxPerSec?: number
   /** 时间轴总时长（秒）；与 clipStart 一起做绝对定位 */
   timelineSpan?: number
+  /** 速度图数据源：单轨 → 带符号变化率；多轨（XY）→ 合速度。缺省用本行关键帧 */
+  speedTracks?: Keyframe[][]
   onChange: (stored: number) => void
   onToggleKeyframe: (prop: string, value: number) => void
   onGotoAdjacent: (prop: string, dir: -1 | 1) => void
@@ -59,16 +61,18 @@ type Props = {
   onEnableBezier?: (prop: string, kfId: string) => void
   /** 删除框选/多选关键帧（Delete） */
   onRemoveKeyframes?: (ids: string[]) => void
+  /** F3 自动贝塞尔 */
+  onAutoBezier?: (ids: string[]) => void
 }
 
-/** 关键帧行：数值 + 缓动预设（默认线性）+ 简易曲线；仅「曲线」模式显示可拖杠杆 */
+/** 关键帧行：数值 + 缓动预设（默认线性）+ 速度曲线（选中关键帧可拖入/出速度手柄） */
 export function PrKeyframeRow({
   prop, label, clip, playhead, displayValue,
   min, max, step, unit, defaultValue, testId,
   toStore = (v) => v, toUi = (v) => v,
-  hideGraph, graphOnly, hideEase, pxPerSec, timelineSpan,
+  hideGraph, graphOnly, hideEase, pxPerSec, timelineSpan, speedTracks,
   onChange, onToggleKeyframe, onGotoAdjacent, onSeek, onMoveKeyframe, onSetEase,
-  onSetHandle, onEnableBezier, onRemoveKeyframes,
+  onSetHandle, onEnableBezier, onRemoveKeyframes, onAutoBezier,
 }: Props) {
   const fps = useApp((s) => s.settings.fps)
   const frames = clip.keyframes[prop] ?? []
@@ -90,19 +94,19 @@ export function PrKeyframeRow({
     return selected
   }, [selected, sorted])
 
-  const showHandles = !!(easeTarget?.ease === 'bezier' && onSetHandle)
   const span = timelineSpan ?? clip.duration
   const synced = pxPerSec != null
+  const tracks = useMemo(() => speedTracks ?? [frames], [speedTracks, frames])
   const graph = armed && (
-    <KeyframeGraph
+    <SpeedGraph
       prop={prop}
       frames={frames}
+      speedTracks={tracks}
       duration={clip.duration}
       clipStart={synced ? clip.start : 0}
       absStart={clip.start}
       spanDuration={synced ? span : clip.duration}
       stripRef={stripRef}
-      showHandles={showHandles}
       synced={synced}
       selectedId={selected?.id ?? null}
       onSeekAbs={(t) => onSeek(synced ? t : clip.start + t)}
@@ -111,6 +115,7 @@ export function PrKeyframeRow({
       onSetHandle={onSetHandle ? (id, which, h) => onSetHandle(prop, id, which, h) : undefined}
       onEnableBezier={onEnableBezier ? (id) => onEnableBezier(prop, id) : undefined}
       onRemoveKeyframes={onRemoveKeyframes}
+      onAutoBezier={onAutoBezier}
     />
   )
 
@@ -188,18 +193,37 @@ export function PrKeyframeRow({
   )
 }
 
-function KeyframeGraph({
-  prop, frames, duration, clipStart, absStart, spanDuration, stripRef, showHandles, synced, selectedId,
-  onSeekAbs, onMoveKeyframe, onSeekLocal, onSetHandle, onEnableBezier, onRemoveKeyframes,
+/** 当前生效的出手柄（与 sampleKeyframes 的取值规则一致） */
+function effectiveOut(k: Keyframe): KfHandle {
+  return k.ease === 'bezier' ? (k.oh ?? defaultHandles('easeInOut').oh) : defaultHandles(k.ease).oh
+}
+
+/** 当前生效的入手柄：段 prev→k 是否走曲线由 prev 决定 */
+function effectiveIn(prev: Keyframe, k: Keyframe): KfHandle {
+  if (prev.ease !== 'bezier') return defaultHandles(prev.ease).ih
+  return k.ih ?? defaultHandles(k.ease === 'bezier' ? 'easeInOut' : k.ease).ih
+}
+
+function fmtSpeed(v: number | null) {
+  if (v == null) return '—'
+  const a = Math.abs(v)
+  return a >= 100 ? v.toFixed(0) : a >= 1 ? v.toFixed(2) : v.toFixed(3)
+}
+
+type HandleInfo = { which: 'oh' | 'ih'; t: number; speed: number; spanT: number; spanV: number }
+
+function SpeedGraph({
+  prop, frames, speedTracks, duration, clipStart, absStart, spanDuration, stripRef, synced, selectedId,
+  onSeekAbs, onMoveKeyframe, onSeekLocal, onSetHandle, onEnableBezier, onRemoveKeyframes, onAutoBezier,
 }: {
   prop: string
   frames: Keyframe[]
+  speedTracks: Keyframe[][]
   duration: number
   clipStart: number
   absStart: number
   spanDuration: number
   stripRef: React.RefObject<HTMLDivElement | null>
-  showHandles: boolean
   synced?: boolean
   selectedId: string | null
   onSeekAbs: (absoluteT: number) => void
@@ -208,28 +232,98 @@ function KeyframeGraph({
   onSetHandle?: (id: string, which: 'oh' | 'ih', handle: KfHandle) => void
   onEnableBezier?: (id: string) => void
   onRemoveKeyframes?: (ids: string[]) => void
+  onAutoBezier?: (ids: string[]) => void
 }) {
   const sorted = useMemo(() => [...frames].sort((a, b) => a.t - b.t), [frames])
-  const curve = useMemo(() => sampleCurvePoints(sorted, duration, 48), [sorted, duration])
-  const { vmin, vmax } = useMemo(() => valueRange(sorted), [sorted])
+  const signed = speedTracks.filter((k) => k.length).length === 1
+  const curve = useMemo(
+    () => sampleSpeedCurve(speedTracks, duration, Math.max(120, Math.min(600, Math.round(duration * 60)))),
+    [speedTracks, duration],
+  )
+  const sides = useMemo(
+    () => new Map(sorted.map((k) => [k.id, keyframeSideSpeeds(speedTracks, k.t, duration)])),
+    [sorted, speedTracks, duration],
+  )
   const [picked, setPicked] = useState<string[]>([])
   const [box, setBox] = useState<null | { x0: number; y0: number; x1: number; y1: number }>(null)
-  const pickedRef = useRef(picked)
-  pickedRef.current = picked
+  const [dragRange, setDragRange] = useState<null | { lo: number; hi: number }>(null)
   const span = Math.max(1e-6, spanDuration)
 
-  // 局部时间 → 图上 0..1（对齐整条时间轴）
   const xOf = (local: number) => (clipStart + local) / span
 
-  // 每帧同步 Delete 上下文（勿放 effect，避免回调抖动把注册清掉）
+  const selected = selectedId ? sorted.find((k) => k.id === selectedId) ?? null : null
+  const selIdx = selected ? sorted.findIndex((k) => k.id === selected.id) : -1
+
+  // 选中关键帧的入/出速度手柄。多轨（XY）时各轨共用同一归一化手柄，合速度 = 手柄斜率 × 空间距离
+  const handles: HandleInfo[] = []
+  if (onSetHandle && selected && selIdx >= 0) {
+    for (const which of ['oh', 'ih'] as const) {
+      const parts = speedTracks.filter((k) => k.length).map((track) => {
+        const s = [...track].sort((a, b) => a.t - b.t)
+        const i = s.findIndex((k) => Math.abs(k.t - selected.t) < 1e-4)
+        if (i < 0) return null
+        const j = which === 'oh' ? i + 1 : i - 1
+        if (j < 0 || j >= s.length) return null
+        const k = s[i]
+        const n = s[j]
+        if ((which === 'oh' ? k : n).ease === 'hold') return null
+        const spanT = Math.abs(n.t - k.t)
+        if (spanT <= 1e-6) return null
+        const spanV = which === 'oh' ? n.value - k.value : k.value - n.value
+        const h = which === 'oh' ? effectiveOut(k) : effectiveIn(n, k)
+        return { spanT, spanV, h }
+      }).filter((p): p is NonNullable<typeof p> => !!p)
+      if (!parts.length) continue
+      const p0 = parts[0]
+      const speeds = parts.map((p) => (p.h.y * p.spanV) / (p.h.x * p.spanT))
+      handles.push({
+        which,
+        t: selected.t + p0.h.x * p0.spanT,
+        speed: signed ? speeds[0] : Math.hypot(...speeds),
+        spanT: p0.spanT,
+        spanV: signed ? p0.spanV : Math.hypot(...parts.map((p) => p.spanV)),
+      })
+    }
+  }
+  const [dragHandle, setDragHandle] = useState<'oh' | 'ih' | null>(null)
+
+  const range = useMemo(() => {
+    let lo = 0
+    let hi = 0
+    for (const p of curve) {
+      if (p.v < lo) lo = p.v
+      if (p.v > hi) hi = p.v
+    }
+    if (!signed) lo = 0
+    if (hi - lo < 1e-9) hi = lo + 1
+    const pad = (hi - lo) * 0.15
+    return { lo: signed && lo < 0 ? lo - pad : lo, hi: hi + pad }
+  }, [curve, signed])
+  const { lo, hi } = dragRange ?? range
+  const yOf = (v: number) => 1 - (v - lo) / (hi - lo)
+  const clampY = (y: number) => Math.max(0.02, Math.min(0.98, y))
+
+  function keyY(k: Keyframe) {
+    const s = sides.get(k.id)
+    const vals = [s?.inSpeed, s?.outSpeed].filter((v): v is number => v != null && Number.isFinite(v))
+    const v = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0
+    return clampY(yOf(v))
+  }
+
+  // 每帧同步键盘上下文（勿放 effect，避免回调抖动把注册清掉）
   setKfDeleteContext({
     picked,
     selectedId,
     remove: onRemoveKeyframes ?? null,
+    allIds: sorted.map((k) => k.id),
+    autoBezier: onAutoBezier ?? null,
+    selectAll: () => setPicked(sorted.map((k) => k.id)),
   })
-  useEffect(() => () => clearKfDeleteContext(), [])
+  useEffect(() => () => {
+    clearKfDeleteContext()
+    setKfGraphHovered(false)
+  }, [])
 
-  // 帧列表变化时清掉已不存在的选中 id
   useEffect(() => {
     const alive = new Set(frames.map((f) => f.id))
     setPicked((prev) => {
@@ -238,40 +332,17 @@ function KeyframeGraph({
     })
   }, [frames])
 
-  // 播放头附近的点纳入选中，便于 Delete；Ctrl 多选保留
   useEffect(() => {
     if (!selectedId) return
     setPicked((prev) => (prev.includes(selectedId) ? prev : [selectedId]))
   }, [selectedId])
 
-  const selected = selectedId ? sorted.find((k) => k.id === selectedId) ?? null : null
-  const selIdx = selected ? sorted.findIndex((k) => k.id === selected.id) : -1
-  const pathD = curve.map((p, i) => {
-    const x = xOf(p.x * duration) * 100
-    return `${i === 0 ? 'M' : 'L'}${x.toFixed(2)} ${(p.y * 100).toFixed(2)}`
-  }).join(' ')
-
-  function toNorm(k: Keyframe) {
-    return {
-      x: xOf(k.t),
-      y: 1 - (k.value - vmin) / (vmax - vmin),
-    }
-  }
-
-  function handlePos(k: Keyframe, which: 'oh' | 'ih', neighbor: Keyframe) {
-    const d = defaultHandles('linear')
-    const h = which === 'oh' ? (k.oh ?? d.oh) : (k.ih ?? d.ih)
-    const a = which === 'oh' ? k : neighbor
-    const b = which === 'oh' ? neighbor : k
-    const spanT = b.t - a.t
-    const spanV = b.value - a.value
-    const tx = k.t + h.x * spanT
-    const ty = k.value + h.y * spanV
-    return {
-      x: xOf(tx),
-      y: 1 - (ty - vmin) / (vmax - vmin),
-    }
-  }
+  const linePts = curve.map((p) => `${(xOf(p.t) * 100).toFixed(3)} ${(yOf(p.v) * 100).toFixed(3)}`)
+  const pathD = linePts.length ? `M${linePts.join(' L')}` : ''
+  const zeroY = yOf(0) * 100
+  const areaD = curve.length
+    ? `${pathD} L${(xOf(curve[curve.length - 1].t) * 100).toFixed(3)} ${zeroY.toFixed(3)} L${(xOf(curve[0].t) * 100).toFixed(3)} ${zeroY.toFixed(3)} Z`
+    : ''
 
   function clientToLocalT(clientX: number, el: HTMLElement) {
     const rect = el.getBoundingClientRect()
@@ -279,37 +350,49 @@ function KeyframeGraph({
     return r * span - clipStart
   }
 
-  function startHandleDrag(e: React.PointerEvent, kf: Keyframe, which: 'oh' | 'ih', neighbor: Keyframe) {
-    if (!onSetHandle) return
+  function startHandleDrag(e: React.PointerEvent, h: HandleInfo) {
+    if (!onSetHandle || !selected) return
     e.preventDefault()
     e.stopPropagation()
-    onEnableBezier?.(kf.id)
     const el = stripRef.current
     if (!el || duration <= 0) return
-    const a = which === 'oh' ? kf : neighbor
-    const b = which === 'oh' ? neighbor : kf
-    const spanT = Math.max(1e-6, b.t - a.t)
-    const spanV = b.value - a.value
-    const spanVSafe = Math.abs(spanV) < 1e-9 ? 1 : spanV
+    const kf = selected
+    const frozen = { lo, hi }
+    setDragRange(frozen)
+    setDragHandle(h.which)
+    onEnableBezier?.(kf.id)
+    const canSpeed = Math.abs(h.spanV) > 1e-9
+    const startInfl = Math.abs(h.t - kf.t) / h.spanT
+    const rect0 = el.getBoundingClientRect()
+    const grabDy = e.clientY - (rect0.top + clampY(yOf(h.speed)) * rect0.height)
+
+    // 自动锁轴：先动超过 4px 的方向决定只改速度（上下）或只改影响范围（左右）；Shift 两者同时
+    let axis: 'speed' | 'infl' | null = null
+    const x0 = e.clientX
+    const y0 = e.clientY
 
     const onMove = (ev: PointerEvent) => {
       const rect = el.getBoundingClientRect()
-      const ny = Math.max(0, Math.min(1, (ev.clientY - rect.top) / rect.height))
-      const tLocal = clientToLocalT(ev.clientX, el)
-      const vAbs = vmax - ny * (vmax - vmin)
-      if (which === 'oh') {
-        onSetHandle(kf.id, 'oh', {
-          x: Math.max(0.02, Math.min(0.98, (tLocal - kf.t) / spanT)),
-          y: (vAbs - kf.value) / spanVSafe,
-        })
-      } else {
-        onSetHandle(kf.id, 'ih', {
-          x: Math.max(-0.98, Math.min(-0.02, (tLocal - kf.t) / spanT)),
-          y: (vAbs - kf.value) / spanVSafe,
-        })
+      if (!axis) {
+        const dx = Math.abs(ev.clientX - x0)
+        const dy = Math.abs(ev.clientY - y0)
+        if (Math.max(dx, dy) < 4 && !ev.shiftKey) return
+        axis = dy >= dx ? 'speed' : 'infl'
       }
+      const free = ev.shiftKey
+      // 不夹到图内：拖出图外仍按冻结的纵轴比例继续加减速
+      const ny = (ev.clientY - grabDy - rect.top) / rect.height
+      let speed = free || axis === 'speed' ? frozen.hi - ny * (frozen.hi - frozen.lo) : h.speed
+      if (!signed) speed = Math.max(0, speed)
+      const infl = free || axis === 'infl'
+        ? Math.max(0.02, Math.min(0.98, Math.abs(clientToLocalT(ev.clientX, el) - kf.t) / h.spanT))
+        : startInfl
+      const x = h.which === 'oh' ? infl : -infl
+      onSetHandle(kf.id, h.which, { x, y: canSpeed ? (speed * x * h.spanT) / h.spanV : 0 })
     }
     const onUp = () => {
+      setDragRange(null)
+      setDragHandle(null)
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
     }
@@ -326,17 +409,21 @@ function KeyframeGraph({
     const top = (Math.min(y0, y1) - rect.top) / rect.height
     const bottom = (Math.max(y0, y1) - rect.top) / rect.height
     return sorted.filter((f) => {
-      const p = toNorm(f)
-      return p.x >= left && p.x <= right && p.y >= top && p.y <= bottom
+      const x = xOf(f.t)
+      const y = keyY(f)
+      return x >= left && x <= right && y >= top && y <= bottom
     }).map((f) => f.id)
   }
 
   return (
     <div
       ref={stripRef}
-      className={clsx('pr-kf-graph', showHandles && 'pr-kf-graph--bezier', synced && 'pr-kf-graph--synced')}
+      className={clsx('pr-kf-graph', synced && 'pr-kf-graph--synced')}
       data-testid={`kf-strip-${prop}`}
-      title="拖空白处 scrub · 拖菱形 · Ctrl+拖框选 · Ctrl+点多选"
+      data-graph="speed"
+      title={`速度曲线${signed ? '（变化率/秒）' : '（合速度/秒）'} · 拖空白处 scrub · 拖菱形移动 · Ctrl+拖框选 · Ctrl+A 全选 · F3 自动贝塞尔（框选则只处理选中）`}
+      onPointerEnter={() => setKfGraphHovered(true)}
+      onPointerLeave={() => setKfGraphHovered(false)}
       onPointerDown={(e) => {
         if (e.button !== 0) return
         if ((e.target as HTMLElement).closest('[data-kf-id],[data-kf-handle]')) return
@@ -363,6 +450,7 @@ function KeyframeGraph({
           window.addEventListener('pointerup', onUp)
           return
         }
+        e.preventDefault()
         setPicked([])
         const seekFromClientX = (clientX: number) => {
           const node = stripRef.current
@@ -383,7 +471,6 @@ function KeyframeGraph({
         window.addEventListener('pointerup', onUp)
       }}
     >
-      {/* 片段区间高亮，其余铺满时间轴背景 */}
       {synced && duration > 0 && (
         <div
           className="pr-kf-clip-band"
@@ -393,20 +480,22 @@ function KeyframeGraph({
       )}
 
       <svg className="pr-kf-svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden>
-        <path d={pathD} fill="none" stroke="var(--accent)" strokeWidth="1.5" vectorEffect="non-scaling-stroke" opacity="0.9" />
-        {showHandles && selected && selIdx >= 0 && selIdx < sorted.length - 1 && (() => {
-          const n = sorted[selIdx + 1]
-          const p0 = toNorm(selected)
-          const h = handlePos(selected, 'oh', n)
-          return (
-            <line
-              x1={p0.x * 100} y1={p0.y * 100}
-              x2={h.x * 100} y2={h.y * 100}
-              stroke="var(--accent)" strokeWidth="1.5" opacity="0.55"
-              vectorEffect="non-scaling-stroke"
-            />
-          )
-        })()}
+        <line
+          x1={xOf(0) * 100} x2={xOf(duration) * 100} y1={zeroY} y2={zeroY}
+          stroke="var(--text-muted)" strokeWidth="1" strokeDasharray="3 3" opacity="0.45"
+          vectorEffect="non-scaling-stroke"
+        />
+        <path d={areaD} fill="var(--accent)" opacity="0.12" />
+        <path d={pathD} fill="none" stroke="var(--accent)" strokeWidth="1.5" vectorEffect="non-scaling-stroke" opacity="0.95" data-testid={`kf-speed-path-${prop}`} />
+        {selected && handles.map((h) => (
+          <line
+            key={h.which}
+            x1={xOf(selected.t) * 100} y1={clampY(yOf(h.speed)) * 100}
+            x2={xOf(h.t) * 100} y2={clampY(yOf(h.speed)) * 100}
+            stroke="var(--accent)" strokeWidth="1.5" opacity="0.6"
+            vectorEffect="non-scaling-stroke"
+          />
+        ))}
       </svg>
 
       <KfPlayheadLine
@@ -429,16 +518,16 @@ function KeyframeGraph({
       })()}
 
       {sorted.map((f) => {
-        const y = 1 - (f.value - vmin) / (vmax - vmin)
         const isSel = picked.includes(f.id) || selected?.id === f.id
+        const s = sides.get(f.id)
         return (
           <button
             key={f.id}
             type="button"
             data-kf-id={f.id}
-            className={clsx('pr-kf-mark', isSel && 'selected')}
-            style={{ left: `${xOf(f.t) * 100}%`, top: `${y * 100}%` }}
-            title={`${f.t.toFixed(2)}s · ${f.ease}`}
+            className={clsx('pr-kf-mark', isSel && 'selected', f.ease === 'bezier' && 'is-bezier')}
+            style={{ left: `${xOf(f.t) * 100}%`, top: `${keyY(f) * 100}%` }}
+            title={`${f.t.toFixed(2)}s · ${f.ease} · 入 ${fmtSpeed(s?.inSpeed ?? null)} / 出 ${fmtSpeed(s?.outSpeed ?? null)} 每秒`}
             onPointerDown={(e) => {
               e.preventDefault()
               e.stopPropagation()
@@ -460,6 +549,8 @@ function KeyframeGraph({
                   return [id, k?.t ?? originT]
                 }),
               )
+              const frozen = { lo, hi }
+              setDragRange(frozen)
               const onMove = (ev: PointerEvent) => {
                 const el = stripRef.current
                 if (!el || duration <= 0) return
@@ -470,6 +561,7 @@ function KeyframeGraph({
                 }
               }
               const onUp = () => {
+                setDragRange(null)
                 window.removeEventListener('pointermove', onMove)
                 window.removeEventListener('pointerup', onUp)
               }
@@ -482,21 +574,22 @@ function KeyframeGraph({
         )
       })}
 
-      {showHandles && selected && selIdx >= 0 && selIdx < sorted.length - 1 && onSetHandle && (() => {
-        const n = sorted[selIdx + 1]
-        const h = handlePos(selected, 'oh', n)
-        return (
-          <button
-            type="button"
-            data-kf-handle="oh"
-            className="pr-kf-handle"
-            style={{ left: `${h.x * 100}%`, top: `${h.y * 100}%` }}
-            title="拖动调整曲线"
-            data-testid={`kf-handle-oh-${prop}`}
-            onPointerDown={(e) => startHandleDrag(e, selected, 'oh', n)}
-          />
-        )
-      })()}
+      {handles.map((h) => (
+        <button
+          key={h.which}
+          type="button"
+          data-kf-handle={h.which}
+          className={clsx('pr-kf-handle pr-kf-handle--speed', dragHandle === h.which && 'is-dragging')}
+          style={{ left: `${xOf(h.t) * 100}%`, top: `${clampY(yOf(h.speed)) * 100}%` }}
+          title={`${h.which === 'oh' ? '出' : '入'}速度 ${fmtSpeed(h.speed)}/秒 · 影响 ${Math.round((Math.abs(h.t - (selected?.t ?? 0)) / h.spanT) * 100)}% · 上下拖=速度 · 左右拖=影响范围 · 按住 Shift 同时调 · 双击恢复自动`}
+          data-testid={`kf-handle-${h.which}-${prop}`}
+          onPointerDown={(e) => startHandleDrag(e, h)}
+          onDoubleClick={(e) => {
+            e.stopPropagation()
+            if (selected) onAutoBezier?.([selected.id])
+          }}
+        />
+      ))}
     </div>
   )
 }
