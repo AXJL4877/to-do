@@ -10,9 +10,18 @@ type Slot = {
   pending: number | null
   /** 已跟采的片内帧号；同帧不重复 seek，避免元素拖着打转 */
   followFrame: number | null
+  /** A cache hit paused this slot; the next live sample must align before presenting. */
+  resumeSync: boolean
 }
 
 const slots = new Map<string, Slot>()
+// Renderer-thread-only scope; prefetch never seeks or pauses foreground slots.
+let frameScope = 'program'
+export function withVideoFrameScope<T>(scope: string, render: () => T): T {
+  const previous = frameScope
+  frameScope = scope
+  try { return render() } finally { frameScope = previous }
+}
 const warmup = new Map<string, HTMLVideoElement>()
 const nativeSnaps = new Map<string, { t: number; canvas: HTMLCanvasElement }>()
 const nativePending = new Map<string, number>()
@@ -57,10 +66,48 @@ export function setVideoSeekQuiet(on: boolean) {
 
 /** 播放中是否还有层在 seek（此时不宜写入 RAM 缓存，否则会缓存黑帧导致闪烁） */
 export function anyVideoSeeking() {
-  for (const s of slots.values()) {
+  for (const [id, s] of slots) {
+    if (!id.startsWith(`${frameScope}:`)) continue
     if (s.v.seeking) return true
   }
   return false
+}
+
+/** 本帧有层没拿到稳定画面（seek / 未解码），合成结果不能写入 RAM */
+let sampleUnstable = false
+let sampleCacheable = true
+
+export function resetFrameSampleStability() {
+  sampleUnstable = false
+  sampleCacheable = true
+}
+
+export function frameSampleCacheable() { return !sampleUnstable && sampleCacheable }
+
+export function frameSampleUnstable() {
+  return sampleUnstable
+}
+
+function markUnstable() {
+  sampleUnstable = true
+}
+
+/** 命中 RAM 帧时停掉 HTMLVideo，避免后台继续解码把已缓存回放拖卡 */
+let decodeHeld = false
+
+export function holdVideoDecode() {
+  if (decodeHeld) return
+  decodeHeld = true
+  for (const s of slots.values()) {
+    try {
+      s.resumeSync = true
+      if (!s.v.paused) s.v.pause()
+    } catch { /* */ }
+  }
+}
+
+export function releaseVideoDecode() {
+  decodeHeld = false
 }
 
 /** 只静音，不停播（播放循环里每帧 mute+pause 会把叠层卡死） */
@@ -149,11 +196,12 @@ function slotOf(clipId: string, m: MediaItem): Slot {
     s = { v: makeVideo((el) => {
       const cur = slots.get(clipId)
       if (!cur || cur.v !== el) return
-      const want = cur.pending
-      if (capture(cur)) cur.settled = want ?? el.currentTime
-      cur.pending = null
-      bump()
-    }), snap: null, settled: null, pending: null, followFrame: null }
+      if (capture(cur)) {
+        cur.settled = el.currentTime
+        cur.pending = null
+      }
+      if (clipId.startsWith('program:')) bump()
+    }), snap: null, settled: null, pending: null, followFrame: null, resumeSync: false }
     slots.set(clipId, s)
   }
   const src = playUrl(m)
@@ -194,7 +242,7 @@ function htmlFrame(clipId: string, m: MediaItem, t: number, step: number, opts?:
   if (!playUrl(m)) return null
   const s = slotOf(clipId, m)
   const v = s.v
-  if (v.error) return still(s)
+  if (v.error) { markUnstable(); return still(s) }
 
   const q = Math.round(t / step) * step
   const frame = Math.round(q / step)
@@ -202,7 +250,7 @@ function htmlFrame(clipId: string, m: MediaItem, t: number, step: number, opts?:
   // 播放：只采样画面（声走 programAudio 混音）。
   // ⑤ 不堵：seeking / 未就绪立刻退回上一帧；主钟不在这里等。
   // seek 只跟播放头纠偏，元素绝不反推播放头。
-  if (composePlay && !opts?.reverse) {
+  if (composePlay && frameScope === 'program' && !opts?.reverse) {
     const rate = Math.max(0.25, Math.min(4, opts?.speed ?? 1))
     try {
       v.playbackRate = rate
@@ -210,13 +258,14 @@ function htmlFrame(clipId: string, m: MediaItem, t: number, step: number, opts?:
       v.muted = true
     } catch { /* */ }
 
-    if (s.followFrame !== frame && !v.seeking && v.readyState >= 1) {
+    if ((s.resumeSync || s.followFrame !== frame) && !v.seeking && v.readyState >= 1) {
       s.followFrame = frame
-      // 连续解码；偏离超过 ~4 帧才纠（传统预览：跟主钟，不每帧硬钉）
+      // 连续解码；偏离超过 ~8 帧才纠（过紧会 seek 闪烁，过松会音画漂）
       const drift = Math.abs(v.currentTime - q)
-      if (drift > step * 4 || Number.isNaN(v.currentTime)) {
+      if ((s.resumeSync && drift > 1e-4) || drift > step * 8 || Number.isNaN(v.currentTime)) {
         try { v.currentTime = q } catch { /* */ }
       }
+      s.resumeSync = false
     }
 
     if (v.paused && !v.seeking && v.readyState >= 2) {
@@ -225,9 +274,14 @@ function htmlFrame(clipId: string, m: MediaItem, t: number, step: number, opts?:
 
     // 直接画 HTMLVideo；seeking 时优先上一帧，避免占位符闪白/闪黑
     if (v.readyState >= 2 && v.videoWidth > 0) {
-      if (!v.seeking) return v
+      if (!v.seeking) {
+        if (Math.floor(v.currentTime / step + 1e-4) !== frame) sampleCacheable = false
+        return v
+      }
+      markUnstable()
       return still(s) ?? v
     }
+    markUnstable()
     return still(s)
   }
 
@@ -237,9 +291,9 @@ function htmlFrame(clipId: string, m: MediaItem, t: number, step: number, opts?:
     if (!v.paused) v.pause()
   } catch { /* */ }
 
-  const eps = step
+  const eps = 1e-4
   if (s.settled != null && Math.abs(s.settled - q) <= eps && still(s)) return still(s)
-  if (v.seeking || s.pending != null) return still(s)
+  if (v.seeking || s.pending != null) { markUnstable(); return still(s) }
   if (v.readyState >= 2 && Math.abs(v.currentTime - q) <= eps) {
     if (capture(s)) s.settled = q
     return still(s)
@@ -247,6 +301,7 @@ function htmlFrame(clipId: string, m: MediaItem, t: number, step: number, opts?:
   s.pending = q
   s.followFrame = frame
   try { v.currentTime = q } catch { s.pending = null }
+  markUnstable()
   return still(s)
 }
 
@@ -295,7 +350,7 @@ export function videoFrameAt(
 ): CanvasImageSource | null {
   const step = 1 / Math.max(1, fps)
   const t = Math.max(0, mediaTime)
-  const id = clipId || `media:${m.id}`
+  const id = `${frameScope}:${clipId || `media:${m.id}`}`
 
   const html = htmlFrame(id, m, t, step, opts)
   if (html) return html
@@ -312,6 +367,10 @@ export function videoFrameAt(
 }
 
 export function dropVideo(id: string) {
+  if (!id.startsWith('program:') && !id.startsWith('prefetch:')) {
+    dropVideo(`program:${id}`)
+    dropVideo(`prefetch:${id}`)
+  }
   const s = slots.get(id)
   if (s) {
     s.v.removeAttribute('src')
@@ -332,7 +391,8 @@ export function dropVideo(id: string) {
 /** 停掉未在本帧使用的解码槽，释放叠层时的多余 HTMLVideo */
 export function pauseUnusedVideoSlots(activeClipIds: Set<string>) {
   for (const [id, s] of slots) {
-    if (activeClipIds.has(id)) continue
+    if (!id.startsWith(`${frameScope}:`)) continue
+    if (activeClipIds.has(id.slice(frameScope.length + 1))) continue
     try {
       s.v.muted = true
       if (!s.v.paused) s.v.pause()

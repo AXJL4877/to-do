@@ -2,7 +2,7 @@ import type { Clip, MediaItem, ProjectSettings, Sequence, Track } from '../types
 import { blendToComposite, clipCanvasFilter } from './clipFilters'
 import { sampleKeyframes, resolveClipTransform, effectiveTransform } from './keyframeEval'
 import type { SnapGuide } from './monitorSnap'
-import { pauseUnusedVideoSlots, videoFrameAt } from './videoCache'
+import { pauseUnusedVideoSlots, resetFrameSampleStability, videoFrameAt } from './videoCache'
 import { mediaTimeAt, pictureClipsAt } from './programPlayer'
 
 export type ImageCache = Map<string, HTMLImageElement>
@@ -50,15 +50,17 @@ function isVideoClip(clip: Clip, media: MediaItem[]): boolean {
 }
 
 /** 近似铺满且不透明：可挡住下层，下层不必解码/绘制 */
-function isOpaqueFullscreenCover(clip: Clip, playhead: number): boolean {
+function isOpaqueFullscreenCover(clip: Clip, playhead: number, media: MediaItem[], settings: ProjectSettings): boolean {
   if (clip.text) return false
   const tr = effectiveTransform(clip, playhead)
-  if (tr.opacity < 0.98) return false
+  if (tr.opacity < 1 || tr.rotation !== 0 || clip.mask || clip.effects.some(e => e.enabled)) return false
   if (clip.blend && clip.blend !== 'normal') return false
-  if (Math.abs(tr.scaleX) < 0.98 || Math.abs(tr.scaleY) < 0.98) return false
-  if (Math.abs(tr.x) > 0.05 || Math.abs(tr.y) > 0.05) return false
-  if (tr.cropL + tr.cropR + tr.cropT + tr.cropB > 0.04) return false
-  return true
+  if (tr.cropL !== 0 || tr.cropR !== 0 || tr.cropT !== 0 || tr.cropB !== 0) return false
+  const m = media.find(item => item.id === clip.mediaId)
+  if (!m?.width || !m.height) return false
+  const fit = Math.min(settings.width / m.width, settings.height / m.height)
+  return m.width * fit * Math.abs(tr.scaleX) >= settings.width * (1 + Math.abs(tr.x))
+    && m.height * fit * Math.abs(tr.scaleY) >= settings.height * (1 + Math.abs(tr.y))
 }
 
 /** 被上层遮挡时仍推进该层解码（超时用上一帧）；声不在这里出 */
@@ -113,6 +115,7 @@ export function renderProgramFrame(
   /** true：与导出一致，不画选中框/K帧路径/安全框等编辑装饰 */
   exportLook = false,
 ) {
+  resetFrameSampleStability()
   const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true } as CanvasRenderingContext2DSettings)
     ?? canvas.getContext('2d')
   if (!ctx) return
@@ -137,7 +140,7 @@ export function renderProgramFrame(
     const c = visible[i]
     if (!isVideoClip(c, media)) continue
     if (covered) skipDraw.add(c.id)
-    else if (isOpaqueFullscreenCover(c, playhead)) covered = true
+    else if (isOpaqueFullscreenCover(c, playhead, media, settings)) covered = true
   }
   // ② 每活跃视频 clip 独立 HTMLVideo 槽；未活跃的暂停释放
   const liveIds = new Set(videoLayers.map((c) => c.id))
