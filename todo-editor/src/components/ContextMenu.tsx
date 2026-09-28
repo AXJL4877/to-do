@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import clsx from 'clsx'
+import { usePreviewSuspend } from '../hooks/usePreviewSuspend'
 
 export type MenuItem = {
   id: string
@@ -19,6 +20,7 @@ type Props = {
 
 /** 规范 2.3：右键菜单，不可用项置灰不隐藏 */
 export function ContextMenu({ x, y, items, onClose }: Props) {
+  usePreviewSuspend(true, 'menu')
   useEffect(() => {
     const close = () => onClose()
     window.addEventListener('click', close)

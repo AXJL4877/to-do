@@ -13,6 +13,7 @@ import { tryDeletePickedKeyframes } from './lib/kfDelete'
 import { initStoreSync, isAiPopout, isTimelinePopout, isLocalPlayheadScrubbing } from './lib/storeSync'
 import { setLivePlayhead } from './lib/livePlayhead'
 import { desktop } from './lib/desktop'
+import { bindNativePreviewLifecycle } from './lib/nativePreviewBridge'
 import { PanelBottomClose } from 'lucide-react'
 
 const TIMELINE_POPOUT = isTimelinePopout()
@@ -35,6 +36,11 @@ export default function App() {
 
   useEffect(() => {
     return initStoreSync()
+  }, [])
+
+  useEffect(() => {
+    if (POPOUT) return
+    return bindNativePreviewLifecycle()
   }, [])
 
   useEffect(() => {

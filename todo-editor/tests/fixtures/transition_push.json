@@ -6,7 +6,6 @@
       "start": 0,
       "duration": 3,
       "inPoint": 0,
-      "outPoint": 3,
       "trackId": "v1",
       "enabled": true,
       "kind": "video",
@@ -28,6 +27,7 @@
       "temperature": 0,
       "tint": 0,
       "blend": "normal",
+      "outPoint": 3,
       "transitionIn": {
         "type": "push",
         "duration": 0.7

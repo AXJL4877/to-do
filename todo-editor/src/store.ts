@@ -458,6 +458,7 @@ function defaultSettings(): ProjectSettings {
   return {
     width: 1920, height: 1080, fps: 30, aspect: '16:9', pixelAspect: 1,
     stillDuration: 5, cachePath: './cache', useProxy: false, hwAccel: true,
+    nativePreview: false,
     canvasBg: 'black', canvasColor: '#0a0a0a', safeFrame: false, magnetic: false, snap: true,
   }
 }
@@ -1047,7 +1048,7 @@ export const useApp = create<AppStore>((set, get) => {
           const media = reviveMediaList((data.media as MediaItem[]) ?? [])
           const offlineN = media.filter((m) => m.offline).length
           set({
-            projectId: id, projectName: d.name, settings: data.settings, media,
+            projectId: id, projectName: d.name, settings: { ...defaultSettings(), ...(data.settings as ProjectSettings) }, media,
             folders: data.folders ?? get().folders,
             sequences,
             activeSeqId,
@@ -1114,7 +1115,7 @@ export const useApp = create<AppStore>((set, get) => {
       const media = reviveMediaList((data.media as MediaItem[]) ?? [])
       set({
         projectId: id, projectName: name,
-        settings: (data.settings as ProjectSettings) ?? get().settings,
+        settings: { ...defaultSettings(), ...(data.settings as ProjectSettings) },
         media,
         folders: (data.folders as AppStore['folders']) ?? get().folders,
         sequences, activeSeqId: String(data.activeSeqId || sequences[0]?.id),

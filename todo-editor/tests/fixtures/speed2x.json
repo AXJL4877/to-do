@@ -6,7 +6,6 @@
       "start": 0,
       "duration": 4,
       "inPoint": 0,
-      "outPoint": 8,
       "trackId": "v1",
       "enabled": true,
       "kind": "video",
@@ -27,7 +26,8 @@
       "saturation": 0,
       "temperature": 0,
       "tint": 0,
-      "blend": "normal"
+      "blend": "normal",
+      "outPoint": 8
     }
   ],
   "tracks": [

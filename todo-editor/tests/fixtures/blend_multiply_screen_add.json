@@ -6,7 +6,6 @@
       "start": 0,
       "duration": 4,
       "inPoint": 0,
-      "outPoint": 4,
       "trackId": "v4",
       "enabled": true,
       "kind": "video",
@@ -27,14 +26,14 @@
       "saturation": 0,
       "temperature": 0,
       "tint": 0,
-      "blend": "normal"
+      "blend": "normal",
+      "outPoint": 4
     },
     {
       "mediaPath": "tests/media/intra.mp4",
       "start": 0,
       "duration": 4,
       "inPoint": 0,
-      "outPoint": 4,
       "trackId": "v3",
       "enabled": true,
       "kind": "video",
@@ -55,14 +54,14 @@
       "saturation": 0,
       "temperature": 0,
       "tint": 0,
-      "blend": "multiply"
+      "blend": "multiply",
+      "outPoint": 4
     },
     {
       "mediaPath": "tests/media/alpha_circle.png",
       "start": 0,
       "duration": 4,
       "inPoint": 0,
-      "outPoint": 4,
       "trackId": "v2",
       "enabled": true,
       "kind": "image",
@@ -83,14 +82,14 @@
       "saturation": 0,
       "temperature": 0,
       "tint": 0,
-      "blend": "screen"
+      "blend": "screen",
+      "outPoint": 4
     },
     {
       "mediaPath": "tests/media/alpha_checker.png",
       "start": 0,
       "duration": 4,
       "inPoint": 0,
-      "outPoint": 4,
       "trackId": "v1",
       "enabled": true,
       "kind": "image",
@@ -111,7 +110,8 @@
       "saturation": 0,
       "temperature": 0,
       "tint": 0,
-      "blend": "add"
+      "blend": "add",
+      "outPoint": 4
     }
   ],
   "tracks": [

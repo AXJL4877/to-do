@@ -16,5 +16,5 @@ function aiApi(): Plugin {
 export default defineConfig({
   plugins: [react(), tailwindcss(), aiApi()],
   base: './',
-  server: { port: 5173, strictPort: true },
+  server: { host: '127.0.0.1', port: 5173, strictPort: true },
 })

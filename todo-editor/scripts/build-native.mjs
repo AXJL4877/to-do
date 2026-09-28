@@ -31,6 +31,8 @@ const sharedSrcs = [
   resolve(sharedDir, 'keyframes.cpp'),
   resolve(sharedDir, 'layers.cpp'),
 ]
+const previewDir = resolve(root, 'native/preview')
+const spikesDir = resolve(root, 'native/spikes')
 const legacyProbe = resolve(root, 'native/media_probe.c')
 mkdirSync(out, { recursive: true })
 
@@ -101,12 +103,44 @@ for (const [envKey, exeName] of [['FFMPEG', 'ffmpeg.exe'], ['FFPROBE', 'ffprobe.
   }
 }
 
+console.log('编译 B2 预览引擎…')
+execFileSync(cxx, [
+  ...common, '-std=c++17',
+  `-I${previewDir}`,
+  resolve(previewDir, 'todo_preview_main.cpp'),
+  resolve(previewDir, 'preview_window.cpp'),
+  resolve(previewDir, 'preview_clock.cpp'),
+  resolve(sharedDir, 'editgraph.cpp'),
+  resolve(sharedDir, 'native_supports.cpp'),
+  '-ld3d11', '-ldxgi', '-luser32', '-lgdi32',
+  '-o', resolve(out, 'todo-preview-engine.exe'),
+], { stdio: 'inherit', timeout: 180000 })
+// DPI：运行时 SetProcessDpiAwarenessContext(PER_MONITOR_AWARE_V2)；manifest 文件见 native/preview/
+
+console.log('编译 todo-job-bind…')
+execFileSync(cxx, [
+  '-O2', '-Wall', '-std=c++17',
+  resolve(previewDir, 'todo_job_bind.cpp'),
+  '-lkernel32',
+  '-o', resolve(out, 'todo-job-bind.exe'),
+], { stdio: 'inherit', timeout: 60000 })
+
+if (existsSync(resolve(spikesDir, 'spike-host.cpp'))) {
+  console.log('编译 spike-host…')
+  execFileSync(cxx, [
+    '-O2', '-Wall', '-std=c++17',
+    resolve(spikesDir, 'spike-host.cpp'),
+    '-luser32', '-lgdi32',
+    '-o', resolve(out, 'spike-host.exe'),
+  ], { stdio: 'inherit', timeout: 60000 })
+}
+
 writeFileSync(resolve(out, 'ENGINE_BUILD.txt'), [
   `builtAt=${new Date().toISOString()}`,
   `cxx=${cxx}`,
   `sdk=${sdk}`,
-  'artifacts=todo-media-engine.exe,todo-media-probe.exe,todo-gpu-view.exe',
-  'cli=probe,frame,export,play-smoke,play-session(OPEN/SEEK/READ/AUDIO_CLOCK)',
+  'artifacts=todo-media-engine.exe,todo-media-probe.exe,todo-gpu-view.exe,todo-preview-engine.exe,todo-job-bind.exe',
+  'cli=probe,frame,export,play-smoke,play-session(OPEN/SEEK/READ/AUDIO_CLOCK),preview-protocol-v1',
 ].join('\n'))
 
-console.log(`原生引擎已输出：${out}（CLI: probe / frame / export / play-smoke / play-session+AUDIO_CLOCK）`)
+console.log(`原生引擎已输出：${out}（含 todo-preview-engine / job-bind）`)

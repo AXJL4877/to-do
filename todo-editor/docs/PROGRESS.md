@@ -113,3 +113,4 @@ preview:test 通过
 - 硬件：NVIDIA GeForce RTX 4060 Laptop GPU，驱动32.0.15.9174；OrayIddDriver未选用。上述seek计时仅命令处理，不是解码seek→正确画面的延迟。
 - T1/golden回归输出见上节（本子任务未改动导出/共享timemap/keyframe实现）。尚无GPU帧耗时baseline，不宣称AE/PR级性能、原生视频已接管或30分钟浸泡通过。
 - 下一步：T2严格JSON/有限值验证、timeline serial失效、桥接timeline完整内容判定及unsupported自动回退，补失败测试后逐项修复；全部门禁通过再T3。
+`T2-QUANTIZE` commit：cf4c22b（账本引用在下一次任务提交时一并保存）。

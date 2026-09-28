@@ -19,6 +19,7 @@
     "fixtures:write": "node scripts/write-fixtures.mjs",
     "golden": "node scripts/golden.mjs",
     "golden:check": "node scripts/golden.mjs --check",
+    "preview:test": "node scripts/test-preview-protocol.mjs",
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",

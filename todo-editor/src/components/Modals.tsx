@@ -1,5 +1,6 @@
 import { useApp } from '../store'
 import { SHORTCUTS } from '../lib/shortcuts'
+import { usePreviewSuspend } from '../hooks/usePreviewSuspend'
 
 function MoreActions() {
   const setModal = useApp((s) => s.setModal)
@@ -73,6 +74,7 @@ function MoreActions() {
 
 export function Modals() {
   const modal = useApp((s) => s.modal)
+  usePreviewSuspend(!!modal, modal === 'export' ? 'dialog' : 'dialog')
   const setModal = useApp((s) => s.setModal)
   const drafts = useApp((s) => s.drafts)
   const settings = useApp((s) => s.settings)
@@ -167,6 +169,9 @@ export function Modals() {
               </label>
               <label className="flex items-center gap-2 text-[12px]">
                 <input type="checkbox" data-testid="set-hwaccel" checked={settings.hwAccel} onChange={(e) => updateSettings({ hwAccel: e.target.checked })} />硬件加速
+              </label>
+              <label className="flex items-center gap-2 text-[12px]">
+                <input type="checkbox" data-testid="set-native-preview" checked={!!settings.nativePreview} onChange={(e) => updateSettings({ nativePreview: e.target.checked })} />原生节目预览（B2 popup）
               </label>
               <button className="btn btn-ghost" data-testid="btn-clear-cache" onClick={clearCache}>清理缓存 ({cacheMb.toFixed(1)} MB)</button>
             </>

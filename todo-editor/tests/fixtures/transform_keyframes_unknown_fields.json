@@ -6,7 +6,6 @@
       "start": 0,
       "duration": 4,
       "inPoint": 0,
-      "outPoint": 4,
       "trackId": "v1",
       "enabled": true,
       "kind": "video",
@@ -28,6 +27,7 @@
       "temperature": 0,
       "tint": 0,
       "blend": "normal",
+      "outPoint": 4,
       "keyframes": {
         "x": [
           {

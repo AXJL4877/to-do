@@ -6,7 +6,6 @@
       "start": 0,
       "duration": 5,
       "inPoint": 0,
-      "outPoint": 5,
       "trackId": "v2",
       "enabled": true,
       "kind": "video",
@@ -27,14 +26,14 @@
       "saturation": 0,
       "temperature": 0,
       "tint": 0,
-      "blend": "normal"
+      "blend": "normal",
+      "outPoint": 5
     },
     {
       "mediaPath": "tests/media/alpha_circle.png",
       "start": 0,
       "duration": 5,
       "inPoint": 0,
-      "outPoint": 5,
       "trackId": "v1",
       "enabled": true,
       "kind": "image",
@@ -55,7 +54,8 @@
       "saturation": 0,
       "temperature": 0,
       "tint": 0,
-      "blend": "normal"
+      "blend": "normal",
+      "outPoint": 5
     }
   ],
   "tracks": [

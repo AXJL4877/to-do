@@ -23,6 +23,14 @@ import { broadcastLivePlayhead } from '../lib/storeSync'
 import { syncProgramAudio, stopProgramAudio } from '../lib/programAudio'
 import { Monitor3dViewport } from './Monitor3dViewport'
 import { webglOk } from '../lib/scene3d'
+import {
+  isNativePreviewActive,
+  pushTimeline,
+  reportPreviewRect,
+  seekToPlayhead,
+  startNativePreview,
+  stopNativePreview,
+} from '../lib/nativePreviewBridge'
 import clsx from 'clsx'
 
 /** 画布缓冲坐标：object-fit:contain 时要把 letterbox 算进去 */
@@ -65,6 +73,11 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program' 
   const [viewPan, setViewPan] = useState({ x: 0, y: 0 })
   const viewPanRef = useRef({ x: 0, y: 0 })
   const notifiedCache = useRef('')
+  const paintRef = useRef<(
+    t: number,
+    transformOverrides?: Record<string, { x: number; y: number }>,
+    opts?: { playing?: boolean; guides?: SnapGuide[] },
+  ) => void>(() => {})
 
   const media = useApp((s) => s.media)
   const settings = useApp((s) => s.settings)
@@ -85,6 +98,7 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program' 
   const setLoop = useApp((s) => s.setLoop)
   const setSourceIO = useApp((s) => s.setSourceIO)
   const setFullscreen = useApp((s) => s.setFullscreen)
+  const fullscreen = useApp((s) => s.fullscreen)
   const threePointEdit = useApp((s) => s.threePointEdit)
   const updateSettings = useApp((s) => s.updateSettings)
   const selectClips = useApp((s) => s.selectClips)
@@ -118,6 +132,44 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program' 
     ro.observe(el)
     return () => ro.disconnect()
   }, [])
+
+  /** B2：节目窗上报 CSS 矩形；nativePreview 时隐藏 canvas 绘制 */
+  const nativePreview = settings.nativePreview
+  const [nativeOn, setNativeOn] = useState(false)
+  useEffect(() => {
+    if (!isProgram) return
+    let alive = true
+    if (nativePreview && !fullscreen) {
+      void startNativePreview().then((ok) => { if (alive) setNativeOn(ok && isNativePreviewActive()) })
+    } else {
+      void stopNativePreview().then(() => { if (alive) setNativeOn(false) })
+    }
+    return () => { alive = false }
+  }, [isProgram, nativePreview, fullscreen])
+
+  useEffect(() => {
+    if (!isProgram || !nativeOn) return
+    const el = viewportRef.current
+    if (!el) return
+    const report = () => {
+      const r = el.getBoundingClientRect()
+      reportPreviewRect({ x: r.x, y: r.y, w: r.width, h: r.height })
+    }
+    report()
+    const ro = new ResizeObserver(report)
+    ro.observe(el)
+    window.addEventListener('scroll', report, true)
+    return () => {
+      ro.disconnect()
+      window.removeEventListener('scroll', report, true)
+    }
+  }, [isProgram, nativeOn, display.w, display.h])
+
+  useEffect(() => {
+    if (!isProgram || !nativeOn) return
+    void pushTimeline()
+    void seekToPlayhead()
+  }, [isProgram, nativeOn, activeSeqId, sequences, media, playhead, playing])
 
   useEffect(() => {
     if (!isSeq) return
@@ -204,11 +256,14 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program' 
       return
     }
 
-    // 节目底图：播放中现场合成（防缓存黑帧闪烁）；暂停走 RAM 缓存
+    // 节目底图：驱动钟可合成；跟窗只贴共享帧/缓存，禁止双窗抢解码
     presentCachedProgramFrame(
       getProgramPreviewCache(), frame, fps, canvas, seq, media, settings,
       imgCache.current, w, h, maxEdge,
-      { playing: !!(opts?.playing || st.playing) },
+      {
+        playing: !!(opts?.playing || st.playing),
+        followOnly: !!(st.playing && !drivesClock),
+      },
     )
 
     if (isEdit) {
@@ -232,7 +287,9 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program' 
         ahead: 6,
       })
     }
-  }, [mode, isProgram, isEdit, media, settings, sourceMediaId, sourceIn, sourceOut, preview.w, preview.h, imgCache, imgVersion, selectedClipIds, autoKeyframe])
+  }, [mode, isProgram, isEdit, drivesClock, media, settings, sourceMediaId, sourceIn, sourceOut, preview.w, preview.h, imgCache, imgVersion, selectedClipIds, autoKeyframe])
+
+  paintRef.current = paint
 
   useEffect(() => {
     if (use3d) return
@@ -266,8 +323,10 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program' 
   }, [use3d, isSeq, playing, paint, drivesClock])
 
   // 墙钟播放环：仅 drivesClock 的窗负责推进 + 音频
+  // 注意：deps 不含 media/paint——代理生成会换 media 引用，重建循环会闪一下并重置墙钟
   useEffect(() => {
     if (use3d || !drivesClock || !playing) return
+    cancelPrefetchProgramFrames()
     cancelComposeUpgrade()
     void stopNativePlaySession()
     setVideoSeekQuiet(true)
@@ -291,8 +350,6 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program' 
     const seqEnd = (seq: typeof st0.sequences[0]) =>
       Math.max(seq.workOut, ...seq.clips.map((c) => c.start + c.duration), 5)
 
-    const videoIds = new Set(media.filter((m) => m.kind === 'video').map((m) => m.id))
-
     const tick = (now: number) => {
       const st = useApp.getState()
       const seq = st.sequences.find((q) => q.id === st.activeSeqId) ?? st.sequences[0]
@@ -310,7 +367,11 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program' 
           t = seq.workIn + ((t - seq.workIn) % span)
         } else {
           void stopNativePlaySession()
-          paint(end, undefined, { playing: true })
+          const mediaNow = st.media
+          presentCachedProgramFrame(
+            cache, Math.max(0, Math.floor(end * fps + 1e-6)), fps, canvas, seq, mediaNow, st.settings,
+            imgCache.current, preview.w, preview.h, maxEdge, { playing: true },
+          )
           setLivePlayhead(end)
           broadcastLivePlayhead(end)
           useApp.setState({ playing: false, playhead: end })
@@ -323,6 +384,8 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program' 
 
       if (frame !== lastShown) {
         lastShown = frame
+        const mediaNow = st.media
+        const videoIds = new Set(mediaNow.filter((m) => m.kind === 'video').map((m) => m.id))
         const videoClips = seq.clips.filter((c) => {
           if (!c.enabled || !c.mediaId || !videoIds.has(c.mediaId)) return false
           if (t < c.start || t >= c.start + c.duration) return false
@@ -333,17 +396,16 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program' 
           proxiesKicked = true
           st.ensureStackProxies(videoClips.map((c) => c.mediaId!).filter(Boolean))
         }
-        // 显示尺寸固定，避免叠层数变化改 canvas 宽高清空缓冲 → 闪烁
         const dw = preview.w
         const dh = preview.h
 
         presentCachedProgramFrame(
-          cache, frame, fps, canvas, seq, media, settings,
+          cache, frame, fps, canvas, seq, mediaNow, st.settings,
           imgCache.current, dw, dh, maxEdge, { playing: true },
         )
         if (isEdit) {
           renderProgramOverlay(
-            canvas, seq, settings, t, dw, dh,
+            canvas, seq, st.settings, t, dw, dh,
             st.selectedClipIds, st.autoKeyframe,
           )
         }
@@ -351,7 +413,7 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program' 
         if (frame % 2 === 0) broadcastLivePlayhead(t)
       }
 
-      syncProgramAudio(seq, media, t, true, fps)
+      syncProgramAudio(seq, st.media, t, true, fps)
       raf = requestAnimationFrame(tick)
     }
     raf = requestAnimationFrame(tick)
@@ -368,9 +430,9 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program' 
         useApp.setState({ playhead: endT })
       }
       setLivePlayhead(endT)
-      requestAnimationFrame(() => paint(endT))
+      requestAnimationFrame(() => paintRef.current(endT))
     }
-  }, [playing, drivesClock, loop, activeSeqId, use3d, media, settings, preview.w, preview.h, imgCache, isEdit, paint])
+  }, [playing, drivesClock, loop, activeSeqId, use3d, preview.w, preview.h, isEdit])
 
   // 编辑窗：拖拽时本地绘制，松手再写 store
   useEffect(() => {
@@ -730,9 +792,19 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program' 
               cursor: isEdit ? 'move' : 'default',
               touchAction: 'none',
               background: '#000',
+              visibility: isProgram && nativeOn ? 'hidden' : 'visible',
             }}
             onPointerDown={onCanvasPointerDown}
           />
+        )}
+        {isProgram && nativeOn && (
+          <div
+            className="pointer-events-none absolute inset-0 flex items-end justify-end p-1"
+            data-testid="native-preview-badge"
+            aria-hidden
+          >
+            <span className="text-[9px] px-1 rounded" style={{ background: 'rgba(0,0,0,0.45)', color: '#9f9' }}>NATIVE</span>
+          </div>
         )}
       </div>
 

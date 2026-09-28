@@ -1,0 +1,103 @@
+
+> todo-editor@1.0.0 electron:dev
+> concurrently -k "vite" "wait-on http://127.0.0.1:5173 && electron ."
+
+[0] (node:26876) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+[0] (Use `node --trace-warnings ...` to show where the warning was created)
+[0] 
+[0]   VITE v6.4.3  ready in 760 ms
+[0] 
+[0]   ➜  Local:   http://127.0.0.1:5173/
+[1] 
+[1] [ai-server] (node:25720) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+[1] (Use `node --trace-warnings ...` to show where the warning was created)
+[1] [spike] Electron HWND= 30279568 display.scaleFactor= 1.5 dpiAware note: Electron Chromium is typically Per-Monitor V2
+[1] [spike] cssRect {
+[1]   x: 364.66668701171875,
+[1]   y: 69.33333587646484,
+[1]   w: 486.57293701171875,
+[1]   h: 396.3333435058594,
+[1]   dpr: 1.5,
+[1]   innerW: 1426,
+[1]   innerH: 863
+[1] } childPx { x: 547, y: 104, w: 730, h: 595 } popupScreen { x: 687, y: 193, w: 730, h: 595 } contentBounds { x: 140, y: 89, width: 1426, height: 863 }
+[1] [spike] spawn D:\desktop\to_do\todo-editor\native\bin\spike-child-window.exe child 30279568 547 104 730 595
+[1] [spike] stdout ok mode=child hwnd=1116164 parent=30279568 rect=547,104 730x595
+[1] [spike] result {
+[1]   ok: true,
+[1]   mode: 'child',
+[1]   hwnd: '30279568',
+[1]   scale: 1.5,
+[1]   rect: {
+[1]     x: 364.66668701171875,
+[1]     y: 69.33333587646484,
+[1]     w: 486.57293701171875,
+[1]     h: 396.3333435058594,
+[1]     dpr: 1.5,
+[1]     innerW: 1426,
+[1]     innerH: 863
+[1]   },
+[1]   child: { x: 547, y: 104, w: 730, h: 595 },
+[1]   popup: { x: 687, y: 193, w: 730, h: 595 },
+[1]   electronDpiNote: 'Electron/Chromium on Windows uses per-monitor DPI awareness (V2 in recent builds); scaleFactor from screen.getDisplayMatching'
+[1] }
+[0] 09:54:54 [vite] (client) page reload native/spikes/out/electron-spike-out.txt
+[0] 09:54:55 [vite] (client) page reload native/spikes/out/electron-spike-out.txt
+[1] [spike] capturePage saved D:\desktop\to_do\todo-editor\native\spikes\out\electron-capture-child.png (note: may omit native child HWND)
+[0] 09:55:25 [vite] (client) page reload electron/spikeOverlay.cjs
+[0] 09:55:26 [vite] (client) page reload native/spikes/out/electron-spike-out.txt
+[0] 09:55:26 [vite] (client) page reload native/spikes/out/electron-spike-out.txt
+[0] 09:55:29 [vite] (client) page reload electron/spikeOverlay.cjs
+[0] 09:55:30 [vite] (client) page reload native/spikes/out/electron-spike-out.txt
+[0] 09:55:31 [vite] (client) page reload native/spikes/out/electron-spike-out.txt
+[0] 09:55:32 [vite] (client) page reload native/spikes/out/electron-spike-out.txt
+[0] 09:55:33 [vite] (client) page reload native/spikes/out/electron-spike-out.txt
+[0] 09:55:34 [vite] (client) page reload native/spikes/out/electron-spike-out.txt
+[0] 09:55:35 [vite] (client) page reload native/spikes/out/electron-spike-out.txt
+[0] 09:55:36 [vite] (client) page reload native/spikes/out/electron-spike-out.txt
+[0] 09:55:37 [vite] (client) page reload native/spikes/out/electron-spike-out.txt
+[0] 09:55:38 [vite] (client) page reload native/spikes/out/electron-spike-out.txt
+[0] 09:55:39 [vite] (client) page reload native/spikes/out/electron-spike-out.txt
+[0] 09:55:40 [vite] (client) page reload native/spikes/out/electron-spike-out.txt
+[0] 09:55:41 [vite] (client) page reload native/spikes/out/electron-spike-out.txt
+[0] 09:56:03 [vite] (client) page reload scripts/_extract_b11.mjs
+[0] 09:56:04 [vite] (client) page reload native/spikes/out/electron-spike-out.txt
+[0] 09:56:04 [vite] (client) page reload native/spikes/out/electron-spike-out.txt
+[0] 09:56:24 [vite] (client) page reload native/spikes/out/electron-spike-out.txt
+[0] 09:56:24 [vite] (client) page reload scripts/_extract_b11.mjs
+[0] 09:56:25 [vite] (client) page reload native/spikes/out/electron-spike-out.txt
+[0] 09:56:34 [vite] (client) page reload scripts/_extract_b11.mjs
+[0] 09:56:35 [vite] (client) page reload native/spikes/out/electron-spike-out.txt
+[0] 09:56:52 [vite] (client) page reload scripts/_extract_b11.mjs
+[0] 09:56:53 [vite] (client) page reload native/spikes/out/electron-spike-out.txt
+[0] 09:56:54 [vite] (client) page reload native/spikes/out/electron-spike-out.txt
+[0] 09:56:59 [vite] (client) page reload scripts/golden.mjs
+[0] 09:56:59 [vite] (client) page reload native/spikes/out/electron-spike-out.txt
+[0] 09:57:00 [vite] (client) page reload native/spikes/out/electron-spike-out.txt
+[0] 09:57:01 [vite] (client) page reload native/spikes/out/electron-spike-out.txt
+[0] 09:57:02 [vite] (client) page reload native/spikes/out/electron-spike-out.txt
+[0] 09:57:02 [vite] (client) page reload native/spikes/out/electron-spike-out.txt
+[0] 09:57:03 [vite] (client) page reload native/spikes/out/electron-spike-out.txt
+[0] 09:57:31 [vite] (client) page reload scripts/_extract_b11.mjs
+[0] 09:57:32 [vite] (client) page reload native/spikes/out/electron-spike-out.txt
+[0] 10:00:14 [vite] (client) page reload native/engine/src/todo_export.cpp
+[0] 10:00:14 [vite] (client) page reload native/spikes/out/electron-spike-out.txt
+[0] 10:00:35 [vite] (client) page reload native/engine/src/todo_export.cpp
+[0] 10:00:36 [vite] (client) page reload native/spikes/out/electron-spike-out.txt
+[0] 10:00:37 [vite] (client) page reload native/spikes/out/electron-spike-out.txt
+[0] 10:00:37 [vite] (client) page reload native/shared/editgraph.h
+[0] 10:00:38 [vite] (client) page reload native/spikes/out/electron-spike-out.txt
+[0] 10:00:39 [vite] (client) page reload native/spikes/out/electron-spike-out.txt
+[0] 10:00:39 [vite] (client) page reload native/shared/editgraph.cpp
+[0] 10:00:39 [vite] (client) page reload native/spikes/out/electron-spike-out.txt
+[0] 10:00:40 [vite] (client) page reload native/spikes/out/electron-spike-out.txt
+[0] 10:00:44 [vite] (client) page reload scripts/build-native.mjs
+[0] 10:00:45 [vite] (client) page reload native/spikes/out/electron-spike-out.txt
+[0] 10:00:45 [vite] (client) page reload native/spikes/out/electron-spike-out.txt
+[0] 10:00:46 [vite] (client) page reload native/spikes/out/electron-spike-out.txt
+[0] 10:00:47 [vite] (client) page reload native/spikes/out/electron-spike-out.txt
+[0] 10:00:48 [vite] (client) page reload native/spikes/out/electron-spike-out.txt
+[0] 10:00:49 [vite] (client) page reload native/spikes/out/electron-spike-out.txt
+[1] wait-on http://127.0.0.1:5173 && electron . exited with code 1
+--> Sending SIGTERM to other processes..
+[0] vite exited with code 1

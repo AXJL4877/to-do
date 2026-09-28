@@ -14,6 +14,7 @@ import {
   type DockSlot,
 } from '../lib/panelDock'
 import clsx from 'clsx'
+import { usePreviewSuspend } from '../hooks/usePreviewSuspend'
 
 function ResizeHandle({ axis, onDelta, testId }: {
   axis: 'x' | 'y'
@@ -34,6 +35,7 @@ function MonitorArea() {
   const monitorView = useApp((s) => s.monitorView)
   const setMonitorView = useApp((s) => s.setMonitorView)
   const [viewOpen, setViewOpen] = useState(false)
+  usePreviewSuspend(viewOpen, 'menu')
 
   const viewLabel =
     monitorView === 'dual' ? '编辑+节目'

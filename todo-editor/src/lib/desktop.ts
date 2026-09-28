@@ -145,6 +145,20 @@ export type DesktopApi = {
     duration?: number
     error?: string
   }>
+  /** B2 native program preview */
+  previewInit?: (opts?: { fps?: number; budgetMB?: number; adapterLuid?: string | null }) => Promise<{ ok: boolean; error?: string; pid?: number }>
+  previewStop?: () => Promise<{ ok: boolean }>
+  previewRect?: (css: { x: number; y: number; w: number; h: number }) => Promise<{ ok: boolean }>
+  previewVisible?: (on: boolean) => Promise<{ ok: boolean }>
+  previewSuspend?: (reason?: 'menu' | 'dialog' | 'drag') => Promise<{ ok: boolean }>
+  previewResume?: () => Promise<{ ok: boolean }>
+  previewTimeline?: (json: string | unknown) => Promise<{ ok: boolean }>
+  previewSeek?: (frame: number) => Promise<{ ok: boolean }>
+  previewPlay?: () => Promise<{ ok: boolean }>
+  previewPause?: () => Promise<{ ok: boolean }>
+  previewStats?: () => Promise<{ ok: boolean }>
+  onPreviewEvent?: (cb: (ev: Record<string, unknown>) => void) => () => void
+  onPreviewCrashed?: (cb: (msg: { code?: number | null; signal?: string | null }) => void) => () => void
 }
 
 declare global {

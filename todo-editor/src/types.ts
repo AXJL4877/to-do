@@ -174,6 +174,8 @@ export interface Sequence {
 export interface ProjectSettings {
   width: number; height: number; fps: number; aspect: string; pixelAspect: number
   stillDuration: number; cachePath: string; useProxy: boolean; hwAccel: boolean
+  /** B2：节目监视器原生 popup 预览（默认关） */
+  nativePreview: boolean
   canvasBg: 'black' | 'color' | 'blur' | 'image'; canvasColor: string
   safeFrame: boolean; magnetic: boolean; snap: boolean
 }

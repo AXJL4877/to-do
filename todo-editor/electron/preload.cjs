@@ -73,4 +73,26 @@ contextBridge.exposeInMainWorld('todoDesktop', {
     bins: opts?.bins,
     ext: opts?.ext,
   }),
+  /** B2 native program preview (popup overlay) */
+  previewInit: (opts) => ipcRenderer.invoke('preview:init', opts),
+  previewStop: () => ipcRenderer.invoke('preview:stop'),
+  previewRect: (css) => ipcRenderer.invoke('preview:rect', css),
+  previewVisible: (on) => ipcRenderer.invoke('preview:visible', on),
+  previewSuspend: (reason) => ipcRenderer.invoke('preview:suspend', reason),
+  previewResume: () => ipcRenderer.invoke('preview:resume'),
+  previewTimeline: (json) => ipcRenderer.invoke('preview:timeline', json),
+  previewSeek: (frame) => ipcRenderer.invoke('preview:seek', frame),
+  previewPlay: () => ipcRenderer.invoke('preview:play'),
+  previewPause: () => ipcRenderer.invoke('preview:pause'),
+  previewStats: () => ipcRenderer.invoke('preview:stats'),
+  onPreviewEvent: (cb) => {
+    const handler = (_e, msg) => cb(msg)
+    ipcRenderer.on('preview:event', handler)
+    return () => ipcRenderer.removeListener('preview:event', handler)
+  },
+  onPreviewCrashed: (cb) => {
+    const handler = (_e, msg) => cb(msg)
+    ipcRenderer.on('preview:crashed', handler)
+    return () => ipcRenderer.removeListener('preview:crashed', handler)
+  },
 })

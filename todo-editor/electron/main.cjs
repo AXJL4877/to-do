@@ -7,6 +7,7 @@ const { createMediaProbe } = require('./mediaProbe.cjs')
 const { exportSequence } = require('./exportSequence.cjs')
 const { createNativePlayer, rgb24ToBmpDataUrl } = require('./nativePlayer.cjs')
 const { makeProxy } = require('./makeProxy.cjs')
+const { createPreviewEngine } = require('./previewEngine.cjs')
 
 const isDev = !app.isPackaged
 
@@ -26,6 +27,8 @@ let aiWindow = null
 let aiServerProc = null
 /** @type {string} */
 let aiBaseUrl = ''
+/** @type {ReturnType<typeof createPreviewEngine> | null} */
+let previewEngine = null
 
 // 硬件加速默认开启；仅在环境变量显式关闭时禁用
 if (process.env.TODO_DISABLE_GPU === '1') {
@@ -696,6 +699,98 @@ app.whenReady().then(async () => {
   })
 
   createWindow()
+
+  /** B2 native preview host (popup); renderer drives via preview:* IPC */
+  const ensurePreview = () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return null
+    if (!previewEngine) previewEngine = createPreviewEngine(mainWindow)
+    return previewEngine
+  }
+  ipcMain.handle('preview:init', (_e, opts = {}) => {
+    const pe = ensurePreview()
+    if (!pe) return { ok: false, error: 'no_window' }
+    if (pe.isRunning()) return { ok: true, already: true }
+    return pe.start(opts || {})
+  })
+  ipcMain.handle('preview:stop', () => {
+    if (previewEngine) previewEngine.stop()
+    previewEngine = null
+    return { ok: true }
+  })
+  ipcMain.handle('preview:rect', (_e, css) => {
+    const pe = ensurePreview()
+    if (!pe || !pe.isRunning()) return { ok: false }
+    pe.syncRect(css)
+    return { ok: true }
+  })
+  ipcMain.handle('preview:visible', (_e, on) => {
+    const pe = ensurePreview()
+    if (!pe || !pe.isRunning()) return { ok: false }
+    pe.setVisible(!!on)
+    return { ok: true }
+  })
+  ipcMain.handle('preview:suspend', (_e, reason) => {
+    const pe = ensurePreview()
+    if (!pe || !pe.isRunning()) return { ok: false }
+    pe.suspend(reason)
+    return { ok: true }
+  })
+  ipcMain.handle('preview:resume', () => {
+    const pe = ensurePreview()
+    if (!pe || !pe.isRunning()) return { ok: false }
+    pe.resume()
+    return { ok: true }
+  })
+  ipcMain.handle('preview:timeline', (_e, json) => {
+    const pe = ensurePreview()
+    if (!pe || !pe.isRunning()) return { ok: false }
+    pe.send({ cmd: 'timeline', json: typeof json === 'string' ? json : JSON.stringify(json) })
+    return { ok: true }
+  })
+  ipcMain.handle('preview:seek', (_e, frame) => {
+    const pe = ensurePreview()
+    if (!pe || !pe.isRunning()) return { ok: false }
+    pe.send({ cmd: 'seek', frame: Number(frame) || 0 })
+    return { ok: true }
+  })
+  ipcMain.handle('preview:play', () => {
+    const pe = ensurePreview()
+    if (!pe || !pe.isRunning()) return { ok: false }
+    pe.send({ cmd: 'play' })
+    return { ok: true }
+  })
+  ipcMain.handle('preview:pause', () => {
+    const pe = ensurePreview()
+    if (!pe || !pe.isRunning()) return { ok: false }
+    pe.send({ cmd: 'pause' })
+    return { ok: true }
+  })
+  ipcMain.handle('preview:stats', () => {
+    const pe = ensurePreview()
+    if (!pe || !pe.isRunning()) return { ok: false }
+    pe.send({ cmd: 'stats' })
+    return { ok: true }
+  })
+
+  // DEV spike S0.1 — only when TODO_SPIKE_CHILD=1 (do not enable in release)
+  if (process.env.TODO_SPIKE_CHILD === '1') {
+    const { startSpikeOverlay } = require('./spikeOverlay.cjs')
+    const bootSpike = () => {
+      if (!mainWindow || mainWindow.isDestroyed()) return
+      const run = () => {
+        startSpikeOverlay(mainWindow, {
+          mode: process.env.TODO_SPIKE_MODE || undefined,
+        }).then((r) => console.log('[spike] result', r)).catch((e) => console.error('[spike]', e))
+      }
+      if (mainWindow.webContents.isLoading()) {
+        mainWindow.webContents.once('did-finish-load', () => setTimeout(run, 800))
+      } else {
+        setTimeout(run, 800)
+      }
+    }
+    bootSpike()
+  }
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
@@ -706,9 +801,17 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  if (previewEngine) {
+    previewEngine.stop()
+    previewEngine = null
+  }
   stopAiServer()
 })
 
 app.on('will-quit', () => {
+  if (previewEngine) {
+    previewEngine.stop()
+    previewEngine = null
+  }
   stopAiServer()
 })

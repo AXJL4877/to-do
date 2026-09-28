@@ -1,4 +1,5 @@
 import { desktop } from './desktop'
+import { previewResume, previewSuspend } from '../hooks/usePreviewSuspend'
 
 const MIME = 'application/todo-media-id'
 const PREFIX = 'todo-media:'
@@ -16,12 +17,14 @@ export function beginMediaDrag(dt: DataTransfer, mediaId: string) {
   dt.setData('text/plain', PREFIX + mediaId)
   dt.effectAllowed = 'copy'
   window.addEventListener('keydown', onEsc)
+  previewSuspend('drag')
 }
 
 export function finishMediaDrag() {
   window.removeEventListener('keydown', onEsc)
   const id = draggingId
   draggingId = null
+  previewResume()
   if (id) desktop()?.endMediaDrag?.(id)
 }
 
