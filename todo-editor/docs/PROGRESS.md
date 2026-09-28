@@ -28,7 +28,7 @@
 - 发现事实冲突：native/shared/quantize.h 新增 round 版本与已提交 timemap.h/cpp 的 floor 同名函数冲突，先修复再链接 B3。
 
 ## FIX-PREVIEW-CACHE 验收（2026-09-28）
-- 状态：代码与自动化验收完成，等待人工工程回看；提交待记录。
+- 状态：代码与自动化验收完成，等待人工工程回看；commit：e13ae8f。
 - 文件：src/lib/previewCache.ts、src/lib/videoCache.ts、src/lib/monitorDraw.ts、scripts/test-preview-cache.mjs、tests/preview-cache.browser.ts、docs/PROGRESS.md、docs/HUMAN_VERIFY.md。
 - 同一缓存链路文件在本轮前已有未提交支撑改动（共享上一帧、离屏合成、帧稳定性标记、Canvas池）。保留并随本任务收口；其他现存 Electron/UI/fixture 改动不提交、不还原。
 - 修复：预取独立槽，所有层就绪才入库；暂停精确采样；实时漂移帧不入库；命中缓存暂停视频，离开缓存强制对齐；freeze编辑失效并取消旧预取；缓存条不跨缺帧；旋转/透明/letterbox不能误剔除下层。
@@ -89,3 +89,27 @@ maxAbsErr=0.000e+0 (< 1e-9)
 ```
 - 相对baseline：golden哈希变化0；不存在tests/perf/baseline.json和perf-gate，不能声称P99/丢帧/seek性能已达标。
 - 风险：HTML实时路径仍允许跨层采样时刻偏差（现已禁止误入缓存），需T3–T6原生链路替代；新增预取槽会增加解码器资源。
+
+## T2-QUANTIZE：原生时间量化与已提交T1保持一致
+- 状态：子任务完成；T2整体尚未完成，阻塞项见native/preview/PROTOCOL.md末节。
+- 文件：native/shared/quantize.h、scripts/test-preview-quantize.mjs、native/preview/PROTOCOL.md、docs/PROGRESS.md。
+- 先用C++测试复现0.02秒被round成第1帧，再改floor并移除与timemap.cpp冲突的同名定义。node scripts/test-preview-quantize.mjs：5 cases passed。
+- npm run native:build：exit 0；g++ -O2 C++17，FFmpeg n8.1 LGPL shared。产物与编译器路径见native/bin/ENGINE_BUILD.txt；完整编译输出native/test-output/native-build.log。已有pragma、缩进、函数指针转换等编译警告仍在，未当作零警告构建。
+- 编译后npm run preview:test完整输出：
+```text
+
+> todo-editor@1.0.0 preview:test
+> node scripts/test-preview-protocol.mjs
+
+host hwnd= 34343336
+ready NVIDIA GeForce RTX 4060 Laptop GPU 0x000000000001351B
+line_too_long ok
+seekTotalUs= 286 seekCount= 1000
+play30s frame= 900 expect≈ 900 err= 0
+stdin-close exit ok
+preview:test 通过
+
+```
+- 硬件：NVIDIA GeForce RTX 4060 Laptop GPU，驱动32.0.15.9174；OrayIddDriver未选用。上述seek计时仅命令处理，不是解码seek→正确画面的延迟。
+- T1/golden回归输出见上节（本子任务未改动导出/共享timemap/keyframe实现）。尚无GPU帧耗时baseline，不宣称AE/PR级性能、原生视频已接管或30分钟浸泡通过。
+- 下一步：T2严格JSON/有限值验证、timeline serial失效、桥接timeline完整内容判定及unsupported自动回退，补失败测试后逐项修复；全部门禁通过再T3。
