@@ -1,0 +1,107 @@
+{
+  "spec": "todo-anim-pack/1",
+  "id": "builtin.doodle-figure",
+  "name": "手绘小人",
+  "version": "1.0.0",
+  "author": "TO DO",
+  "description": "手绘线条小人动作动画：先生成一组关键帧，再自动拼成动画。描述角色和动作即可，可逐帧写分镜。",
+  "tags": ["手绘", "小人", "动作", "关键帧"],
+  "outputs": ["animation"],
+  "inputs": [
+    {
+      "id": "character",
+      "type": "text",
+      "label": "角色",
+      "required": true,
+      "maxLength": 80,
+      "placeholder": "例如：一个圆脑袋的火柴小人，戴红色围巾"
+    },
+    {
+      "id": "action",
+      "type": "text",
+      "label": "动作",
+      "required": true,
+      "maxLength": 80,
+      "placeholder": "例如：拿起水杯喝一口水，再把杯子放下"
+    },
+    {
+      "id": "line",
+      "type": "select",
+      "label": "线条",
+      "default": "marker",
+      "options": [
+        { "value": "marker", "label": "马克笔", "prompt": "bold black marker outlines of even thickness, slightly wobbly hand-drawn lines" },
+        { "value": "pencil", "label": "铅笔", "prompt": "loose dark graphite pencil lines with a sketchy, slightly rough hand-drawn feel" },
+        { "value": "crayon", "label": "蜡笔", "prompt": "thick waxy crayon outlines with broken rough edges, childlike hand-drawn feel" }
+      ]
+    },
+    {
+      "id": "color",
+      "type": "select",
+      "label": "上色",
+      "default": "spot",
+      "options": [
+        { "value": "mono", "label": "黑白线稿", "prompt": "Pure black line art only, no color fills" },
+        { "value": "spot", "label": "局部点色", "prompt": "Mostly black line art with only one or two flat accent colors on key items (such as clothing or the held object)" },
+        { "value": "full", "label": "平涂上色", "prompt": "Simple flat color fills inside the outlines, a small cheerful palette, no gradients" }
+      ]
+    },
+    {
+      "id": "background",
+      "type": "select",
+      "label": "背景",
+      "default": "white",
+      "options": [
+        { "value": "white", "label": "纯白底", "prompt": "Isolated on a pure flat white background, no ground shadow, no scenery, no paper texture" },
+        { "value": "paper", "label": "白纸", "prompt": "On plain off-white sketchbook paper with a very subtle paper grain, no scenery" }
+      ]
+    }
+  ],
+  "prompt": {
+    "template": "Hand-drawn 2D cartoon animation character: {{character}}, performing the action: {{action}}. Drawn with {{line}}. {{color}}. Simple, readable silhouette; the character design (proportions, clothes, colors, props) stays identical in every pose; full body visible, side or three-quarter view, like a key drawing from a hand-drawn animation. Flat 2D, no shading gradients, no photographic lighting. {{background}}.",
+    "avoid": [
+      "photograph",
+      "photorealistic",
+      "3D render",
+      "CGI",
+      "anime style",
+      "motion blur",
+      "speed lines",
+      "text",
+      "letters",
+      "numbers",
+      "watermark",
+      "signature",
+      "panel borders",
+      "grid lines",
+      "cropped body"
+    ]
+  },
+  "keyframes": {
+    "modes": ["sheet", "sequence"],
+    "defaultMode": "sheet",
+    "counts": [4, 6, 8, 9, 12],
+    "defaultCount": 6,
+    "align": "baseline"
+  },
+  "playback": {
+    "fps": [2, 4, 6, 8, 12],
+    "defaultFps": 6,
+    "loops": ["forward", "pingpong"],
+    "defaultLoop": "forward",
+    "maxRepeat": 10
+  },
+  "cutout": {
+    "method": "keyWhite",
+    "threshold": 0.1,
+    "default": true,
+    "lockInputs": { "background": "white" }
+  },
+  "image": {
+    "models": ["gpt-image-2"],
+    "aspectRatios": ["1:1", "3:4", "4:3", "9:16", "16:9"],
+    "defaultAspectRatio": "1:1",
+    "resolutions": ["1K", "2K"],
+    "defaultResolution": "2K"
+  }
+}

@@ -23,6 +23,8 @@ import {
 import { listModels } from './huniuClient.mjs'
 import { readAiConfig, writeAiConfig } from './huniuConfig.mjs'
 import { listStylePacks, stylePreviewPath } from './stylePacks.mjs'
+import { animPreviewPath, listAnimPacks } from './animPacks.mjs'
+import { H3_QUALITIES, ensureH3, h3Health } from './h3Client.mjs'
 
 export { kickWorker as kickAiWorker }
 
@@ -48,6 +50,7 @@ function mimeFor(name) {
   if (n.endsWith('.gif')) return 'image/gif'
   if (n.endsWith('.mp4')) return 'video/mp4'
   if (n.endsWith('.webm')) return 'video/webm'
+  if (n.endsWith('.json')) return 'application/json; charset=utf-8'
   return 'application/octet-stream'
 }
 
@@ -167,6 +170,25 @@ export async function handleAiHttp(req, res) {
         return true
       }
 
+      const outMatch = url.match(/^\/api\/ai-jobs\/([^/?]+)\/output/)
+      if (req.method === 'GET' && outMatch) {
+        const job = getAiJob(decodeURIComponent(outMatch[1]))
+        if (!job) {
+          sendJson(res, 404, { ok: false, error: 'not found' })
+        } else if (job.status !== 'done' && job.status !== 'imported') {
+          sendJson(res, 409, { ok: false, status: job.status, phase: job.phase, error: job.error || '任务未完成' })
+        } else {
+          sendJson(res, 200, {
+            ok: true,
+            output: job.params.output || {
+              jobId: job.id, kind: job.resultKind, video: job.resultUrl, duration: job.duration,
+              width: job.params.width ?? null, height: job.params.height ?? null,
+            },
+          })
+        }
+        return true
+      }
+
       const ackMatch = url.match(/^\/api\/ai-jobs\/([^/?]+)\/ack/)
       if (req.method === 'POST' && ackMatch) {
         sendJson(res, 200, ackAiJob(decodeURIComponent(ackMatch[1])))
@@ -204,9 +226,10 @@ export async function handleAiHttp(req, res) {
       return true
     }
 
-    const previewMatch = url.match(/^\/api\/ai-styles\/([^/?]+)\/previews\/(\d+)/)
+    const previewMatch = url.match(/^\/api\/ai-(styles|anims)\/([^/?]+)\/previews\/(\d+)/)
     if (previewMatch) {
-      const file = stylePreviewPath(decodeURIComponent(previewMatch[1]), Number(previewMatch[2]))
+      const lookup = previewMatch[1] === 'anims' ? animPreviewPath : stylePreviewPath
+      const file = lookup(decodeURIComponent(previewMatch[2]), Number(previewMatch[3]))
       if (!file || !existsSync(file)) {
         sendJson(res, 404, { ok: false, error: 'not found' })
         return true
@@ -226,6 +249,28 @@ export async function handleAiHttp(req, res) {
         return true
       }
       sendJson(res, 200, { ok: true, ...listStylePacks() })
+      return true
+    }
+
+    if (url === '/api/ai-h3' || url.startsWith('/api/ai-h3?')) {
+      sendJson(res, 200, { ok: true, ...(await h3Health()), qualities: H3_QUALITIES })
+      return true
+    }
+    if (url.startsWith('/api/ai-h3/start') && req.method === 'POST') {
+      try {
+        sendJson(res, 200, { ok: true, ...(await ensureH3()) })
+      } catch (e) {
+        sendJson(res, 500, { ok: false, error: String(e instanceof Error ? e.message : e) })
+      }
+      return true
+    }
+
+    if (url === '/api/ai-anims' || url.startsWith('/api/ai-anims?')) {
+      if (req.method !== 'GET') {
+        sendJson(res, 405, { ok: false, error: 'GET only' })
+        return true
+      }
+      sendJson(res, 200, { ok: true, ...listAnimPacks() })
       return true
     }
 

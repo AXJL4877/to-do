@@ -16,29 +16,29 @@ const DATA_DIR = process.env.TODO_DATA_DIR
 export const BUILTIN_STYLE_DIR = path.join(ROOT, 'server', 'styles')
 export const USER_STYLE_DIR = path.join(DATA_DIR, 'styles')
 
-const ASPECT_RATIOS = ['1:1', '16:9', '9:16', '3:2', '2:3', '4:3', '3:4']
-const RESOLUTIONS = ['1K', '2K', '4K']
+export const ASPECT_RATIOS = ['1:1', '16:9', '9:16', '3:2', '2:3', '4:3', '3:4']
+export const RESOLUTIONS = ['1K', '2K', '4K']
 const REF_EXT = ['.png', '.jpg', '.jpeg', '.webp']
-const CUTOUT_METHODS = ['keyWhite']
-const ID_RE = /^[a-z0-9]+(\.[a-z0-9][a-z0-9-]*)+$/
+export const CUTOUT_METHODS = ['keyWhite']
+export const ID_RE = /^[a-z0-9]+(\.[a-z0-9][a-z0-9-]*)+$/
 const INPUT_ID_RE = /^[a-z][a-zA-Z0-9_]{0,31}$/
-const SEMVER_RE = /^\d+\.\d+\.\d+$/
-const PLACEHOLDER_RE = /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g
+export const SEMVER_RE = /^\d+\.\d+\.\d+$/
+export const PLACEHOLDER_RE = /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g
 
-class PackError extends Error {}
+export class PackError extends Error {}
 
-function fail(where, msg) {
+export function fail(where, msg) {
   throw new PackError(`${where}: ${msg}`)
 }
 
-function onlyKeys(obj, allowed, where) {
+export function onlyKeys(obj, allowed, where) {
   if (!obj || typeof obj !== 'object' || Array.isArray(obj)) fail(where, '必须是对象')
   for (const k of Object.keys(obj)) {
     if (!allowed.includes(k)) fail(where, `不允许的字段 "${k}"`)
   }
 }
 
-function str(v, where, { min = 1, max = 200, optional = false } = {}) {
+export function str(v, where, { min = 1, max = 200, optional = false } = {}) {
   if (v == null && optional) return undefined
   if (typeof v !== 'string') fail(where, '必须是字符串')
   const s = v.trim()
@@ -46,7 +46,7 @@ function str(v, where, { min = 1, max = 200, optional = false } = {}) {
   return s
 }
 
-function strList(v, where, { allowed, min = 1, max = 20 } = {}) {
+export function strList(v, where, { allowed, min = 1, max = 20 } = {}) {
   if (!Array.isArray(v)) fail(where, '必须是数组')
   if (v.length < min || v.length > max) fail(where, `数量须在 ${min}~${max}`)
   const seen = new Set()
@@ -59,7 +59,7 @@ function strList(v, where, { allowed, min = 1, max = 20 } = {}) {
   return v
 }
 
-function validateInput(inp, i) {
+export function validateInput(inp, i) {
   const where = `inputs[${i}]`
   if (!inp || typeof inp !== 'object') fail(where, '必须是对象')
   if (!INPUT_ID_RE.test(String(inp.id || ''))) fail(`${where}.id`, '须为小写字母开头的标识符')
@@ -153,9 +153,14 @@ export function validateStylePack(raw, packDir) {
 
 function validateCutout(c, inputs) {
   onlyKeys(c, ['method', 'threshold', 'trim', 'default', 'lockInputs'], 'cutout')
+  if (typeof c.trim !== 'boolean') fail('cutout.trim', '必须是布尔值')
+  validateCutoutCore(c, inputs)
+}
+
+/** method / threshold / default / lockInputs 的公共校验（动画包同样使用） */
+export function validateCutoutCore(c, inputs) {
   if (!CUTOUT_METHODS.includes(c.method)) fail('cutout.method', `只支持 ${CUTOUT_METHODS.join(' / ')}`)
   if (typeof c.threshold !== 'number' || c.threshold < 0 || c.threshold > 0.5) fail('cutout.threshold', '须为 0~0.5')
-  if (typeof c.trim !== 'boolean') fail('cutout.trim', '必须是布尔值')
   if (typeof c.default !== 'boolean') fail('cutout.default', '必须是布尔值')
   if (c.lockInputs != null) {
     if (!c.lockInputs || typeof c.lockInputs !== 'object' || Array.isArray(c.lockInputs)) fail('cutout.lockInputs', '必须是对象')
@@ -167,9 +172,9 @@ function validateCutout(c, inputs) {
   }
 }
 
-function checkPackImage(packDir, rel, where) {
+export function checkPackImage(packDir, rel, where, exts = REF_EXT) {
   if (path.isAbsolute(rel) || rel.split(/[/\\]/).includes('..')) fail(where, '必须是包内相对路径')
-  if (!REF_EXT.includes(path.extname(rel).toLowerCase())) fail(where, `仅支持 ${REF_EXT.join(' ')}`)
+  if (!exts.includes(path.extname(rel).toLowerCase())) fail(where, `仅支持 ${exts.join(' ')}`)
   const abs = path.join(packDir, rel)
   if (!existsSync(abs) || !statSync(abs).isFile()) fail(where, '文件不存在')
 }
@@ -230,7 +235,7 @@ export function listStylePacks() {
   return { styles: [...packs.values()].map(publicStyle), errors }
 }
 
-function cleanText(v) {
+export function cleanText(v) {
   return String(v ?? '').replace(/[{}]/g, '').replace(/\s+/g, ' ').trim()
 }
 

@@ -4,6 +4,7 @@ import {
   type Tool, type Track, type TrackKind, type Transform3D, type TransitionType,
   defaultAudio, defaultColor, defaultScene3d, defaultText, defaultTransform, defaultTransform3d, uid,
 } from './types'
+import { applyPresetKeyframes, findMotionPreset, presetDuration, type ParamValues } from './lib/motionPresets'
 import { autoBezierKeyframes, splitKeyframes, patchClipTransform, patchClipXY, resolveClipTransform, sampleKeyframes, seedPositionKeyframes, defaultHandles, snapToFrame } from './lib/keyframeEval'
 import { clearPreviewCache, getProgramPreviewCache, notifyPreviewCacheChanged } from './lib/previewCache'
 import { ensureScene3d } from './lib/scene3d'
@@ -519,8 +520,8 @@ export type AppStore = {
   libraryTab: string
   /** AI+：当前参考图（截帧 / 上传），生图·生视频共用；不进媒体库 */
   aiRefDataUrl: string | null
-  /** AI+：生图 | 生视频 | 生音频 */
-  aiGenMode: 'image' | 'video' | 'audio'
+  /** AI+：生图 | 生视频 | 生音频 | 风格动画 */
+  aiGenMode: 'image' | 'video' | 'audio' | 'anim'
   /** AI+ 弹出：独立窗 / 应用内浮窗 */
   aiFloat: boolean
   aiFloatKind: null | 'window' | 'panel'
@@ -610,7 +611,7 @@ export type AppStore = {
   setSelectedMedia: (id: string | null) => void
   captureFrame: () => void
   setAiRef: (dataUrl: string | null) => void
-  setAiGenMode: (m: 'image' | 'video' | 'audio') => void
+  setAiGenMode: (m: 'image' | 'video' | 'audio' | 'anim') => void
   setAiFloat: (v: boolean) => void
   setPlayhead: (t: number, opts?: { exact?: boolean }) => void
   togglePlay: () => void
@@ -715,6 +716,8 @@ export type AppStore = {
   enqueueExport: (opts: { preset: string; name?: string; rangeOnly?: boolean; audioOnly?: boolean }) => void
   savePreset: (name: string, kind: EffectPreset['kind'], payload: unknown) => void
   applyPreset: (id: string) => void
+  /** 动效预设：写成关键帧。循环类 range='playhead' 时从播放头起 seconds 秒；入场 / 出场 / 强调从播放头处开始 */
+  applyAnimPreset: (id: string, values: ParamValues, opts: { range: 'clip' | 'playhead'; seconds: number; label?: string }) => void
   clearCache: () => void
   importFont: (name: string) => void
   seedDemo: () => void
@@ -2843,6 +2846,33 @@ export const useApp = create<AppStore>((set, get) => {
       if (p.kind === 'motion') get().updateSelectedTransform(p.payload as never)
       if (p.kind === 'text') get().updateSelectedText(p.payload as never)
       notify(`已应用「${p.name}」`)
+    },
+    applyAnimPreset(id, values, opts) {
+      const preset = findMotionPreset(id)
+      if (!preset) return
+      const seq = get().seq()
+      const audioTracks = new Set(seq.tracks.filter((t) => t.kind === 'audio').map((t) => t.id))
+      const ids = new Set(get().selectedClipIds)
+      const targets = seq.clips.filter((c) => ids.has(c.id) && !audioTracks.has(c.trackId))
+      if (!targets.length) { notify('先选中画面片段'); return }
+      get().pushHistory()
+      const playhead = get().playhead
+      const fps = get().settings.fps
+      const targetIds = new Set(targets.map((c) => c.id))
+      patchSeq((s) => ({
+        ...s,
+        clips: s.clips.map((c) => {
+          if (!targetIds.has(c.id)) return c
+          const inside = playhead >= c.start && playhead < c.start + c.duration
+          const atHead = opts.range === 'playhead' && inside
+          const t0 = atHead ? playhead - c.start : 0
+          let t1 = c.duration
+          if (atHead && preset.group === 'loop') t1 = t0 + opts.seconds
+          if (atHead && preset.group === 'out') t1 = t0 + (presetDuration(preset, values) ?? 0)
+          return applyPresetKeyframes(c, preset, values, { t0, t1, fps })
+        }),
+      }))
+      notify(`已应用动效「${opts.label ?? preset.name}」`)
     },
     clearCache() {
       clearPreviewCache(getProgramPreviewCache())

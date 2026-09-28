@@ -6,6 +6,7 @@ import {
 import { useApp } from '../store'
 import { parseMediaFiles, filesFromDataTransfer } from '../lib/importFiles'
 import { AiPanel } from './AiPanel'
+import { MotionPresetLibrary } from './MotionPresetLibrary'
 import { beginDockDrag, defaultPanelDock, shouldIgnoreDockClick } from '../lib/panelDock'
 import { beginMediaDrag, finishMediaDrag } from '../lib/mediaDrag'
 import clsx from 'clsx'
@@ -66,7 +67,6 @@ export function MediaLibrary() {
   const media = useApp((s) => s.media)
   const libraryTab = useApp((s) => s.libraryTab) as LibTab
   const selectedMediaId = useApp((s) => s.selectedMediaId)
-  const presets = useApp((s) => s.presets)
   const fonts = useApp((s) => s.fonts)
   const setLibraryTab = useApp((s) => s.setLibraryTab)
   const setSelectedMedia = useApp((s) => s.setSelectedMedia)
@@ -81,7 +81,6 @@ export function MediaLibrary() {
   const aiFloatKind = useApp((s) => s.aiFloatKind)
   const setAiFloat = useApp((s) => s.setAiFloat)
   const importFont = useApp((s) => s.importFont)
-  const applyPreset = useApp((s) => s.applyPreset)
   const toggleFavorite = useApp((s) => s.toggleFavorite)
   const panelDock = useApp((s) => s.layout.panelDock) ?? defaultPanelDock
   const setLayout = useApp((s) => s.setLayout)
@@ -260,14 +259,7 @@ export function MediaLibrary() {
         )}
         {libraryTab === 'preset' && (
           <div className="grid gap-1" data-testid="preset-list">
-            {presets.length === 0 && <p className="text-[11px] px-1" style={{ color: 'var(--text-muted)' }}>暂无预设</p>}
-            {presets.map((p) => (
-              <button key={p.id} className="btn btn-ghost w-full justify-start" data-testid={`preset-${p.id}`} onClick={() => applyPreset(p.id)}>
-                <span className="truncate">{p.name}</span>
-              </button>
-            ))}
-            <button className="btn btn-ghost w-full" data-testid="btn-apply-template-vlog" onClick={() => applyPreset('tpl_vlog')}>套用 Vlog 模板</button>
-            <button className="btn btn-ghost w-full" data-testid="btn-apply-template-promo" onClick={() => applyPreset('tpl_promo')}>套用宣传模板</button>
+            <MotionPresetLibrary />
           </div>
         )}
         {libraryTab === 'font' && (

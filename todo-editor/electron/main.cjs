@@ -317,6 +317,9 @@ function startAiServer() {
   const env = {
     ...process.env,
     TODO_DATA_DIR: dataDir,
+    TODO_NATIVE_BIN: app.isPackaged
+      ? path.join(process.resourcesPath, 'native')
+      : path.join(__dirname, '../native/bin'),
   }
   /** @type {import('child_process').ChildProcess} */
   let child

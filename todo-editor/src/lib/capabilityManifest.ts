@@ -213,9 +213,9 @@ export const CAPABILITY_MANIFEST: CapabilityItem[] = [
 
   // 15 模板预设 (7)
   { module: 15, moduleName: '模板与预设', feature: '预设列表', selector: '[data-testid="preset-list"]', kind: 'exists' },
-  { module: 15, moduleName: '模板与预设', feature: '电影调色', selector: '[data-testid="preset-preset_cinematic"]', kind: 'exists' },
-  { module: 15, moduleName: '模板与预设', feature: 'Vlog模板', selector: '[data-testid="btn-apply-template-vlog"]', kind: 'exists' },
-  { module: 15, moduleName: '模板与预设', feature: '宣传模板', selector: '[data-testid="btn-apply-template-promo"]', kind: 'exists' },
+  { module: 15, moduleName: '模板与预设', feature: '动效预设', selector: '[data-testid="motion-presets"]', kind: 'exists' },
+  { module: 15, moduleName: '模板与预设', feature: '动效参数', selector: '[data-testid="motion-detail"]', kind: 'exists' },
+  { module: 15, moduleName: '模板与预设', feature: '应用动效', selector: '[data-testid="motion-apply"]', kind: 'exists' },
   { module: 15, moduleName: '模板与预设', feature: '存运动预设', selector: '[data-testid="btn-save-motion-preset"]', kind: 'exists' },
   { module: 15, moduleName: '模板与预设', feature: '存调色预设', selector: '[data-testid="btn-save-color-preset"]', kind: 'exists' },
   { module: 15, moduleName: '模板与预设', feature: '存文字预设', selector: '[data-testid="btn-save-text-preset"]', kind: 'exists' },

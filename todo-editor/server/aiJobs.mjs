@@ -6,14 +6,17 @@ import { DatabaseSync } from 'node:sqlite'
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { spawn } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import {
   saveImageResult,
   submitImageGeneration,
 } from './huniuClient.mjs'
 import { readAiConfig } from './huniuConfig.mjs'
 import { compileStyleById } from './stylePacks.mjs'
-import { cutoutFile } from './imageCutout.mjs'
+import { cutoutFile, decodeImage, encodePng } from './imageCutout.mjs'
+import { compileAnimById, framePrompt, sheetPrompt } from './animPacks.mjs'
+import { normalizeFrames, resolveFfmpeg, sliceGrid, writeAnimation } from './animBuild.mjs'
+import { H3_QUALITIES, ensureH3, h3Download, h3Generate, h3UploadImage } from './h3Client.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const DATA_DIR = process.env.TODO_DATA_DIR
@@ -126,6 +129,7 @@ function rowToJob(r) {
 }
 
 export function enqueueAiJob(body) {
+  if (body.kind === 'anim' || body.animId) return enqueueAnimJob(body)
   if (body.styleId) return enqueueStyledJob(body)
   const kind = body.kind === 'video' ? 'video' : 'image'
   const prompt = String(body.prompt || '').trim()
@@ -133,10 +137,15 @@ export function enqueueAiJob(body) {
 
   const id = `${kind === 'video' ? 'v' : 'i'}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`
   const now = Date.now()
+  const engine = kind === 'video' && body.engine === 'h3' ? 'h3' : undefined
+  const qualityMp = Number(body.qualityMp ?? H3_QUALITIES[0])
+  if (engine && !H3_QUALITIES.includes(qualityMp)) throw new Error(`本地 H3 画质须为 ${H3_QUALITIES.join(' / ')}`)
   const params = {
     size: body.size || '',
-    model: body.model || '',
+    model: engine ? 'minimax-h3-local' : body.model || '',
     quality: body.quality || '',
+    engine,
+    qualityMp: engine ? qualityMp : undefined,
     duration: Math.min(10, Math.max(3, Number(body.duration) || 5)),
     autoTimeline: !!body.autoTimeline,
     width: body.width || null,
@@ -189,6 +198,47 @@ function enqueueStyledJob(body) {
   return rowToJob(getJob.get(id))
 }
 
+/** 风格动画任务：关键帧计划全部由动画包编译；imageDataUrl 作为角色参考 */
+function enqueueAnimJob(body) {
+  if (!body.animId) throw new Error('缺少 animId')
+  const plan = compileAnimById(body.animId, {
+    inputs: body.animInputs,
+    mode: body.mode,
+    frames: body.frames,
+    fps: body.fps,
+    loop: body.loop,
+    repeat: body.repeat,
+    aspectRatio: body.size,
+    resolution: body.quality,
+    model: body.model,
+    alpha: body.alpha,
+    beats: body.beats,
+  })
+  const id = `a_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`
+  const now = Date.now()
+  const params = {
+    size: plan.aspectRatio,
+    model: plan.model,
+    quality: plan.resolution,
+    duration: 0,
+    autoTimeline: !!body.autoTimeline,
+    width: null,
+    height: null,
+    anim: plan.meta,
+    plan,
+    output: null,
+  }
+  let refPath = null
+  if (body.imageDataUrl) {
+    const b64 = String(body.imageDataUrl).replace(/^data:image\/\w+;base64,/, '')
+    refPath = path.join(AI_OUT, `${id}_ref.png`)
+    writeFileSync(refPath, Buffer.from(b64, 'base64'))
+  }
+  insertJob.run(id, 'anim', plan.basePrompt, JSON.stringify(params), refPath, now, now)
+  kickWorker()
+  return rowToJob(getJob.get(id))
+}
+
 export function listAiJobs(limit = 40) {
   return listJobs.all(Math.min(100, Math.max(1, limit))).map(rowToJob)
 }
@@ -237,6 +287,7 @@ export function kickWorker() {
         if (!job) continue
         try {
           if (job.kind === 'image') await runImageJob(job)
+          else if (job.kind === 'anim') await runAnimJob(job)
           else await runVideoJob(job)
         } catch (e) {
           updateJob.run('error', '失败', null, null, null, null, String(e).slice(0, 400), Date.now(), job.id)
@@ -306,7 +357,133 @@ async function runImageJob(job) {
   )
 }
 
+function fileToDataUrl(file) {
+  const buf = readFileSync(file)
+  const ext = path.extname(file).slice(1).toLowerCase()
+  const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'webp' ? 'image/webp' : 'image/png'
+  return `data:${mime};base64,${buf.toString('base64')}`
+}
+
+async function generateImage(config, plan, prompt, imageDataUrl, outPath) {
+  const submitted = await submitImageGeneration(config, {
+    prompt, model: plan.model, size: plan.aspectRatio, quality: plan.resolution, imageDataUrl,
+  })
+  await saveImageResult(config, submitted, outPath)
+  return decodeImage(readFileSync(outPath))
+}
+
+/**
+ * 风格动画：拼图模式 1 次生图后切格；逐帧模式首帧文生图（或参考图），其余帧以首帧为参考图生图。
+ * 产物：<id>.webm|mp4、<id>_fNN.png、拼图 <id>_sheet.png、清单 <id>.json（todo-anim-output/1）。
+ */
+async function runAnimJob(job) {
+  const params = job.params
+  const plan = params.plan
+  const config = readAiConfig({ revealKey: true })
+  const row = getJob.get(job.id)
+  const refUrl = row?.ref_path && existsSync(row.ref_path) ? fileToDataUrl(row.ref_path) : ''
+  const n = plan.frames
+
+  let keyframes
+  let sheetName = null
+  if (plan.mode === 'sheet') {
+    setPhase.run(`生成关键帧拼图（${n} 帧）…`, Date.now(), job.id)
+    const sheetPath = path.join(AI_OUT, `${job.id}_sheet_raw`)
+    const sheet = await generateImage(config, plan, sheetPrompt(plan, { hasRef: !!refUrl }), refUrl, sheetPath)
+    sheetName = `${job.id}_sheet.png`
+    writeFileSync(path.join(AI_OUT, sheetName), encodePng(sheet))
+    keyframes = sliceGrid(sheet, plan.grid.cols, plan.grid.rows)
+  } else {
+    keyframes = []
+    let anchorUrl = refUrl
+    for (let i = 0; i < n; i++) {
+      setPhase.run(`关键帧 ${i + 1}/${n}…`, Date.now(), job.id)
+      const fromRef = !!anchorUrl
+      const out = path.join(AI_OUT, `${job.id}_k${i + 1}_raw`)
+      keyframes.push(await generateImage(config, plan, framePrompt(plan, i, { fromRef }), anchorUrl, out))
+      if (!anchorUrl) anchorUrl = fileToDataUrl(out)
+    }
+  }
+
+  setPhase.run(plan.cutout ? '逐帧抠像 · 对齐…' : '对齐关键帧…', Date.now(), job.id)
+  const frames = normalizeFrames(keyframes, { cutout: plan.cutout, align: plan.align })
+  setPhase.run(plan.cutout ? '合成透明动画…' : '合成动画…', Date.now(), job.id)
+  const built = await writeAnimation(frames, {
+    outDir: AI_OUT, id: job.id, fps: plan.fps, loop: plan.loop, repeat: plan.repeat, alpha: !!plan.cutout,
+  })
+
+  const url = (name) => `/ai-generated/${name}`
+  const output = {
+    spec: 'todo-anim-output/1',
+    jobId: job.id,
+    anim: { id: plan.meta.id, version: plan.meta.version, name: plan.meta.name },
+    alpha: !!plan.cutout,
+    mode: plan.mode,
+    fps: plan.fps,
+    loop: plan.loop,
+    repeat: plan.repeat,
+    frameCount: frames.length,
+    playFrames: built.playFrames,
+    duration: built.duration,
+    width: built.width,
+    height: built.height,
+    video: url(built.video),
+    frames: built.frames.map(url),
+    sheet: sheetName ? url(sheetName) : null,
+    manifest: url(`${job.id}.json`),
+  }
+  writeFileSync(path.join(AI_OUT, `${job.id}.json`), JSON.stringify(output, null, 2))
+  params.width = built.width
+  params.height = built.height
+  params.duration = built.duration
+  params.output = output
+  setParams.run(JSON.stringify(params), Date.now(), job.id)
+  updateJob.run(
+    'done', plan.cutout ? '完成 · 透明通道' : '完成', built.video, url(built.video), 'video',
+    built.duration, null, Date.now(), job.id,
+  )
+}
+
+function probeVideo(file) {
+  try {
+    const ffprobe = resolveFfmpeg().replace(/ffmpeg(\.exe)?$/i, (m) => m.replace('ffmpeg', 'ffprobe'))
+    const out = execFileSync(ffprobe, [
+      '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height:format=duration', '-of', 'json', file,
+    ], { encoding: 'utf8', windowsHide: true })
+    const j = JSON.parse(out)
+    const s = j.streams?.[0]
+    return s ? { width: s.width, height: s.height, duration: Number(j.format?.duration) || undefined } : null
+  } catch {
+    return null
+  }
+}
+
+/** 本地 MiniMax H3：h3-studio 出片后拉回 AI_OUT */
+async function runH3VideoJob(job) {
+  const phase = (s) => setPhase.run(s, Date.now(), job.id)
+  const row = getJob.get(job.id)
+  await ensureH3(phase)
+  let firstFrame = null
+  if (row?.ref_path && existsSync(row.ref_path)) {
+    phase('上传首帧…')
+    firstFrame = await h3UploadImage(row.ref_path)
+  }
+  phase('提交本地 H3…')
+  const dur = job.params.duration || 5
+  const { url } = await h3Generate({ prompt: job.prompt, seconds: dur, qualityMp: job.params.qualityMp, firstFrame }, phase)
+  phase('拉回成片…')
+  const name = `${job.id}.mp4`
+  const file = await h3Download(url, path.join(AI_OUT, name))
+  const probed = probeVideo(file)
+  if (probed) {
+    Object.assign(job.params, probed)
+    setParams.run(JSON.stringify(job.params), Date.now(), job.id)
+  }
+  updateJob.run('done', '完成 · 本地 H3', name, `/ai-generated/${name}`, 'video', probed?.duration ?? dur, null, Date.now(), job.id)
+}
+
 async function runVideoJob(job) {
+  if (job.params.engine === 'h3') return runH3VideoJob(job)
   const row = getJob.get(job.id)
   const refPath = row?.ref_path
   const outPath = path.join(AI_OUT, `${job.id}.mp4`)

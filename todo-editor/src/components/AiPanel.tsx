@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AudioLines, Camera, ImagePlus, LayoutGrid, Loader2, Music, Plus, Settings, Sparkles, Trash2, Video, Wand2, X } from 'lucide-react'
+import { AudioLines, Camera, Clapperboard, Film, ImagePlus, LayoutGrid, Loader2, Music, Plus, Settings, Sparkles, Trash2, Video, Wand2, X } from 'lucide-react'
 import { useApp } from '../store'
 import { AiFloatLaunch } from './AiFloat'
 import { isAiPopout } from '../lib/storeSync'
 import { aiFetch, aiUrl } from '../lib/aiFetch'
 import { AiStyleForm, defaultStyleValues, styleValuesReady, type StylePack, type StyleValues } from './AiStyleForm'
 import { AiStylePicker } from './AiStylePicker'
+import { AiAnimStudio, type AnimPack, type AnimValues } from './AiAnimStudio'
 import clsx from 'clsx'
 
 const FALLBACK_SIZE_OPTIONS = [
@@ -27,6 +28,8 @@ const FALLBACK_MODELS = [{
   defaultQuality: 'low',
 }] as const
 const VID_DURATIONS = [5, 8, 10] as const
+const H3_DURATIONS = [5, 10] as const
+const H3_QUALITY_LABELS: Record<number, string> = { 0.4: '0.4MP · 8GB 稳定', 0.55: '0.55MP · 较清晰', 0.7: '0.7MP · 可能爆显存' }
 
 type ColdAsset = { id: string; name: string; url: string; kind: string }
 type SizeOption = { value: string; label: string }
@@ -41,11 +44,11 @@ type AiModel = {
   defaultQuality?: string
 }
 type AiConfig = { baseUrl: string; hasApiKey: boolean; apiKeyMasked: string }
-type AiMode = 'image' | 'video' | 'audio'
+type AiMode = 'image' | 'video' | 'audio' | 'anim'
 
 type AiJob = {
   id: string
-  kind: 'image' | 'video' | 'audio'
+  kind: 'image' | 'video' | 'audio' | 'anim'
   status: 'queued' | 'running' | 'done' | 'error' | 'imported'
   prompt: string
   params: {
@@ -57,6 +60,8 @@ type AiJob = {
     width?: number | null
     height?: number | null
     style?: { id: string; name: string; version: string; summary: string; cutout?: boolean } | null
+    anim?: { id: string; name: string; summary: string; alpha: boolean; frames: number } | null
+    engine?: 'h3'
   }
   resultName?: string | null
   resultUrl?: string | null
@@ -168,6 +173,12 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
   const [styleId, setStyleId] = useState('')
   const [styleValues, setStyleValues] = useState<StyleValues | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
+  const [videoEngine, setVideoEngine] = useState<'h3' | 'grok'>('h3')
+  const [h3Quality, setH3Quality] = useState(0.4)
+  const [h3Status, setH3Status] = useState<{ studio: boolean; comfy: boolean; qualities: number[] } | null>(null)
+  const [h3Starting, setH3Starting] = useState(false)
+  const [anims, setAnims] = useState<AnimPack[]>([])
+  const [animOpen, setAnimOpen] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const audioFileRef = useRef<HTMLInputElement>(null)
   const importing = useRef(new Set<string>())
@@ -190,6 +201,82 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
           .map((s) => ({ ...s, previews: s.previews.map((p) => aiUrl(p)) })))
       }
     } catch { /* */ }
+  }
+
+  async function refreshH3() {
+    try {
+      const r = await aiFetch('/api/ai-h3')
+      const data = await r.json()
+      if (data.ok) setH3Status({ studio: data.studio, comfy: data.comfy, qualities: data.qualities })
+    } catch { /* */ }
+  }
+
+  async function startH3() {
+    setH3Starting(true)
+    setError(null)
+    try {
+      const r = await aiFetch('/api/ai-h3/start', { method: 'POST' })
+      const data = await r.json()
+      if (!data.ok) throw new Error(data.error || '本地 H3 启动失败')
+      useApp.getState().setToast('本地 MiniMax H3 已就绪')
+    } catch (e) {
+      setError(friendlyAiError(e instanceof Error ? e.message : String(e)))
+    } finally {
+      setH3Starting(false)
+      void refreshH3()
+    }
+  }
+
+  async function refreshAnims() {
+    try {
+      const r = await aiFetch('/api/ai-anims')
+      const data = await r.json()
+      if (data.ok) {
+        setAnims((data.anims as AnimPack[]).map((a) => ({ ...a, previews: a.previews.map((p) => aiUrl(p)) })))
+      }
+    } catch { /* */ }
+  }
+
+  async function enqueueAnim(pack: AnimPack, v: AnimValues) {
+    if (!config?.hasApiKey) {
+      setConfigOpen(true)
+      setError('请先配置虎妞 API Key')
+      return false
+    }
+    setError(null)
+    try {
+      const res = await aiFetch('/api/ai-jobs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          kind: 'anim',
+          animId: pack.id,
+          animInputs: v.inputs,
+          mode: v.mode,
+          frames: v.frames,
+          beats: v.beats,
+          fps: v.fps,
+          loop: v.loop,
+          repeat: v.repeat,
+          size: v.aspectRatio,
+          quality: v.resolution,
+          model: v.model,
+          alpha: v.alpha,
+          imageDataUrl: refDataUrl ?? undefined,
+          autoTimeline,
+        }),
+      })
+      const data = await res.json()
+      if (!data.ok) throw new Error(data.error || '入队失败')
+      useApp.getState().setToast(`动画已加入队列 · ${activeJobs.length + 1}`)
+      void refreshJobs()
+      return true
+    } catch (e) {
+      const msg = friendlyAiError(e instanceof Error ? e.message : String(e))
+      setError(msg)
+      useApp.getState().setToast(msg)
+      return false
+    }
   }
 
   function pickStyle(id: string) {
@@ -320,7 +407,7 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
           })
         }
         window.setTimeout(() => setJustAdded(null), 1800)
-        useApp.getState().setToast(`AI ${kind === 'video' ? '视频' : '图片'}已入库`)
+        useApp.getState().setToast(`AI ${j.kind === 'anim' ? '动画' : kind === 'video' ? '视频' : '图片'}已入库`)
       }
       void refreshJobs()
     } catch (e) {
@@ -336,6 +423,7 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
   useEffect(() => {
     void refreshJobs()
     void refreshStyles()
+    void refreshAnims()
     void refreshConfig().then(refreshModels)
     const t = window.setInterval(() => {
       void refreshJobs()
@@ -344,8 +432,16 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
   }, [])
 
   useEffect(() => {
-    void refreshModels()
+    if (mode !== 'anim') void refreshModels()
   }, [mode])
+
+  const useH3 = mode === 'video' && videoEngine === 'h3'
+  useEffect(() => {
+    if (!useH3) return
+    void refreshH3()
+    const t = window.setInterval(() => void refreshH3(), 10000)
+    return () => window.clearInterval(t)
+  }, [useH3])
 
   useEffect(() => {
     if (!sizeOptions.some((s) => s.value === size)) {
@@ -383,7 +479,7 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
     const p = prompt.trim()
     if (submitting) return
     if (activeStyle ? !styleValues || !styleValuesReady(activeStyle, styleValues) : !p) return
-    if (!config?.hasApiKey) {
+    if (!useH3 && !config?.hasApiKey) {
       setConfigOpen(true)
       setError('请先配置虎妞 API Key')
       return
@@ -411,7 +507,9 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
           size,
           model,
           quality,
-          duration,
+          duration: useH3 ? (H3_DURATIONS.includes(duration as 5 | 10) ? duration : 5) : duration,
+          engine: useH3 ? 'h3' : undefined,
+          qualityMp: useH3 ? h3Quality : undefined,
           autoTimeline,
           width: mode === 'image' ? Number(size.split('x')[0]) : useApp.getState().settings.width,
           height: mode === 'image' ? Number(size.split('x')[1]) : useApp.getState().settings.height,
@@ -500,7 +598,38 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
         >
           <AudioLines size={12} className="inline mr-1" />生音频
         </button>
+        <button
+          type="button"
+          className={clsx('tab flex-1', mode === 'anim' && 'active')}
+          data-testid="ai-mode-anim"
+          onClick={() => setMode('anim')}
+        >
+          <Film size={12} className="inline mr-1" />动画
+        </button>
       </div>
+
+      {mode === 'anim' && (
+        <div className="field">
+          <label>风格动画</label>
+          <button type="button" className="ai-style-trigger" data-testid="ai-anim-open" onClick={() => setAnimOpen(true)}>
+            <span className="shrink-0 w-10 h-10 rounded-md overflow-hidden grid place-items-center bg-white border" style={{ borderColor: 'var(--border)' }}>
+              {anims[0]?.previews[0]
+                ? <img src={anims[0].previews[0]} alt="" className="w-full h-full object-cover" />
+                : <Clapperboard size={16} style={{ color: 'var(--accent)' }} />}
+            </span>
+            <span className="min-w-0 flex-1 flex flex-col">
+              <span className="text-[12px] font-semibold truncate">打开风格动画</span>
+              <span className="text-[10px] truncate" style={{ color: 'var(--text-muted)' }}>
+                {anims.length ? `关键帧 → 自动拼成动画 · ${anims.length} 个动画包` : '没有可用的动画包'}
+              </span>
+            </span>
+            <LayoutGrid size={14} className="shrink-0 mr-1" style={{ color: 'var(--text-muted)' }} />
+          </button>
+        </div>
+      )}
+      {animOpen && (
+        <AiAnimStudio anims={anims} hasRef={!!refDataUrl} onSubmit={enqueueAnim} onClose={() => setAnimOpen(false)} />
+      )}
 
       {mode === 'image' && styles.length > 0 && (
         <div className="field">
@@ -527,7 +656,7 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
 
       {mode !== 'audio' && (
       <div className="field">
-        <label>参考图（可选 · {mode === 'video' ? '有则图生视频' : '有则图生图'}）</label>
+        <label>参考图（可选 · {mode === 'anim' ? '锁定动画角色外观' : mode === 'video' ? '有则图生视频' : '有则图生图'}）</label>
         {refDataUrl ? (
           <div className="ai-ref-preview relative rounded-lg overflow-hidden border" style={{ borderColor: 'var(--border)' }}>
             <img src={refDataUrl} alt="参考图" className="w-full h-20 object-cover" />
@@ -543,7 +672,7 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
           </div>
         ) : (
           <p className="text-[11px] m-0 px-0.5 mb-1.5" style={{ color: 'var(--text-muted)' }}>
-            无参考图=文生{mode === 'video' ? '视频' : '图'} · 截帧可作参考
+            {mode === 'anim' ? '无参考图=按描述设计角色' : `无参考图=文生${mode === 'video' ? '视频' : '图'}`} · 截帧可作参考
           </p>
         )}
         <div className="flex gap-1">
@@ -583,20 +712,50 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
         <AiStyleForm pack={activeStyle} value={styleValues} onChange={setStyleValues} />
       )}
 
-      {mode !== 'audio' && !activeStyle && (
+      {mode !== 'audio' && mode !== 'anim' && !activeStyle && (
       <div className="field">
         <label>提示词</label>
         <textarea
           data-testid="ai-prompt"
           rows={3}
-          placeholder={mode === 'image' ? '描述画面…' : mode === 'video' ? '描述运动…' : '输入要生成的声音、音乐或朗读文本…'}
+          placeholder={mode === 'image' ? '描述画面…' : useH3 ? '描述画面与动作（可按秒写：0-2s …；H3 同时生成声音）' : mode === 'video' ? '描述运动…' : '输入要生成的声音、音乐或朗读文本…'}
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
         />
       </div>
       )}
 
-      {!activeStyle && (
+      {mode === 'video' && (
+        <div className="field">
+          <label>引擎</label>
+          <div className="tab-row" data-testid="ai-video-engine">
+            <button type="button" className={clsx('tab flex-1', videoEngine === 'h3' && 'active')} data-testid="ai-engine-h3" onClick={() => setVideoEngine('h3')}>
+              本地 MiniMax H3
+            </button>
+            <button type="button" className={clsx('tab flex-1', videoEngine === 'grok' && 'active')} data-testid="ai-engine-grok" onClick={() => setVideoEngine('grok')}>
+              云端 Grok
+            </button>
+          </div>
+          {useH3 && (
+            <div className="flex items-center gap-1.5 px-0.5 text-[10px]" style={{ color: 'var(--text-muted)' }} data-testid="ai-h3-status">
+              <span
+                className="inline-block w-1.5 h-1.5 rounded-full shrink-0"
+                style={{ background: h3Status?.comfy && h3Status.studio ? 'var(--success, #22c55e)' : 'var(--error)' }}
+              />
+              <span className="truncate flex-1">
+                {!h3Status ? '检测本地 H3…' : h3Status.comfy && h3Status.studio ? '本地 H3 就绪 · 8 步加速 · 免 Key' : `未运行（${h3Status.studio ? '' : 'h3-studio '}${h3Status.comfy ? '' : 'ComfyUI'}）· 生成时会自动启动`}
+              </span>
+              {h3Status && !(h3Status.comfy && h3Status.studio) && (
+                <button type="button" className="underline shrink-0" data-testid="ai-h3-start" disabled={h3Starting} onClick={() => void startH3()}>
+                  {h3Starting ? '启动中…' : '立即启动'}
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {!activeStyle && mode !== 'anim' && !useH3 && (
       <div className="field">
         <label>模型</label>
         <select data-testid="ai-model" value={model} onChange={(e) => setModel(e.target.value)}>
@@ -615,7 +774,7 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
       </div>
       )}
 
-      {activeStyle ? null : mode === 'image' ? (
+      {activeStyle || mode === 'anim' ? null : mode === 'image' ? (
         <>
           <div className="field">
             <label>尺寸</label>
@@ -634,6 +793,21 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
             </select>
           </div>
         </>
+      ) : useH3 ? (
+        <div className="grid grid-cols-2 gap-2">
+          <div className="field">
+            <label>时长</label>
+            <select data-testid="ai-h3-duration" value={H3_DURATIONS.includes(duration as 5 | 10) ? duration : 5} onChange={(e) => setDuration(Number(e.target.value) as typeof duration)}>
+              {H3_DURATIONS.map((d) => <option key={d} value={d}>{d} 秒{d > 5 ? ' · 两段接续' : ''}</option>)}
+            </select>
+          </div>
+          <div className="field">
+            <label>画质</label>
+            <select data-testid="ai-h3-quality" value={h3Quality} onChange={(e) => setH3Quality(Number(e.target.value))}>
+              {(h3Status?.qualities ?? [0.4, 0.55, 0.7]).map((q) => <option key={q} value={q}>{H3_QUALITY_LABELS[q] ?? `${q}MP`}</option>)}
+            </select>
+          </div>
+        </div>
       ) : mode === 'video' ? (
         <div className="field">
           <label>时长</label>
@@ -760,16 +934,28 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
       </label>
       )}
 
+      {mode === 'anim' ? (
+        <button
+          type="button"
+          className="btn btn-primary w-full"
+          data-testid="ai-generate"
+          disabled={!anims.length}
+          onClick={() => setAnimOpen(true)}
+        >
+          <Film size={13} />规划动画…
+        </button>
+      ) : (
       <button
         type="button"
         className={clsx('btn btn-primary w-full', submitting && 'opacity-70')}
         data-testid="ai-generate"
-        disabled={!canGen || isAudioMode || !model}
+        disabled={!canGen || isAudioMode || (!model && !useH3)}
         onClick={() => void enqueue()}
       >
         {submitting ? <Loader2 size={13} className="animate-spin" /> : mode === 'video' ? <Video size={13} /> : mode === 'audio' ? <AudioLines size={13} /> : <Sparkles size={13} />}
-        {submitting ? '入队中…' : activeStyle ? `${activeStyle.name} · 入队` : mode === 'audio' ? '生音频 · 待接入' : refDataUrl ? (mode === 'video' ? '图生视频 · 入队' : '图生图 · 入队') : (mode === 'video' ? '文生视频 · 入队' : '文生图 · 入队')}
+        {submitting ? '入队中…' : activeStyle ? `${activeStyle.name} · 入队` : useH3 ? `本地 H3 ${refDataUrl ? '图生视频' : '文生视频'} · 入队` : mode === 'audio' ? '生音频 · 待接入' : refDataUrl ? (mode === 'video' ? '图生视频 · 入队' : '图生图 · 入队') : (mode === 'video' ? '文生视频 · 入队' : '文生图 · 入队')}
       </button>
+      )}
 
       {error && (
         <p className="text-[11px] m-0 px-1" style={{ color: 'var(--error)' }} data-testid="ai-error">{error}</p>
@@ -789,15 +975,17 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1">
                     {j.status === 'running' && <Loader2 size={11} className="animate-spin shrink-0" />}
-                    <span className="font-medium shrink-0">{j.kind === 'video' ? '视频' : '图片'}</span>
+                    <span className="font-medium shrink-0">{j.kind === 'anim' ? '动画' : j.kind === 'video' ? (j.params.engine === 'h3' ? '视频 · H3' : '视频') : '图片'}</span>
                     <span style={{ color: j.status === 'error' ? 'var(--error)' : 'var(--text-muted)' }}>
                       {statusLabel(j)}
                     </span>
                   </div>
                   <p className="m-0 truncate opacity-80">
-                    {j.params.style
-                      ? `〔${j.params.style.name}${j.params.style.cutout ? ' · 透明底' : ''}〕${j.params.style.summary}`
-                      : j.prompt}
+                    {j.params.anim
+                      ? `〔${j.params.anim.name} · ${j.params.anim.frames} 帧${j.params.anim.alpha ? ' · 透明' : ''}〕${j.params.anim.summary}`
+                      : j.params.style
+                        ? `〔${j.params.style.name}${j.params.style.cutout ? ' · 透明底' : ''}〕${j.params.style.summary}`
+                        : j.prompt}
                   </p>
                   {j.error && <p className="m-0 mt-0.5" style={{ color: 'var(--error)' }}>{friendlyAiError(j.error)}</p>}
                 </div>
