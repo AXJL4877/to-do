@@ -1548,6 +1548,200 @@
         }
       }
     },
+    "transform_ease": {
+      "workIn": 0,
+      "workOut": 4,
+      "settings": {
+        "width": 640,
+        "height": 360,
+        "fps": 30
+      },
+      "times": [
+        0.016167,
+        0.349831,
+        0.466317,
+        0.60757,
+        0.879666,
+        0.973857,
+        1.330567,
+        1.391434,
+        1.671376,
+        1.745206,
+        1.969921,
+        2.16015,
+        2.312468,
+        2.50479,
+        2.768766,
+        2.909551,
+        3.160533,
+        3.408037,
+        3.505945,
+        3.775489
+      ],
+      "frames": {
+        "t00_0.016167": {
+          "time": 0.016167,
+          "width": 640,
+          "height": 360,
+          "layers": 1,
+          "sha256": "65b095f8650bf6f8d9be6e7529fe0808bfd6068dad62aa31b2e02031e5e587d6",
+          "rgb": "transform_ease__t00_0.016167.rgb"
+        },
+        "t01_0.349831": {
+          "time": 0.349831,
+          "width": 640,
+          "height": 360,
+          "layers": 1,
+          "sha256": "65b095f8650bf6f8d9be6e7529fe0808bfd6068dad62aa31b2e02031e5e587d6",
+          "rgb": "transform_ease__t01_0.349831.rgb"
+        },
+        "t02_0.466317": {
+          "time": 0.466317,
+          "width": 640,
+          "height": 360,
+          "layers": 1,
+          "sha256": "65b095f8650bf6f8d9be6e7529fe0808bfd6068dad62aa31b2e02031e5e587d6",
+          "rgb": "transform_ease__t02_0.466317.rgb"
+        },
+        "t03_0.607570": {
+          "time": 0.60757,
+          "width": 640,
+          "height": 360,
+          "layers": 1,
+          "sha256": "65b095f8650bf6f8d9be6e7529fe0808bfd6068dad62aa31b2e02031e5e587d6",
+          "rgb": "transform_ease__t03_0.607570.rgb"
+        },
+        "t04_0.879666": {
+          "time": 0.879666,
+          "width": 640,
+          "height": 360,
+          "layers": 1,
+          "sha256": "65b095f8650bf6f8d9be6e7529fe0808bfd6068dad62aa31b2e02031e5e587d6",
+          "rgb": "transform_ease__t04_0.879666.rgb"
+        },
+        "t05_0.973857": {
+          "time": 0.973857,
+          "width": 640,
+          "height": 360,
+          "layers": 1,
+          "sha256": "65b095f8650bf6f8d9be6e7529fe0808bfd6068dad62aa31b2e02031e5e587d6",
+          "rgb": "transform_ease__t05_0.973857.rgb"
+        },
+        "t06_1.330567": {
+          "time": 1.330567,
+          "width": 640,
+          "height": 360,
+          "layers": 1,
+          "sha256": "65b095f8650bf6f8d9be6e7529fe0808bfd6068dad62aa31b2e02031e5e587d6",
+          "rgb": "transform_ease__t06_1.330567.rgb"
+        },
+        "t07_1.391434": {
+          "time": 1.391434,
+          "width": 640,
+          "height": 360,
+          "layers": 1,
+          "sha256": "65b095f8650bf6f8d9be6e7529fe0808bfd6068dad62aa31b2e02031e5e587d6",
+          "rgb": "transform_ease__t07_1.391434.rgb"
+        },
+        "t08_1.671376": {
+          "time": 1.671376,
+          "width": 640,
+          "height": 360,
+          "layers": 1,
+          "sha256": "65b095f8650bf6f8d9be6e7529fe0808bfd6068dad62aa31b2e02031e5e587d6",
+          "rgb": "transform_ease__t08_1.671376.rgb"
+        },
+        "t09_1.745206": {
+          "time": 1.745206,
+          "width": 640,
+          "height": 360,
+          "layers": 1,
+          "sha256": "65b095f8650bf6f8d9be6e7529fe0808bfd6068dad62aa31b2e02031e5e587d6",
+          "rgb": "transform_ease__t09_1.745206.rgb"
+        },
+        "t10_1.969921": {
+          "time": 1.969921,
+          "width": 640,
+          "height": 360,
+          "layers": 1,
+          "sha256": "65b095f8650bf6f8d9be6e7529fe0808bfd6068dad62aa31b2e02031e5e587d6",
+          "rgb": "transform_ease__t10_1.969921.rgb"
+        },
+        "t11_2.160150": {
+          "time": 2.16015,
+          "width": 640,
+          "height": 360,
+          "layers": 1,
+          "sha256": "65b095f8650bf6f8d9be6e7529fe0808bfd6068dad62aa31b2e02031e5e587d6",
+          "rgb": "transform_ease__t11_2.160150.rgb"
+        },
+        "t12_2.312468": {
+          "time": 2.312468,
+          "width": 640,
+          "height": 360,
+          "layers": 1,
+          "sha256": "65b095f8650bf6f8d9be6e7529fe0808bfd6068dad62aa31b2e02031e5e587d6",
+          "rgb": "transform_ease__t12_2.312468.rgb"
+        },
+        "t13_2.504790": {
+          "time": 2.50479,
+          "width": 640,
+          "height": 360,
+          "layers": 1,
+          "sha256": "65b095f8650bf6f8d9be6e7529fe0808bfd6068dad62aa31b2e02031e5e587d6",
+          "rgb": "transform_ease__t13_2.504790.rgb"
+        },
+        "t14_2.768766": {
+          "time": 2.768766,
+          "width": 640,
+          "height": 360,
+          "layers": 1,
+          "sha256": "65b095f8650bf6f8d9be6e7529fe0808bfd6068dad62aa31b2e02031e5e587d6",
+          "rgb": "transform_ease__t14_2.768766.rgb"
+        },
+        "t15_2.909551": {
+          "time": 2.909551,
+          "width": 640,
+          "height": 360,
+          "layers": 1,
+          "sha256": "65b095f8650bf6f8d9be6e7529fe0808bfd6068dad62aa31b2e02031e5e587d6",
+          "rgb": "transform_ease__t15_2.909551.rgb"
+        },
+        "t16_3.160533": {
+          "time": 3.160533,
+          "width": 640,
+          "height": 360,
+          "layers": 1,
+          "sha256": "65b095f8650bf6f8d9be6e7529fe0808bfd6068dad62aa31b2e02031e5e587d6",
+          "rgb": "transform_ease__t16_3.160533.rgb"
+        },
+        "t17_3.408037": {
+          "time": 3.408037,
+          "width": 640,
+          "height": 360,
+          "layers": 1,
+          "sha256": "65b095f8650bf6f8d9be6e7529fe0808bfd6068dad62aa31b2e02031e5e587d6",
+          "rgb": "transform_ease__t17_3.408037.rgb"
+        },
+        "t18_3.505945": {
+          "time": 3.505945,
+          "width": 640,
+          "height": 360,
+          "layers": 1,
+          "sha256": "65b095f8650bf6f8d9be6e7529fe0808bfd6068dad62aa31b2e02031e5e587d6",
+          "rgb": "transform_ease__t18_3.505945.rgb"
+        },
+        "t19_3.775489": {
+          "time": 3.775489,
+          "width": 640,
+          "height": 360,
+          "layers": 1,
+          "sha256": "65b095f8650bf6f8d9be6e7529fe0808bfd6068dad62aa31b2e02031e5e587d6",
+          "rgb": "transform_ease__t19_3.775489.rgb"
+        }
+      },
+      "baselineNote": "B1.2b: 由含 ease/bezier 的 sample_kf 新逻辑生成（非线性插值基线）"
+    },
     "transform_keyframes": {
       "workIn": 0,
       "workOut": 4,

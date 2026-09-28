@@ -1,0 +1,172 @@
+{
+  "version": 1,
+  "clips": [
+    {
+      "mediaPath": "tests/media/gop250.mp4",
+      "start": 0,
+      "duration": 4,
+      "inPoint": 0,
+      "outPoint": 4,
+      "trackId": "v1",
+      "enabled": true,
+      "kind": "video",
+      "speed": 1,
+      "reverse": false,
+      "x": 0,
+      "y": 0,
+      "scaleX": 1,
+      "scaleY": 1,
+      "rotation": 0,
+      "opacity": 1,
+      "cropL": 0,
+      "cropR": 0,
+      "cropT": 0,
+      "cropB": 0,
+      "exposure": 0,
+      "contrast": 0,
+      "saturation": 0,
+      "temperature": 0,
+      "tint": 0,
+      "blend": "normal",
+      "keyframes": {
+        "x": [
+          {
+            "t": 0,
+            "value": -0.3
+          },
+          {
+            "t": 2,
+            "value": 0.3
+          },
+          {
+            "t": 4,
+            "value": 0
+          }
+        ],
+        "y": [
+          {
+            "t": 0,
+            "value": 0.25,
+            "ease": "easeIn"
+          },
+          {
+            "t": 2,
+            "value": -0.25,
+            "ease": "easeIn"
+          },
+          {
+            "t": 4,
+            "value": 0,
+            "ease": "easeIn"
+          }
+        ],
+        "scale": [
+          {
+            "t": 0,
+            "value": 0.7,
+            "ease": "easeOut"
+          },
+          {
+            "t": 2,
+            "value": 1.15,
+            "ease": "easeOut"
+          },
+          {
+            "t": 4,
+            "value": 0.9,
+            "ease": "easeOut"
+          }
+        ],
+        "scaleY": [
+          {
+            "t": 0,
+            "value": 0.7,
+            "ease": "easeInOut"
+          },
+          {
+            "t": 2,
+            "value": 1.15,
+            "ease": "easeInOut"
+          },
+          {
+            "t": 4,
+            "value": 0.9,
+            "ease": "easeInOut"
+          }
+        ],
+        "rotation": [
+          {
+            "t": 0,
+            "value": -20,
+            "ease": "hold"
+          },
+          {
+            "t": 2,
+            "value": 25,
+            "ease": "hold"
+          },
+          {
+            "t": 4,
+            "value": 0,
+            "ease": "linear"
+          }
+        ],
+        "opacity": [
+          {
+            "t": 0,
+            "value": 0.3,
+            "ease": "bezier",
+            "oh": {
+              "x": 0.42,
+              "y": 0
+            },
+            "ih": {
+              "x": -0.42,
+              "y": 0
+            }
+          },
+          {
+            "t": 2,
+            "value": 1,
+            "ease": "bezier",
+            "oh": {
+              "x": 0.42,
+              "y": 0
+            },
+            "ih": {
+              "x": -0.42,
+              "y": 0
+            }
+          },
+          {
+            "t": 4,
+            "value": 0.6,
+            "ease": "bezier",
+            "oh": {
+              "x": 0.3333333333333333,
+              "y": 0.3333333333333333
+            },
+            "ih": {
+              "x": -0.3333333333333333,
+              "y": -0.3333333333333333
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "tracks": [
+    {
+      "id": "v1",
+      "kind": "video",
+      "muted": false
+    }
+  ],
+  "settings": {
+    "width": 640,
+    "height": 360,
+    "fps": 30
+  },
+  "workIn": 0,
+  "workOut": 4
+}

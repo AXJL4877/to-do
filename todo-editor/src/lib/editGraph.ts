@@ -1,7 +1,16 @@
 /** 预览/导出共用的时间线描述（v1）。compose / export / Monitor 均消费此结构。 */
 export const EDIT_GRAPH_VERSION = 1 as const
 
-export type EditGraphKeyframe = { t: number; value: number }
+export type EditGraphKfHandle = { x: number; y: number }
+
+export type EditGraphKeyframe = {
+  t: number
+  value: number
+  /** 缺省 linear；为 linear 时可省略以保持旧 fixture JSON 不变 */
+  ease?: 'linear' | 'easeIn' | 'easeOut' | 'easeInOut' | 'hold' | 'bezier'
+  oh?: EditGraphKfHandle
+  ih?: EditGraphKfHandle
+}
 
 export type EditGraphText = {
   content: string
@@ -119,7 +128,13 @@ type ClipIn = {
   chromaKey?: { color: string; tolerance: number; enabled: boolean }
   transitionIn?: { type: string; duration: number }
   transitionOut?: { type: string; duration: number }
-  keyframes?: Record<string, { t: number; value: number }[]>
+  keyframes?: Record<string, Array<{
+    t: number
+    value: number
+    ease?: EditGraphKeyframe['ease']
+    oh?: EditGraphKfHandle
+    ih?: EditGraphKfHandle
+  }>>
 }
 
 export function buildEditGraph(input: {
@@ -146,8 +161,15 @@ export function buildEditGraph(input: {
       const tr = c.transform
       const col = c.color
       const kf = c.keyframes
-      const mapKf = (prop: string) =>
-        (kf?.[prop] ?? []).map((k) => ({ t: k.t, value: k.value }))
+      const mapKf = (prop: string): EditGraphKeyframe[] =>
+        (kf?.[prop] ?? []).map((k) => {
+          const out: EditGraphKeyframe = { t: k.t, value: k.value }
+          const ease = k.ease ?? 'linear'
+          if (ease !== 'linear') out.ease = ease
+          if (k.oh) out.oh = { x: k.oh.x, y: k.oh.y }
+          if (k.ih) out.ih = { x: k.ih.x, y: k.ih.y }
+          return out
+        })
       const kind = c.text ? 'text' : (m?.kind || undefined)
       return {
         mediaPath: m?.path || '',
