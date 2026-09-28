@@ -539,7 +539,9 @@ bool parse_clip_obj(const std::string &s, size_t *i, Clip *c) {
     skip_ws(s, i);
     if (*i >= s.size() || s[*i] != ':') return false;
     ++(*i);
-    if (key == "mediaPath") {
+    if (key == "id") {
+      if (!parse_string(s, i, &c->id)) return false;
+    } else if (key == "mediaPath") {
       if (!parse_string(s, i, &c->media_path)) return false;
     } else if (key == "trackId") {
       if (!parse_string(s, i, &c->track_id)) return false;
@@ -559,6 +561,9 @@ bool parse_clip_obj(const std::string &s, size_t *i, Clip *c) {
       if (!parse_number(s, i, &c->speed)) return false;
     } else if (key == "reverse") {
       if (!parse_bool(s, i, &c->reverse)) return false;
+    } else if (key == "freeze") {
+      if (!parse_number(s, i, &c->freeze)) return false;
+      c->has_freeze = true;
     } else if (key == "x") {
       if (!parse_number(s, i, &c->x)) return false;
     } else if (key == "y") {

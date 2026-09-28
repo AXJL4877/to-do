@@ -15,6 +15,8 @@ export function clip(overrides = {}) {
     kind = 'video',
     speed = 1,
     reverse = false,
+    freeze,
+    omitOutPoint = false,
     x = 0,
     y = 0,
     scaleX = 1,
@@ -45,7 +47,6 @@ export function clip(overrides = {}) {
     start,
     duration,
     inPoint,
-    outPoint: outPoint ?? inPoint + duration * (speed || 1),
     trackId,
     enabled,
     kind,
@@ -56,6 +57,8 @@ export function clip(overrides = {}) {
     exposure, contrast, saturation, temperature, tint,
     blend,
   }
+  if (!omitOutPoint) c.outPoint = outPoint ?? inPoint + duration * (speed || 1)
+  if (freeze !== undefined) c.freeze = freeze
   if (text) c.text = text
   if (effects) c.effects = effects
   if (mask) c.mask = mask

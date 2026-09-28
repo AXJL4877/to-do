@@ -197,6 +197,34 @@ const fixtures = {
     workOut: 4,
   }),
 
+  /** B1.2c：定格；基线由 media_time(has_freeze) 新逻辑生成 */
+  freeze: graph({
+    clips: [clip({
+      mediaPath: MEDIA, duration: 2, inPoint: 0, outPoint: 8, speed: 1, reverse: false,
+      freeze: 1.25,
+    })],
+    tracks: videoTracks('v1'),
+    workOut: 2,
+  }),
+
+  /** B1.2c：反向且无 outPoint（C++ 默认 -1 → span=duration*spd）；基线由新逻辑生成 */
+  reverse_out_unset: graph({
+    clips: [clip({
+      mediaPath: INTRA, duration: 4, inPoint: 0, speed: 1, reverse: true, omitOutPoint: true,
+    })],
+    tracks: videoTracks('v1'),
+    workOut: 4,
+  }),
+
+  /** B1.2c：1.5× 反向；基线由新逻辑生成 */
+  speed_1_5x_reverse: graph({
+    clips: [clip({
+      mediaPath: MEDIA, duration: 4, inPoint: 0, outPoint: 6, speed: 1.5, reverse: true,
+    })],
+    tracks: videoTracks('v1'),
+    workOut: 4,
+  }),
+
   transition_dissolve: graph({
     clips: [clip({
       mediaPath: MEDIA, duration: 3, outPoint: 3,

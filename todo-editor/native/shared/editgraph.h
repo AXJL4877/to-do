@@ -7,6 +7,7 @@
 #ifdef _WIN32
 
 struct Clip {
+  std::string id;
   std::string media_path;
   double start = 0;
   double duration = 0;
@@ -17,6 +18,8 @@ struct Clip {
   std::string kind;
   double speed = 1;
   bool reverse = false;
+  bool has_freeze = false;
+  double freeze = 0;
   double x = 0;
   double y = 0;
   double scale_x = 1;

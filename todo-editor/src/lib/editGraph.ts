@@ -38,6 +38,7 @@ export type EditGraphMask = {
 }
 
 export type EditGraphClip = {
+  id?: string
   mediaPath: string
   start: number
   duration: number
@@ -48,6 +49,8 @@ export type EditGraphClip = {
   kind?: string
   speed?: number
   reverse?: boolean
+  /** 定格源媒体时间（秒）；字段存在即生效，可为 0 */
+  freeze?: number
   /** 静态变换（无关键帧或关键帧兜底）；坐标与监视器一致：中心归一化、角度° */
   x?: number
   y?: number
@@ -100,6 +103,7 @@ export type EditGraph = {
 }
 
 type ClipIn = {
+  id?: string
   mediaId?: string
   start: number
   duration: number
@@ -109,6 +113,7 @@ type ClipIn = {
   enabled?: boolean
   speed?: number
   reverse?: boolean
+  freeze?: number
   transform?: {
     x: number; y: number; scaleX: number; scaleY: number; rotation: number; opacity: number
     cropL?: number; cropR?: number; cropT?: number; cropB?: number
@@ -172,6 +177,7 @@ export function buildEditGraph(input: {
         })
       const kind = c.text ? 'text' : (m?.kind || undefined)
       return {
+        ...(c.id ? { id: c.id } : {}),
         mediaPath: m?.path || '',
         start: c.start,
         duration: c.duration,
@@ -182,6 +188,7 @@ export function buildEditGraph(input: {
         kind,
         speed: c.speed ?? 1,
         reverse: !!c.reverse,
+        ...(c.freeze !== undefined ? { freeze: c.freeze } : {}),
         x: tr?.x ?? 0,
         y: tr?.y ?? 0,
         scaleX: tr?.scaleX ?? 1,

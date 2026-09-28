@@ -4,6 +4,7 @@
 
 #ifdef _WIN32
 int todo_cmd_kf_eval_stdin();
+int todo_cmd_timemap_eval_stdin();
 #endif
 
 #include <cmath>
@@ -359,11 +360,14 @@ int wmain(int argc, wchar_t **argv) {
   if (argc < 2) {
     return fail_json(
       "INVALID_ARGUMENT",
-      "usage: todo-media-engine probe|frame|export|compose|kf-eval|play-smoke|play-session ...");
+      "usage: todo-media-engine probe|frame|export|compose|kf-eval|timemap-eval|play-smoke|play-session ...");
   }
   const std::wstring cmd = argv[1];
   if (cmd == L"kf-eval") {
     return todo_cmd_kf_eval_stdin();
+  }
+  if (cmd == L"timemap-eval") {
+    return todo_cmd_timemap_eval_stdin();
   }
   if (cmd == L"probe") {
     if (argc < 3) return fail_json("INVALID_ARGUMENT", "probe requires file");
