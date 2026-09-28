@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "clips": [
+    {
+      "mediaPath": "tests/media/4k.mp4",
+      "start": 0,
+      "duration": 4,
+      "inPoint": 0,
+      "outPoint": 4,
+      "trackId": "v1",
+      "enabled": true,
+      "kind": "video",
+      "speed": 1,
+      "reverse": false,
+      "x": 0,
+      "y": 0,
+      "scaleX": 1,
+      "scaleY": 1,
+      "rotation": 0,
+      "opacity": 1,
+      "cropL": 0,
+      "cropR": 0,
+      "cropT": 0,
+      "cropB": 0,
+      "exposure": 0,
+      "contrast": 0,
+      "saturation": 0,
+      "temperature": 0,
+      "tint": 0,
+      "blend": "normal"
+    }
+  ],
+  "tracks": [
+    {
+      "id": "v1",
+      "kind": "video",
+      "muted": false
+    }
+  ],
+  "settings": {
+    "width": 853,
+    "height": 401,
+    "fps": 30
+  },
+  "workIn": 0,
+  "workOut": 4
+}

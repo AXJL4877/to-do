@@ -2,6 +2,7 @@
 #include "todo_engine.h"
 #include "todo_export.h"
 
+
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -355,7 +356,7 @@ int wmain(int argc, wchar_t **argv) {
   if (argc < 2) {
     return fail_json(
       "INVALID_ARGUMENT",
-      "usage: todo-media-engine probe <file> [timeoutMs] | frame <file> <timeSec> <out.ppm> [timeoutMs] | export <editGraph.json> <out.mp4> | compose <editGraph.json> <timeSec> <out.bmp> | play-smoke <file> <seconds> [timeoutMs] | play-session [timeoutMs]");
+      "usage: todo-media-engine probe|frame|export|compose|kf-eval|play-smoke|play-session ...");
   }
   const std::wstring cmd = argv[1];
   if (cmd == L"probe") {

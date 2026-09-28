@@ -21,15 +21,23 @@ if (!sdk) throw new Error('找不到 FFmpeg 开发 SDK：运行 npm run native:s
 
 const out = resolve(root, 'native/bin')
 const include = resolve(root, 'native/engine/include')
+const sharedDir = resolve(root, 'native/shared')
 const engineSrc = resolve(root, 'native/engine/src/todo_engine.cpp')
 const cliSrc = resolve(root, 'native/engine/src/todo_media_cli.cpp')
 const exportSrc = resolve(root, 'native/engine/src/todo_export.cpp')
+const sharedSrcs = [
+  resolve(sharedDir, 'editgraph.cpp'),
+  resolve(sharedDir, 'timemap.cpp'),
+  resolve(sharedDir, 'keyframes.cpp'),
+  resolve(sharedDir, 'layers.cpp'),
+]
 const legacyProbe = resolve(root, 'native/media_probe.c')
 mkdirSync(out, { recursive: true })
 
 const common = [
   '-O2', '-Wall', '-Wextra',
   `-I${include}`,
+  `-I${sharedDir}`,
   `-I${resolve(sdk, 'include')}`,
   `-L${resolve(sdk, 'lib')}`,
 ]
@@ -39,7 +47,7 @@ const ffmpegLibs = ['-lavformat', '-lavcodec', '-lavutil', '-lswscale', '-lswres
 console.log('编译 C++ 媒体引擎…')
 execFileSync(cxx, [
   ...common, '-std=c++17', '-municode',
-  engineSrc, cliSrc, exportSrc,
+  engineSrc, cliSrc, exportSrc, ...sharedSrcs,
   ...ffmpegLibs, '-lwinmm', '-ld3d11', '-ldxgi', '-ld3dcompiler', '-lgdi32',
   '-o', resolve(out, 'todo-media-engine.exe'),
 ], { stdio: 'inherit', timeout: 180000 })

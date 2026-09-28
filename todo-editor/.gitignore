@@ -16,6 +16,13 @@ dist-ssr
 *.local
 .data
 
+# B1 golden / test media（大文件本地生成，只提交 hashes + fixtures）
+tests/media/*.mp4
+tests/media/*.png
+tests/media/*.ttf
+tests/media/alpha_seq/
+tests/golden/out/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

@@ -1,0 +1,47 @@
+{
+  "generatedAt": "2026-09-28T02:04:34.409Z",
+  "ffmpeg": "D:\\desktop\\to_do\\todo-editor\\native\\bin\\ffmpeg.exe",
+  "font": "C:/Windows/Fonts/arial.ttf",
+  "files": {
+    "gop250.mp4": {
+      "sha256": "f3f1754be413f3cf0ad041be820f4f69841c16be071f773b4cf1c5b8040ea28e",
+      "bytes": 7172797
+    },
+    "intra.mp4": {
+      "sha256": "07e8f95eb8650109acdd07dae723590a5d44cc330e050c714ff29209676ca12c",
+      "bytes": 14196231
+    },
+    "4k.mp4": {
+      "sha256": "7a8675f86b169de86278cae7059c47c7b1546f22fd1103b82626fde0012415fb",
+      "bytes": 13223728
+    },
+    "alpha_circle.png": {
+      "sha256": "474510ab0346bc588f0c0a6929984be17fbecc04d58e84d2fa8608be1e024395",
+      "bytes": 2895
+    },
+    "alpha_checker.png": {
+      "sha256": "03d44f1e0411b0920759ce603dc1cef7c1206486cc70919f7c6ebf856e58f781",
+      "bytes": 2001
+    },
+    "alpha_seq/frame_000.png": {
+      "sha256": "ddde35a3070d7a66713ec32db0b5e7eb54608ca9e6c36bd8faac5cf8a3f39516",
+      "bytes": 1798
+    },
+    "alpha_seq/frame_001.png": {
+      "sha256": "15bf65ed3a3a4ebee6e813d9c35c5c0c382404716bf7dab24da1831811797b44",
+      "bytes": 1795
+    },
+    "alpha_seq/frame_002.png": {
+      "sha256": "5d02a55840bef74895ed5ccd5720bd0f34eae9be74427313d3783bc5c45d8c0c",
+      "bytes": 1795
+    },
+    "alpha_seq/frame_003.png": {
+      "sha256": "3c459f851b34ddd3a74db27177c87a345b6cc07db9fa1e6286c8c07334eae92f",
+      "bytes": 1796
+    },
+    "alpha_seq/frame_004.png": {
+      "sha256": "0f17381b856f7726d907520639e644f9f8ba584f30028808f8469e564b75aee9",
+      "bytes": 1796
+    }
+  }
+}
