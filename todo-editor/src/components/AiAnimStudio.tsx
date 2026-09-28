@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Clapperboard, Film, Grid3x3, ImageOff, Layers, Loader2, Scissors, Square, X } from 'lucide-react'
+import { Clapperboard, Film, ImageOff, Loader2, Scissors, Square, X } from 'lucide-react'
 import clsx from 'clsx'
 import type { StyleInput } from './AiStyleForm'
 
@@ -14,21 +14,18 @@ export type AnimPack = {
   previews: string[]
   outputs: string[]
   inputs: StyleInput[]
-  keyframes: { modes: ('sheet' | 'sequence')[]; defaultMode: 'sheet' | 'sequence'; counts: number[]; defaultCount: number; align: string }
+  sprite: { grid: number; frames: number; align: string }
   playback: { fps: number[]; defaultFps: number; loops: ('forward' | 'pingpong')[]; defaultLoop: 'forward' | 'pingpong'; maxRepeat: number }
-  image: { models: string[]; aspectRatios: string[]; defaultAspectRatio: string; resolutions: string[]; defaultResolution: string }
+  image: { models: string[]; resolutions: string[]; defaultResolution: string }
   cutout: { default: boolean; lockInputs: Record<string, string> } | null
 }
 
 export type AnimValues = {
   inputs: Record<string, string>
-  mode: 'sheet' | 'sequence'
-  frames: number
   beats: string[]
   fps: number
   loop: 'forward' | 'pingpong'
   repeat: number
-  aspectRatio: string
   resolution: string
   model: string
   alpha: boolean
@@ -39,27 +36,22 @@ export function defaultAnimValues(pack: AnimPack): AnimValues {
   for (const inp of pack.inputs) inputs[inp.id] = inp.type === 'select' ? inp.default : ''
   return {
     inputs,
-    mode: pack.keyframes.defaultMode,
-    frames: pack.keyframes.defaultCount,
-    beats: Array(pack.keyframes.defaultCount).fill(''),
+    beats: Array(pack.sprite.grid).fill(''),
     fps: pack.playback.defaultFps,
     loop: pack.playback.defaultLoop,
     repeat: 1,
-    aspectRatio: pack.image.defaultAspectRatio,
     resolution: pack.image.defaultResolution,
     model: pack.image.models[0],
     alpha: pack.cutout?.default ?? false,
   }
 }
 
-function playFrames(v: AnimValues) {
-  const one = v.loop === 'pingpong' && v.frames > 2 ? v.frames * 2 - 2 : v.frames
+function playFrames(v: AnimValues, frames: number) {
+  const one = v.loop === 'pingpong' && frames > 2 ? frames * 2 - 2 : frames
   return one * v.repeat
 }
 
-const SHEET_GRID: Record<number, string> = { 4: '2×2', 6: '3×2', 8: '4×2', 9: '3×3', 12: '4×3' }
-
-/** 风格动画弹窗：左侧动画包，右侧关键帧规划 + 输出设置，直接入队 */
+/** 风格动画弹窗：左侧动画包，右侧精灵图分镜 + 输出设置，直接入队 */
 export function AiAnimStudio({ anims, hasRef, onSubmit, onClose }: {
   anims: AnimPack[]
   hasRef: boolean
@@ -98,11 +90,9 @@ export function AiAnimStudio({ anims, hasRef, onSubmit, onClose }: {
   }
 
   const set = (patch: Partial<AnimValues>) => value && setValue({ ...value, ...patch })
-  const setFrames = (n: number) => value && setValue({
-    ...value, frames: n, beats: Array.from({ length: n }, (_, i) => value.beats[i] ?? ''),
-  })
   const locked = value?.alpha && pack?.cutout ? pack.cutout.lockInputs : {}
-  const calls = value ? (value.mode === 'sheet' ? 1 : value.frames) : 0
+  const grid = pack?.sprite.grid ?? 5
+  const frames = grid * grid
 
   return createPortal(
     <div className="modal-backdrop" data-testid="ai-anim-studio" onClick={onClose}>
@@ -199,59 +189,40 @@ export function AiAnimStudio({ anims, hasRef, onSubmit, onClose }: {
               </section>
 
               <section className="flex flex-col gap-2.5">
-                <span className="eyebrow">关键帧规划</span>
-                {pack.keyframes.modes.length > 1 && (
-                  <div className="field">
-                    <label>生成方式</label>
-                    <div className="tab-row" data-testid="ai-anim-mode">
-                      <button type="button" className={clsx('tab flex-1', value.mode === 'sheet' && 'active')} data-testid="ai-anim-mode-sheet" onClick={() => set({ mode: 'sheet' })}>
-                        <Grid3x3 size={11} className="inline mr-1" />拼图一次出
-                      </button>
-                      <button type="button" className={clsx('tab flex-1', value.mode === 'sequence' && 'active')} data-testid="ai-anim-mode-sequence" onClick={() => set({ mode: 'sequence' })}>
-                        <Layers size={11} className="inline mr-1" />逐帧生成
-                      </button>
-                    </div>
-                    <span className="text-[10px] px-0.5" style={{ color: 'var(--text-muted)' }}>
-                      {value.mode === 'sheet'
-                        ? `一张 ${SHEET_GRID[value.frames]} 关键帧拼图后自动切格，角色最一致、最省（1 次生图）`
-                        : `首帧定角色，其余帧以首帧为参考逐张重绘，画幅可选（${value.frames} 次生图）`}
-                    </span>
+                <span className="eyebrow">精灵图</span>
+                <div className="flex items-center gap-3" data-testid="ai-anim-sprite">
+                  <div
+                    className="shrink-0 grid gap-[2px] p-1 rounded"
+                    style={{ gridTemplateColumns: `repeat(${grid}, 1fr)`, width: 64, height: 64, background: 'var(--surface-2)' }}
+                    aria-hidden
+                  >
+                    {Array.from({ length: frames }, (_, i) => (
+                      <span key={i} style={{ background: 'var(--accent-dim)', borderRadius: 1 }} />
+                    ))}
                   </div>
-                )}
-                <div className="grid grid-cols-2 gap-2">
+                  <span className="text-[11px] leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+                    一次生成 {grid}×{grid} 角色精灵图，自动切成 {frames} 帧序列帧再拼成动画；角色一致，只需 1 次生图
+                  </span>
+                </div>
+                {pack.image.resolutions.length > 1 && (
                   <div className="field">
-                    <label>关键帧数</label>
-                    <select data-testid="ai-anim-frames" value={value.frames} onChange={(e) => setFrames(Number(e.target.value))}>
-                      {pack.keyframes.counts.map((n) => <option key={n} value={n}>{n} 帧</option>)}
+                    <label>精灵图分辨率</label>
+                    <select data-testid="ai-anim-resolution" value={value.resolution} onChange={(e) => set({ resolution: e.target.value })}>
+                      {pack.image.resolutions.map((r) => <option key={r} value={r}>{r}</option>)}
                     </select>
                   </div>
-                  {value.mode === 'sequence' ? (
-                    <div className="field">
-                      <label>画幅</label>
-                      <select data-testid="ai-anim-aspect" value={value.aspectRatio} onChange={(e) => set({ aspectRatio: e.target.value })}>
-                        {pack.image.aspectRatios.map((a) => <option key={a} value={a}>{a}</option>)}
-                      </select>
-                    </div>
-                  ) : (
-                    <div className="field">
-                      <label>分辨率</label>
-                      <select data-testid="ai-anim-resolution" value={value.resolution} onChange={(e) => set({ resolution: e.target.value })}>
-                        {pack.image.resolutions.map((r) => <option key={r} value={r}>{r}</option>)}
-                      </select>
-                    </div>
-                  )}
-                </div>
+                )}
                 <div className="field">
-                  <label>分镜（可选 · 留空自动均分动作）</label>
+                  <label>分镜（可选 · 每行 {grid} 帧一个阶段，留空自动均分动作）</label>
                   <div className="flex flex-col gap-1" data-testid="ai-anim-beats">
                     {value.beats.map((b, i) => (
                       <div key={i} className="flex items-center gap-1.5">
-                        <span className="shrink-0 w-5 text-[10px] text-right tabular-nums" style={{ color: 'var(--text-muted)' }}>{i + 1}</span>
+                        <span className="shrink-0 w-12 text-[10px] text-right tabular-nums" style={{ color: 'var(--text-muted)' }}>第 {i + 1} 行</span>
                         <input
                           className="flex-1"
                           data-testid={`ai-anim-beat-${i}`}
                           maxLength={80}
-                          placeholder={i === 0 ? '起始姿势，如：站立，手伸向桌上的杯子' : i === value.beats.length - 1 ? '结束姿势' : '中间姿势'}
+                          placeholder={i === 0 ? '起始阶段，如：站立，手伸向桌上的杯子' : i === value.beats.length - 1 ? '结束阶段' : '中间阶段'}
                           value={b}
                           onChange={(e) => set({ beats: value.beats.map((x, j) => (j === i ? e.target.value : x)) })}
                         />
@@ -282,14 +253,6 @@ export function AiAnimStudio({ anims, hasRef, onSubmit, onClose }: {
                       {Array.from({ length: pack.playback.maxRepeat }, (_, i) => i + 1).map((r) => <option key={r} value={r}>{r} 次</option>)}
                     </select>
                   </div>
-                  {value.mode === 'sequence' && pack.image.resolutions.length > 1 && (
-                    <div className="field">
-                      <label>分辨率</label>
-                      <select data-testid="ai-anim-resolution" value={value.resolution} onChange={(e) => set({ resolution: e.target.value })}>
-                        {pack.image.resolutions.map((r) => <option key={r} value={r}>{r}</option>)}
-                      </select>
-                    </div>
-                  )}
                 </div>
                 {pack.cutout && (
                   <div className="field">
@@ -317,7 +280,7 @@ export function AiAnimStudio({ anims, hasRef, onSubmit, onClose }: {
         <div className="px-4 py-3 border-t flex items-center gap-3" style={{ borderColor: 'var(--border)' }}>
           {value && (
             <span className="text-[11px]" style={{ color: 'var(--text-muted)' }} data-testid="ai-anim-summary">
-              {value.frames} 关键帧 · {calls} 次生图 · 成片 {(playFrames(value) / value.fps).toFixed(1)} 秒 · {value.alpha ? '透明' : '不透明'}
+              {grid}×{grid} 精灵图 · {frames} 帧 · 1 次生图 · 成片 {(playFrames(value, frames) / value.fps).toFixed(1)} 秒 · {value.alpha ? '透明' : '不透明'}
             </span>
           )}
           <button type="button" className="btn btn-ghost ml-auto" onClick={onClose}>取消</button>

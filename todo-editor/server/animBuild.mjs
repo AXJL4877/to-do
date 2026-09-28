@@ -1,5 +1,5 @@
 /**
- * 关键帧 → 动画：拼图切格、逐帧抠像、地平线对齐、统一裁边、ffmpeg 合成。
+ * 精灵图 → 动画：自适应切格、逐帧抠像、地平线对齐、统一裁边、ffmpeg 合成。
  * 透明通道输出 WebM(VP9 yuva420p)，否则 MP4(H.264)。帧均为 RGBA { width, height, data }。
  */
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
@@ -38,6 +38,82 @@ export function sliceGrid(img, cols, rows, inset = 0.03) {
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       cells.push(crop(img, c * cw + ix, r * ch + iy, cw - ix * 2, ch - iy * 2))
+    }
+  }
+  return cells
+}
+
+/** 整图边框像素的中位色，作为背景色估计 */
+function borderColor(img) {
+  const { width: w, height: h, data: d } = img
+  const ch = [[], [], []]
+  const push = (x, y) => { const i = (y * w + x) * 4; ch[0].push(d[i]); ch[1].push(d[i + 1]); ch[2].push(d[i + 2]) }
+  const sx = Math.max(1, Math.floor(w / 200))
+  const sy = Math.max(1, Math.floor(h / 200))
+  for (let x = 0; x < w; x += sx) { push(x, 0); push(x, h - 1) }
+  for (let y = 0; y < h; y += sy) { push(0, y); push(w - 1, y) }
+  return ch.map((a) => a.sort((p, q) => p - q)[a.length >> 1])
+}
+
+/** 沿某轴的"墨量"投影：每列（axis='x'）或每行（'y'）偏离背景色的像素数 */
+function inkProfile(img, bg, axis) {
+  const { width: w, height: h, data: d } = img
+  const prof = new Uint32Array(axis === 'x' ? w : h)
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4
+      const diff = Math.max(Math.abs(d[i] - bg[0]), Math.abs(d[i + 1] - bg[1]), Math.abs(d[i + 2] - bg[2]))
+      if (diff > 40) prof[axis === 'x' ? x : y]++
+    }
+  }
+  return prof
+}
+
+/** 在每条理论切线 ±window 内找墨量最少的连续段，切在段中点；多段取中点最靠近理论位置者 */
+function findCuts(prof, n, window = 0.3) {
+  const len = prof.length
+  const step = len / n
+  const cuts = [0]
+  for (let k = 1; k < n; k++) {
+    const ideal = Math.round(k * step)
+    const r = Math.round(step * window)
+    const lo = Math.max(1, ideal - r)
+    const hi = Math.min(len - 2, ideal + r)
+    let min = Infinity
+    for (let p = lo; p <= hi; p++) min = Math.min(min, prof[p])
+    const tol = min + Math.max(1, Math.round(min * 0.05))
+    let best = ideal
+    let bestDist = Infinity
+    for (let p = lo; p <= hi; p++) {
+      if (prof[p] > tol) continue
+      let q = p
+      while (q + 1 <= hi && prof[q + 1] <= tol) q++
+      const mid = (p + q) >> 1
+      if (Math.abs(mid - ideal) < bestDist) { best = mid; bestDist = Math.abs(mid - ideal) }
+      p = q
+    }
+    cuts.push(best)
+  }
+  cuts.push(len)
+  return cuts
+}
+
+/**
+ * 精灵图切格：按格间空白自适应找切线（模型画的网格常不均匀），找不到空白时退化为等分。
+ * inset 为每格四周内缩比例。
+ */
+export function sliceSprite(img, cols, rows, inset = 0.01) {
+  const bg = borderColor(img)
+  const xs = findCuts(inkProfile(img, bg, 'x'), cols)
+  const ys = findCuts(inkProfile(img, bg, 'y'), rows)
+  const cells = []
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const w = xs[c + 1] - xs[c]
+      const h = ys[r + 1] - ys[r]
+      const ix = Math.round(w * inset)
+      const iy = Math.round(h * inset)
+      cells.push(crop(img, xs[c] + ix, ys[r] + iy, w - ix * 2, h - iy * 2))
     }
   }
   return cells
@@ -82,15 +158,15 @@ export function contentBox(img, alpha, threshold = 0.1) {
 }
 
 /**
- * 关键帧 → 统一尺寸、对齐、（可选）抠像后的帧。
+ * 序列帧 → 统一尺寸、对齐、（可选）抠像后的帧。
  * @param {{ width:number, height:number, data:Buffer }[]} frames
  * @param {{ cutout: { method: string, threshold: number } | null, align: 'none'|'baseline' }} opts
  */
 export function normalizeFrames(frames, { cutout, align }) {
   const alpha = !!cutout
   const bg = alpha ? null : [255, 255, 255]
-  const W = frames[0].width
-  const H = frames[0].height
+  const W = Math.max(...frames.map((f) => f.width))
+  const H = Math.max(...frames.map((f) => f.height))
   let out = frames.map((f) => {
     const g = { width: f.width, height: f.height, data: Buffer.from(f.data) }
     if (alpha) applyCutout(g, cutout.method, cutout.threshold)

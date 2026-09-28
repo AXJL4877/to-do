@@ -182,6 +182,8 @@ function capture(s: Slot): boolean {
   }
   const ctx = sheet.getContext('2d')
   if (!ctx) return false
+  // 透明视频（WebM alpha）不会覆盖上一帧，不清会叠出残影
+  ctx.clearRect(0, 0, dw, dh)
   ctx.drawImage(v, 0, 0, dw, dh)
   return sheet.width > 0
 }

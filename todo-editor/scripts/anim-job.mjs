@@ -5,8 +5,8 @@
  *   node scripts/anim-job.mjs list
  *   node scripts/anim-job.mjs start --anim builtin.doodle-figure \
  *        --set character="圆脑袋火柴小人" --set action="拿起水杯喝水再放下" \
- *        [--mode sheet|sequence] [--frames 6] [--beat "伸手拿杯" --beat ...] \
- *        [--fps 6] [--loop forward|pingpong] [--repeat 1] [--aspect 1:1] [--resolution 2K] \
+ *        [--beat "第 1 行：伸手拿杯" --beat ...（每行一条，最多 N 条）] \
+ *        [--fps 12] [--loop forward|pingpong] [--repeat 1] [--resolution 2K] \
  *        [--alpha | --no-alpha] [--ref 角色参考.png]
  *   node scripts/anim-job.mjs status <jobId>
  *   node scripts/anim-job.mjs fetch <jobId> --out <目录> [--wait] [--timeout 900]
@@ -63,7 +63,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 try {
   if (cmd === 'list') {
     const r = await api('GET', '/api/ai-anims')
-    print({ ok: !!r.ok, anims: (r.anims || []).map((a) => ({ id: a.id, name: a.name, inputs: a.inputs, keyframes: a.keyframes, playback: a.playback, alpha: !!a.cutout })), errors: r.errors || [] })
+    print({ ok: !!r.ok, anims: (r.anims || []).map((a) => ({ id: a.id, name: a.name, inputs: a.inputs, sprite: a.sprite, playback: a.playback, alpha: !!a.cutout })), errors: r.errors || [] })
   }
 
   if (cmd === 'start') {
@@ -82,13 +82,10 @@ try {
       kind: 'anim',
       animId,
       animInputs: inputs,
-      mode: one('mode'),
-      frames: num('frames'),
       beats: beats.length ? beats : undefined,
       fps: num('fps'),
       loop: one('loop'),
       repeat: num('repeat'),
-      size: one('aspect'),
       quality: one('resolution'),
       alpha,
       imageDataUrl: ref ? `data:image/png;base64,${readFileSync(ref).toString('base64')}` : undefined,

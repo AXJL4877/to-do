@@ -219,6 +219,7 @@ function publishPresented(source: HTMLCanvasElement, frame: number) {
   }
   const ctx = lastPresented.getContext('2d')
   if (!ctx) return
+  ctx.clearRect(0, 0, lastPresented.width, lastPresented.height)
   ctx.drawImage(source, 0, 0)
   lastPresentedFrame = frame
 }
@@ -245,6 +246,8 @@ export function putCachedFrame(
     releaseSheet(sheet)
     return
   }
+  // 画布来自复用池，残留旧帧
+  ctx.clearRect(0, 0, cache.cacheW, cache.cacheH)
   ctx.drawImage(source, 0, 0, cache.cacheW, cache.cacheH)
   cache.frames.set(frame, sheet)
   cache.bytes += bytes
@@ -357,6 +360,7 @@ export function presentCachedProgramFrame(
     const sheet = scratchCanvas(cw, ch)
     const sctx = sheet.getContext('2d')
     if (sctx) {
+      sctx.clearRect(0, 0, cw, ch)
       sctx.drawImage(compose, 0, 0, cw, ch)
       putCachedFrame(cache, frame, sheet, frame)
     }

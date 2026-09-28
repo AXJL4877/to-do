@@ -14,8 +14,8 @@ import {
 import { readAiConfig } from './huniuConfig.mjs'
 import { compileStyleById } from './stylePacks.mjs'
 import { cutoutFile, decodeImage, encodePng } from './imageCutout.mjs'
-import { compileAnimById, framePrompt, sheetPrompt } from './animPacks.mjs'
-import { normalizeFrames, resolveFfmpeg, sliceGrid, writeAnimation } from './animBuild.mjs'
+import { compileAnimById, spritePrompt } from './animPacks.mjs'
+import { normalizeFrames, resolveFfmpeg, sliceSprite, writeAnimation } from './animBuild.mjs'
 import { H3_QUALITIES, ensureH3, h3Download, h3Generate, h3UploadImage } from './h3Client.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -207,12 +207,9 @@ function enqueueAnimJob(body) {
   if (!body.animId) throw new Error('缺少 animId')
   const plan = compileAnimById(body.animId, {
     inputs: body.animInputs,
-    mode: body.mode,
-    frames: body.frames,
     fps: body.fps,
     loop: body.loop,
     repeat: body.repeat,
-    aspectRatio: body.size,
     resolution: body.quality,
     model: body.model,
     alpha: body.alpha,
@@ -409,7 +406,7 @@ async function generateImage(config, plan, prompt, imageDataUrl, outPath) {
 }
 
 /**
- * 风格动画：拼图模式 1 次生图后切格；逐帧模式首帧文生图（或参考图），其余帧以首帧为参考图生图。
+ * 风格动画：1 次生成 N×N 角色精灵图，自适应切格成序列帧，再抠像 / 对齐 / 合成。
  * 产物：<id>.webm|mp4、<id>_fNN.png、拼图 <id>_sheet.png、清单 <id>.json（todo-anim-output/1）。
  */
 async function runAnimJob(job) {
@@ -420,29 +417,27 @@ async function runAnimJob(job) {
   const refUrl = row?.ref_path && existsSync(row.ref_path) ? fileToDataUrl(row.ref_path) : ''
   const n = plan.frames
 
-  let keyframes
-  let sheetName = null
-  if (plan.mode === 'sheet') {
-    setPhase.run(`生成关键帧拼图（${n} 帧）…`, Date.now(), job.id)
-    const sheetPath = path.join(AI_OUT, `${job.id}_sheet_raw`)
-    const sheet = await generateImage(config, plan, sheetPrompt(plan, { hasRef: !!refUrl }), refUrl, sheetPath)
-    sheetName = `${job.id}_sheet.png`
-    writeFileSync(path.join(AI_OUT, sheetName), encodePng(sheet))
-    keyframes = sliceGrid(sheet, plan.grid.cols, plan.grid.rows)
-  } else {
-    keyframes = []
-    let anchorUrl = refUrl
-    for (let i = 0; i < n; i++) {
-      setPhase.run(`关键帧 ${i + 1}/${n}…`, Date.now(), job.id)
-      const fromRef = !!anchorUrl
-      const out = path.join(AI_OUT, `${job.id}_k${i + 1}_raw`)
-      keyframes.push(await generateImage(config, plan, framePrompt(plan, i, { fromRef }), anchorUrl, out))
-      if (!anchorUrl) anchorUrl = fileToDataUrl(out)
+  const { cols, rows } = plan.grid
+  setPhase.run(`生成 ${cols}×${rows} 精灵图（${n} 帧）…`, Date.now(), job.id)
+  const sheetPath = path.join(AI_OUT, `${job.id}_sheet_raw`)
+  let sheet
+  for (let attempt = 0; ; attempt++) {
+    try {
+      sheet = await generateImage(config, plan, spritePrompt(plan, { hasRef: !!refUrl }), refUrl, sheetPath)
+      break
+    } catch (e) {
+      if (attempt >= AUTO_RETRIES || !TRANSIENT_RE.test(String(e))) throw e
+      const wait = 2000 * (attempt + 1)
+      setPhase.run(`网络波动，${wait / 1000}s 后自动重试（${attempt + 1}/${AUTO_RETRIES}）`, Date.now(), job.id)
+      await new Promise((r) => setTimeout(r, wait))
     }
   }
+  const sheetName = `${job.id}_sheet.png`
+  writeFileSync(path.join(AI_OUT, sheetName), encodePng(sheet))
 
-  setPhase.run(plan.cutout ? '逐帧抠像 · 对齐…' : '对齐关键帧…', Date.now(), job.id)
-  const frames = normalizeFrames(keyframes, { cutout: plan.cutout, align: plan.align })
+  setPhase.run(plan.cutout ? `切成 ${n} 帧 · 抠像 · 对齐…` : `切成 ${n} 帧 · 对齐…`, Date.now(), job.id)
+  const cells = sliceSprite(sheet, cols, rows)
+  const frames = normalizeFrames(cells, { cutout: plan.cutout, align: plan.align })
   setPhase.run(plan.cutout ? '合成透明动画…' : '合成动画…', Date.now(), job.id)
   const built = await writeAnimation(frames, {
     outDir: AI_OUT, id: job.id, fps: plan.fps, loop: plan.loop, repeat: plan.repeat, alpha: !!plan.cutout,
@@ -454,7 +449,7 @@ async function runAnimJob(job) {
     jobId: job.id,
     anim: { id: plan.meta.id, version: plan.meta.version, name: plan.meta.name },
     alpha: !!plan.cutout,
-    mode: plan.mode,
+    grid: plan.grid,
     fps: plan.fps,
     loop: plan.loop,
     repeat: plan.repeat,
@@ -465,7 +460,7 @@ async function runAnimJob(job) {
     height: built.height,
     video: url(built.video),
     frames: built.frames.map(url),
-    sheet: sheetName ? url(sheetName) : null,
+    sheet: url(sheetName),
     manifest: url(`${job.id}.json`),
   }
   writeFileSync(path.join(AI_OUT, `${job.id}.json`), JSON.stringify(output, null, 2))

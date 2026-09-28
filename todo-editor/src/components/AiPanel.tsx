@@ -252,13 +252,10 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
           kind: 'anim',
           animId: pack.id,
           animInputs: v.inputs,
-          mode: v.mode,
-          frames: v.frames,
           beats: v.beats,
           fps: v.fps,
           loop: v.loop,
           repeat: v.repeat,
-          size: v.aspectRatio,
           quality: v.resolution,
           model: v.model,
           alpha: v.alpha,
@@ -629,7 +626,7 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
             <span className="min-w-0 flex-1 flex flex-col">
               <span className="text-[12px] font-semibold truncate">打开风格动画</span>
               <span className="text-[10px] truncate" style={{ color: 'var(--text-muted)' }}>
-                {anims.length ? `关键帧 → 自动拼成动画 · ${anims.length} 个动画包` : '没有可用的动画包'}
+                {anims.length ? `5×5 精灵图 → 序列帧动画 · ${anims.length} 个动画包` : '没有可用的动画包'}
               </span>
             </span>
             <LayoutGrid size={14} className="shrink-0 mr-1" style={{ color: 'var(--text-muted)' }} />

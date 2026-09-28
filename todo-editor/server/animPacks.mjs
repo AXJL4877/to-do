@@ -1,6 +1,7 @@
 /**
- * 风格动画包（Anim Pack）加载 / 严格校验 / 编译成关键帧生成计划。
- * 规范：todo-anim-pack/1 —— 纯数据；关键帧提示词 = 包模板 + 受限输入 + 代码内置的分镜包装。
+ * 风格动画包（Anim Pack）加载 / 严格校验 / 编译成精灵图生成计划。
+ * 规范：todo-anim-pack/2 —— 纯数据；一次生成 N×N 角色精灵图（默认 5×5 = 25 帧），切格后拼成序列帧动画。
+ * 精灵图提示词 = 包模板 + 受限输入 + 代码内置的网格 / 分行分镜包装。
  *
  * 目录：server/anims/<name>/anim.json（内置）、$TODO_DATA_DIR/anims/<name>/anim.json（用户，同 id 覆盖内置）
  */
@@ -8,11 +9,11 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
-  ASPECT_RATIOS, ID_RE, PLACEHOLDER_RE, PackError, RESOLUTIONS, SEMVER_RE,
+  ID_RE, PLACEHOLDER_RE, PackError, RESOLUTIONS, SEMVER_RE,
   checkPackImage, cleanText, fail, onlyKeys, str, strList, validateCutoutCore, validateInput,
 } from './stylePacks.mjs'
 
-export const ANIM_SPEC = 'todo-anim-pack/1'
+export const ANIM_SPEC = 'todo-anim-pack/2'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const DATA_DIR = process.env.TODO_DATA_DIR
@@ -22,18 +23,10 @@ const DATA_DIR = process.env.TODO_DATA_DIR
 export const BUILTIN_ANIM_DIR = path.join(ROOT, 'server', 'anims')
 export const USER_ANIM_DIR = path.join(DATA_DIR, 'anims')
 
-export const KEYFRAME_MODES = ['sheet', 'sequence']
 export const LOOP_MODES = ['forward', 'pingpong']
 const ALIGN_MODES = ['none', 'baseline']
-/** 关键帧数 → 拼图网格 [列, 行] 与整张拼图画幅 */
-export const SHEET_GRIDS = {
-  4: { cols: 2, rows: 2, aspect: '1:1' },
-  6: { cols: 3, rows: 2, aspect: '3:2' },
-  8: { cols: 4, rows: 2, aspect: '16:9' },
-  9: { cols: 3, rows: 3, aspect: '1:1' },
-  12: { cols: 4, rows: 3, aspect: '4:3' },
-}
-const FRAME_COUNTS = Object.keys(SHEET_GRIDS).map(Number)
+/** 精灵图边长（格）：N×N 方形网格，整张图 1:1 */
+export const SPRITE_GRIDS = [4, 5, 6]
 const PREVIEW_EXT = ['.png', '.jpg', '.jpeg', '.webp', '.gif']
 const BEAT_MAX = 80
 
@@ -54,7 +47,7 @@ function intList(v, where, { allowed, min, max }) {
 export function validateAnimPack(raw, packDir) {
   onlyKeys(raw, [
     '$schema', 'spec', 'id', 'name', 'version', 'author', 'description', 'tags',
-    'outputs', 'inputs', 'prompt', 'keyframes', 'playback', 'image', 'previews', 'cutout',
+    'outputs', 'inputs', 'prompt', 'sprite', 'playback', 'image', 'previews', 'cutout',
   ], 'anim.json')
   if (raw.spec !== ANIM_SPEC) fail('spec', `必须为 "${ANIM_SPEC}"`)
   if (!ID_RE.test(String(raw.id || ''))) fail('id', '须形如 author.anim-name（小写）')
@@ -82,13 +75,10 @@ export function validateAnimPack(raw, packDir) {
   if (/\{\{|\}\}/.test(template.replace(PLACEHOLDER_RE, ''))) fail('prompt.template', '存在不合法的花括号')
   strList(raw.prompt.avoid, 'prompt.avoid', { min: 0, max: 40 })
 
-  const k = raw.keyframes
-  onlyKeys(k, ['modes', 'defaultMode', 'counts', 'defaultCount', 'align'], 'keyframes')
-  strList(k.modes, 'keyframes.modes', { allowed: KEYFRAME_MODES })
-  if (!k.modes.includes(k.defaultMode)) fail('keyframes.defaultMode', '须在 modes 中')
-  intList(k.counts, 'keyframes.counts', { allowed: FRAME_COUNTS })
-  if (!k.counts.includes(k.defaultCount)) fail('keyframes.defaultCount', '须在 counts 中')
-  if (!ALIGN_MODES.includes(k.align)) fail('keyframes.align', `取值须为 ${ALIGN_MODES.join(' / ')}`)
+  const s = raw.sprite
+  onlyKeys(s, ['grid', 'align'], 'sprite')
+  if (!SPRITE_GRIDS.includes(s.grid)) fail('sprite.grid', `取值须为 ${SPRITE_GRIDS.join(' / ')}（N×N 格）`)
+  if (!ALIGN_MODES.includes(s.align)) fail('sprite.align', `取值须为 ${ALIGN_MODES.join(' / ')}`)
 
   const p = raw.playback
   onlyKeys(p, ['fps', 'defaultFps', 'loops', 'defaultLoop', 'maxRepeat'], 'playback')
@@ -98,10 +88,8 @@ export function validateAnimPack(raw, packDir) {
   if (!p.loops.includes(p.defaultLoop)) fail('playback.defaultLoop', '须在 loops 中')
   if (!Number.isInteger(p.maxRepeat) || p.maxRepeat < 1 || p.maxRepeat > 20) fail('playback.maxRepeat', '须为 1~20 的整数')
 
-  onlyKeys(raw.image, ['models', 'aspectRatios', 'defaultAspectRatio', 'resolutions', 'defaultResolution'], 'image')
+  onlyKeys(raw.image, ['models', 'resolutions', 'defaultResolution'], 'image')
   strList(raw.image.models, 'image.models', { max: 8 })
-  strList(raw.image.aspectRatios, 'image.aspectRatios', { allowed: ASPECT_RATIOS })
-  if (!raw.image.aspectRatios.includes(raw.image.defaultAspectRatio)) fail('image.defaultAspectRatio', '须在 aspectRatios 中')
   strList(raw.image.resolutions, 'image.resolutions', { allowed: RESOLUTIONS })
   if (!raw.image.resolutions.includes(raw.image.defaultResolution)) fail('image.defaultResolution', '须在 resolutions 中')
 
@@ -159,7 +147,7 @@ export function publicAnim({ pack }) {
     inputs: pack.inputs.map((x) => (x.type === 'select'
       ? { id: x.id, type: x.type, label: x.label, default: x.default, options: x.options.map((o) => ({ value: o.value, label: o.label })) }
       : { id: x.id, type: x.type, label: x.label, required: !!x.required, maxLength: x.maxLength, placeholder: x.placeholder || '' })),
-    keyframes: { ...pack.keyframes },
+    sprite: { ...pack.sprite, frames: pack.sprite.grid * pack.sprite.grid },
     playback: { ...pack.playback },
     image: { ...pack.image },
     cutout: pack.cutout ? { default: pack.cutout.default, lockInputs: pack.cutout.lockInputs || {} } : null,
@@ -184,8 +172,8 @@ function pick(value, allowed, fallback, what, packName) {
 }
 
 /**
- * 请求 → 关键帧生成计划。越界输入一律拒绝。
- * req: { inputs, mode, frames, fps, loop, repeat, aspectRatio, resolution, model, alpha, beats }
+ * 请求 → 精灵图生成计划。越界输入一律拒绝；网格由动画包固定。
+ * req: { inputs, fps, loop, repeat, resolution, model, alpha, beats（每行一条） }
  */
 export function compileAnimJob(entry, req) {
   const { pack } = entry
@@ -222,8 +210,8 @@ export function compileAnimJob(entry, req) {
     }
   }
 
-  const mode = pick(req.mode, pack.keyframes.modes, pack.keyframes.defaultMode, '关键帧模式', name)
-  const frames = pick(req.frames == null ? undefined : Number(req.frames), pack.keyframes.counts, pack.keyframes.defaultCount, '关键帧数', name)
+  const grid = pack.sprite.grid
+  const frames = grid * grid
   const fps = pick(req.fps == null ? undefined : Number(req.fps), pack.playback.fps, pack.playback.defaultFps, '帧率', name)
   const loop = pick(req.loop, pack.playback.loops, pack.playback.defaultLoop, '循环方式', name)
   const repeat = req.repeat == null ? 1 : Number(req.repeat)
@@ -232,16 +220,13 @@ export function compileAnimJob(entry, req) {
   }
   const resolution = pick(req.resolution, pack.image.resolutions, pack.image.defaultResolution, '分辨率', name)
   const model = pick(req.model, pack.image.models, pack.image.models[0], '模型', name)
-  // 拼图模式的画幅由网格决定；逐帧模式才用用户画幅
-  const aspectRatio = mode === 'sheet'
-    ? SHEET_GRIDS[frames].aspect
-    : pick(req.aspectRatio, pack.image.aspectRatios, pack.image.defaultAspectRatio, '画幅', name)
 
+  // 分镜按行：每行 grid 帧为动作的一个阶段
   const rawBeats = req.beats == null ? [] : req.beats
-  if (!Array.isArray(rawBeats) || rawBeats.length > frames) throw new Error(`分镜最多 ${frames} 条`)
-  const beats = Array.from({ length: frames }, (_, i) => {
+  if (!Array.isArray(rawBeats) || rawBeats.length > grid) throw new Error(`分镜最多 ${grid} 条（每行一条）`)
+  const beats = Array.from({ length: grid }, (_, i) => {
     const s = cleanText(rawBeats[i])
-    if (s.length > BEAT_MAX) throw new Error(`第 ${i + 1} 帧分镜最多 ${BEAT_MAX} 字`)
+    if (s.length > BEAT_MAX) throw new Error(`第 ${i + 1} 行分镜最多 ${BEAT_MAX} 字`)
     return s
   })
 
@@ -251,15 +236,14 @@ export function compileAnimJob(entry, req) {
 
   return {
     basePrompt: base,
-    mode,
     frames,
-    grid: mode === 'sheet' ? { cols: SHEET_GRIDS[frames].cols, rows: SHEET_GRIDS[frames].rows } : null,
+    grid: { cols: grid, rows: grid },
     beats,
     fps,
     loop,
     repeat,
-    align: pack.keyframes.align,
-    aspectRatio,
+    align: pack.sprite.align,
+    aspectRatio: '1:1',
     resolution,
     model,
     cutout: alpha ? { method: pack.cutout.method, threshold: pack.cutout.threshold } : null,
@@ -270,7 +254,7 @@ export function compileAnimJob(entry, req) {
       inputs: resolved,
       summary,
       alpha,
-      mode,
+      grid,
       frames,
       fps,
       loop,
@@ -285,38 +269,36 @@ export function compileAnimById(animId, req) {
   return compileAnimJob(entry, req)
 }
 
-function beatText(beat, i, n) {
+function rowBeat(beat, r, rows) {
   if (beat) return beat
-  const pct = n > 1 ? Math.round((i / (n - 1)) * 100) : 0
-  if (i === 0) return 'the starting pose of the action'
-  if (i === n - 1) return 'the ending pose of the action'
-  return `an in-between key pose about ${pct}% through the action`
+  const a = Math.round((r / rows) * 100)
+  const b = Math.round(((r + 1) / rows) * 100)
+  if (r === 0) return 'the motion begins from the starting pose'
+  if (r === rows - 1) return 'the motion completes into the ending pose'
+  return `the motion continues (about ${a}%–${b}% of the action)`
 }
 
-/** 拼图模式：一次生成整张关键帧网格 */
-export function sheetPrompt(plan, { hasRef = false } = {}) {
+/** 精灵图：一次生成 N×N 连续序列帧 */
+export function spritePrompt(plan, { hasRef = false } = {}) {
   const { cols, rows } = plan.grid
   const n = plan.frames
-  const poses = plan.beats.map((b, i) => `cell ${i + 1}: ${beatText(b, i, n)}`).join('; ')
+  const phases = plan.beats
+    .map((b, r) => `row ${r + 1} (frames ${r * cols + 1}-${(r + 1) * cols}): ${rowBeat(b, r, rows)}`)
+    .join('; ')
+  const cycle = plan.loop === 'pingpong'
+    ? `Frame ${n} is the extreme pose; the frames will also be played in reverse, so the motion must read well backwards.`
+    : plan.repeat > 1
+      ? `The motion is a seamless loop cycle: frame ${n} flows directly back into frame 1.`
+      : ''
   return [
-    `Animation keyframe sheet: ${n} equal-size cells in a strict grid of ${cols} columns and ${rows} rows, read left to right, top to bottom,`,
-    `showing ${n} successive key poses of one continuous motion from start to finish (${poses}).`,
-    'Every cell shows the exact same character at the same scale, in the same position inside its cell, on the same ground line, from the same camera angle; only the pose changes between cells.',
-    'The whole character stays fully inside its own cell with some empty margin. Cells are separated only by empty background: no borders, no grid lines, no frame numbers, no captions, no text.',
+    `Character animation sprite sheet: a strict ${cols}×${rows} grid of ${n} equal square cells, read left to right, top to bottom.`,
+    `The ${n} cells are consecutive frames of one smooth continuous motion, like a frame-by-frame hand-drawn animation at ${plan.fps} fps: each frame changes only slightly from the previous one, with evenly spaced in-betweens and no jumps.`,
+    `Phases: ${phases}.`,
+    cycle,
+    'Every cell shows the exact same single character at the same size, standing on the same ground line at the same spot inside its cell, from the same fixed camera angle; only the pose changes.',
+    'The whole character stays fully inside its own cell with clear empty margin on all sides and never crosses into neighboring cells. Cells are separated only by empty background: no borders, no grid lines, no frame numbers, no captions, no text.',
     hasRef ? 'The character must match the character in the reference image exactly.' : '',
     `Character and art style: ${plan.basePrompt}`,
   ].filter(Boolean).join(' ')
 }
 
-/** 逐帧模式：第 i 帧（0 起）的提示词；i>0 或有参考图时基于参考图重绘 */
-export function framePrompt(plan, i, { fromRef }) {
-  const pose = beatText(plan.beats[i], i, plan.frames)
-  if (!fromRef) {
-    return `${plan.basePrompt} Pose: ${pose}. Full body, centered in the frame, with generous empty margin around the character.`
-  }
-  return [
-    'Redraw the exact same character from the reference image: identical design, proportions, clothes, colors, line style, scale, camera angle and position in the frame, on the same background.',
-    `Change only the pose to: ${pose}.`,
-    `Art style: ${plan.basePrompt}`,
-  ].join(' ')
-}

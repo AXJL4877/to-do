@@ -1,11 +1,11 @@
 {
-  "spec": "todo-anim-pack/1",
+  "spec": "todo-anim-pack/2",
   "id": "builtin.doodle-figure",
   "name": "手绘小人",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "author": "TO DO",
-  "description": "手绘线条小人动作动画：先生成一组关键帧，再自动拼成动画。描述角色和动作即可，可逐帧写分镜。",
-  "tags": ["手绘", "小人", "动作", "关键帧"],
+  "description": "手绘线条小人动作动画：一次生成 5×5 角色精灵图（25 帧），自动切格拼成序列帧动画。描述角色和动作即可，可按行写分镜。",
+  "tags": ["手绘", "小人", "精灵图", "序列帧"],
   "outputs": ["animation"],
   "inputs": [
     {
@@ -58,7 +58,7 @@
     }
   ],
   "prompt": {
-    "template": "Hand-drawn 2D cartoon animation character: {{character}}, performing the action: {{action}}. Drawn with {{line}}. {{color}}. Simple, readable silhouette; the character design (proportions, clothes, colors, props) stays identical in every pose; full body visible, side or three-quarter view, like a key drawing from a hand-drawn animation. Flat 2D, no shading gradients, no photographic lighting. {{background}}.",
+    "template": "Hand-drawn 2D cartoon animation character: {{character}}, performing the action: {{action}}. Drawn with {{line}}. {{color}}. Simple, readable silhouette; the character design (proportions, clothes, colors, props) stays identical in every pose; full body visible, side or three-quarter view, like a frame from a hand-drawn animation. Flat 2D, no shading gradients, no photographic lighting. {{background}}.",
     "avoid": [
       "photograph",
       "photorealistic",
@@ -77,16 +77,13 @@
       "cropped body"
     ]
   },
-  "keyframes": {
-    "modes": ["sheet", "sequence"],
-    "defaultMode": "sheet",
-    "counts": [4, 6, 8, 9, 12],
-    "defaultCount": 6,
+  "sprite": {
+    "grid": 5,
     "align": "baseline"
   },
   "playback": {
-    "fps": [2, 4, 6, 8, 12],
-    "defaultFps": 6,
+    "fps": [8, 10, 12, 15, 24],
+    "defaultFps": 12,
     "loops": ["forward", "pingpong"],
     "defaultLoop": "forward",
     "maxRepeat": 10
@@ -99,9 +96,7 @@
   },
   "image": {
     "models": ["gpt-image-2"],
-    "aspectRatios": ["1:1", "3:4", "4:3", "9:16", "16:9"],
-    "defaultAspectRatio": "1:1",
-    "resolutions": ["1K", "2K"],
+    "resolutions": ["2K"],
     "defaultResolution": "2K"
   }
 }
