@@ -19,6 +19,7 @@ import {
   getAiJob,
   kickWorker,
   listAiJobs,
+  retryAiJob,
 } from './aiJobs.mjs'
 import { listModels } from './huniuClient.mjs'
 import { readAiConfig, writeAiConfig } from './huniuConfig.mjs'
@@ -192,6 +193,13 @@ export async function handleAiHttp(req, res) {
       const ackMatch = url.match(/^\/api\/ai-jobs\/([^/?]+)\/ack/)
       if (req.method === 'POST' && ackMatch) {
         sendJson(res, 200, ackAiJob(decodeURIComponent(ackMatch[1])))
+        return true
+      }
+
+      const retryMatch = url.match(/^\/api\/ai-jobs\/([^/?]+)\/retry/)
+      if (req.method === 'POST' && retryMatch) {
+        const r = retryAiJob(decodeURIComponent(retryMatch[1]))
+        sendJson(res, r.ok ? 200 : 409, r)
         return true
       }
 

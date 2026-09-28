@@ -337,6 +337,16 @@ export function keyframeCount(kfs: Record<string, Keyframe[]>): number {
   return Object.values(kfs).reduce((n, arr) => n + arr.length, 0)
 }
 
+/** 入场式关键帧：从片段开头变化到某值后停住（后续关键帧都保持该值）；切分后延续的普通运动不算 */
+export function isEntranceKeyframes(sorted: Keyframe[]): boolean {
+  if (sorted.length < 2) return false
+  const [a, b] = sorted
+  if (a.t > 0.08 || b.t - a.t <= 0.04) return false
+  const eps = 1e-4 * Math.max(1, Math.abs(b.value))
+  if (Math.abs(b.value - a.value) <= eps) return false
+  return sorted.slice(2).every((k) => Math.abs(k.value - b.value) <= eps)
+}
+
 export function hasKeyframeNear(kfs: Keyframe[] | undefined, localT: number, thresh = 0.08): boolean {
   if (!kfs?.length) return false
   return kfs.some((k) => Math.abs(k.t - localT) < thresh)

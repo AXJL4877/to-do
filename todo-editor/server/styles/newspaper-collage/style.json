@@ -1,0 +1,111 @@
+{
+  "spec": "todo-style-pack/1",
+  "id": "builtin.newspaper-collage",
+  "name": "报刊拼贴素材",
+  "version": "1.1.0",
+  "author": "TO DO",
+  "description": "复古撕纸报刊拼贴风的单个素材：撕边老照片、报纸标题条、打字机纸条、剪报块、剪贴物件等，一次出一件，可透明底，拿去自己拼版面。",
+  "tags": ["拼贴", "报纸", "复古", "黑白", "素材"],
+  "previews": ["previews/01-reference.jpg"],
+  "outputs": ["image"],
+  "inputs": [
+    {
+      "id": "subject",
+      "type": "text",
+      "label": "素材内容",
+      "required": true,
+      "maxLength": 160,
+      "placeholder": "例如：纽约天际线老照片 / 纸条上写 Dream Plan Do / 一支干枯的花"
+    },
+    {
+      "id": "kind",
+      "type": "select",
+      "label": "素材类型",
+      "default": "photo",
+      "options": [
+        { "value": "photo", "label": "撕边老照片", "prompt": "a black-and-white halftone photograph printed on newsprint, torn out by hand into an irregular rectangle with ragged white fibrous paper edges" },
+        { "value": "headline", "label": "报纸标题条", "prompt": "a narrow torn strip of newspaper carrying one bold serif headline, with ragged torn edges on all sides" },
+        { "value": "note", "label": "打字机纸条", "prompt": "a small torn scrap of off-white paper with a short phrase typed in a typewriter font and a hand-drawn ink underline scribble" },
+        { "value": "clipping", "label": "剪报块", "prompt": "a torn newspaper clipping with a serif headline, a short italic deck and several columns of small body text, rough torn edges" },
+        { "value": "object", "label": "剪贴物件", "prompt": "a single object cut out of an old black-and-white magazine photo, with a thin uneven white paper border left around its silhouette, like a scrapbook cutout" },
+        { "value": "masthead", "label": "报头残片", "prompt": "a torn corner of a newspaper front page with a blackletter masthead, a thin rule line, issue number and date line" },
+        { "value": "ephemera", "label": "票据 / 邮票", "prompt": "a small piece of vintage paper ephemera such as a ticket stub, postage stamp or tag, slightly worn, printed in black ink" }
+      ]
+    },
+    {
+      "id": "lettering",
+      "type": "select",
+      "label": "文字",
+      "default": "en",
+      "options": [
+        { "value": "en", "label": "英文", "prompt": "Any headline or phrase is short English, spelled exactly as described; small body text is illegible filler" },
+        { "value": "zh", "label": "中文", "prompt": "Any headline or phrase is short Chinese in bold Song-style serif or typewriter type, written exactly as described; small body text is illegible filler" },
+        { "value": "none", "label": "无文字", "prompt": "No readable words anywhere, only illegible tiny print texture if any" }
+      ]
+    },
+    {
+      "id": "tone",
+      "type": "select",
+      "label": "色调",
+      "default": "bw",
+      "options": [
+        { "value": "bw", "label": "黑白复古", "prompt": "Strictly monochrome black, white and soft grey, high-contrast halftone print look" },
+        { "value": "sepia", "label": "泛黄旧报", "prompt": "Aged yellowed newsprint and sepia brown-grey tones" },
+        { "value": "accent", "label": "黑白一抹红", "prompt": "Black and white with one small muted red accent such as an underline or stamp mark" }
+      ]
+    },
+    {
+      "id": "grit",
+      "type": "select",
+      "label": "质感",
+      "default": "medium",
+      "options": [
+        { "value": "clean", "label": "干净利落", "prompt": "Clean torn edges and light paper grain" },
+        { "value": "medium", "label": "适中做旧", "prompt": "Visible fibrous torn edges, fine film grain and halftone dots, faint creases" },
+        { "value": "heavy", "label": "重度做旧", "prompt": "Heavily distressed paper with crumpled creases, frayed edges, dust, ink smudges and photocopy noise" }
+      ]
+    },
+    {
+      "id": "background",
+      "type": "select",
+      "label": "背景",
+      "default": "green",
+      "options": [
+        { "value": "green", "label": "纯绿底（抠像用）", "prompt": "The element lies on a perfectly flat, solid pure chroma-key green background (#00FF00), evenly lit, with no shadow, no gradient and no texture; no green anywhere on the element itself" },
+        { "value": "dark", "label": "深灰纸底", "prompt": "The element lies on a dark charcoal grey textured paper background with a soft contact shadow" },
+        { "value": "white", "label": "纯白底", "prompt": "The element lies on a plain pure white background with no shadow" }
+      ]
+    }
+  ],
+  "prompt": {
+    "template": "A single isolated collage element in a vintage torn-paper newspaper scrapbook style: {{kind}}, depicting {{subject}}. {{lettering}}. {{tone}}. {{grit}}. Only this one piece of paper, shown flat and straight-on from above, centered with generous empty margin on every side and not touching the image edges, slightly tilted like a real pasted clipping. Realistic paper material and print texture, analog editorial collage aesthetic. {{background}}.",
+    "avoid": [
+      "multiple pieces",
+      "full collage",
+      "poster layout",
+      "cropped at image edge",
+      "3D render",
+      "cartoon",
+      "vector illustration",
+      "glossy digital look",
+      "neon colors",
+      "watermark",
+      "signature",
+      "garbled text"
+    ]
+  },
+  "cutout": {
+    "method": "keyGreen",
+    "threshold": 0.12,
+    "trim": true,
+    "default": true,
+    "lockInputs": { "background": "green" }
+  },
+  "image": {
+    "models": ["gpt-image-2"],
+    "aspectRatios": ["1:1", "4:3", "3:4", "16:9", "9:16"],
+    "defaultAspectRatio": "1:1",
+    "resolutions": ["1K", "2K"],
+    "defaultResolution": "2K"
+  }
+}

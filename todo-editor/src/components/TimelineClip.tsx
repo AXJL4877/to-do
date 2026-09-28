@@ -3,6 +3,7 @@ import clsx from 'clsx'
 import type { Clip, Track } from '../types'
 import { useApp } from '../store'
 import { loadWaveformPeaks, slicePeaks } from '../lib/waveform'
+import { isEntranceKeyframes } from '../lib/keyframeEval'
 
 function AudioWaveform({
   mediaId, url, mediaPath, durationHint, inPoint, outPoint, widthPx,
@@ -127,7 +128,7 @@ function edgeHints(clip: Clip, widthPx: number) {
     const kf = clip.keyframes[key]
     if (!kf || kf.length < 2 || inSec > 0) continue
     const sorted = [...kf].sort((a, b) => a.t - b.t)
-    if (sorted[0].t <= 0.08 && sorted[1].t - sorted[0].t > 0.05) {
+    if (isEntranceKeyframes(sorted)) {
       inSec = Math.max(inSec, sorted[1].t - sorted[0].t)
       inLabel = inLabel || '入场动画'
     }

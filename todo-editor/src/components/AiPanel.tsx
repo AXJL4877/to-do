@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AudioLines, Camera, Clapperboard, Film, ImagePlus, LayoutGrid, Loader2, Music, Plus, Settings, Sparkles, Trash2, Video, Wand2, X } from 'lucide-react'
+import { AudioLines, Camera, Clapperboard, Film, ImagePlus, LayoutGrid, Loader2, Music, Plus, RotateCcw, Settings, Sparkles, Trash2, Video, Wand2, X } from 'lucide-react'
 import { useApp } from '../store'
 import { AiFloatLaunch } from './AiFloat'
 import { isAiPopout } from '../lib/storeSync'
@@ -531,6 +531,15 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
     void refreshJobs()
   }
 
+  async function retryJob(id: string) {
+    const res = await aiFetch(`/api/ai-jobs/${id}/retry`, { method: 'POST' })
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({})) as { error?: string }
+      setError(body.error || '重试失败')
+    }
+    void refreshJobs()
+  }
+
   const canGen = !submitting && (activeStyle
     ? !!styleValues && styleValuesReady(activeStyle, styleValues)
     : !!prompt.trim())
@@ -989,6 +998,19 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
                   </p>
                   {j.error && <p className="m-0 mt-0.5" style={{ color: 'var(--error)' }}>{friendlyAiError(j.error)}</p>}
                 </div>
+                {j.status === 'error' && (
+                  <button
+                    type="button"
+                    className="icon-btn shrink-0"
+                    style={{ width: 22, height: 22 }}
+                    title="重试"
+                    aria-label="重试"
+                    data-testid={`ai-job-retry-${j.id}`}
+                    onClick={() => void retryJob(j.id)}
+                  >
+                    <RotateCcw size={11} />
+                  </button>
+                )}
                 {(j.status === 'queued' || j.status === 'error' || j.status === 'imported' || j.status === 'done') && (
                   <button
                     type="button"

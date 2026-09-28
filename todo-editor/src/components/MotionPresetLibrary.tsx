@@ -70,9 +70,9 @@ function PresetPreview({ preset, values, active, className }: {
   )
 }
 
-function PresetCard({ preset, values, label, selected, onClick, onDelete, testId }: {
+function PresetCard({ preset, values, label, selected, onClick, onApply, onDelete, testId }: {
   preset: MotionPreset; values: ParamValues; label: string; selected: boolean
-  onClick: () => void; onDelete?: () => void; testId: string
+  onClick: () => void; onApply: () => void; onDelete?: () => void; testId: string
 }) {
   const [hover, setHover] = useState(false)
   return (
@@ -81,10 +81,11 @@ function PresetCard({ preset, values, label, selected, onClick, onDelete, testId
       className={clsx('btn btn-ghost relative', selected && 'ring-2')}
       style={{ height: 'auto', padding: 6, flexDirection: 'column', alignItems: 'stretch', gap: 4, '--tw-ring-color': 'var(--accent)' } as React.CSSProperties}
       data-testid={testId}
-      title={`${preset.desc}（悬停预览）`}
+      title={`${preset.desc}（悬停预览 · 单击调参 · 双击应用）`}
       onPointerEnter={() => setHover(true)}
       onPointerLeave={() => setHover(false)}
       onClick={onClick}
+      onDoubleClick={onApply}
     >
       <PresetPreview preset={preset} values={values} active={hover} className="h-10" />
       <span className="text-[11px] truncate text-center">{label}</span>
@@ -166,6 +167,7 @@ export function MotionPresetLibrary() {
             values={resolveValues(p, valuesById[p.id])}
             selected={selId === p.id && !customId}
             onClick={() => select(p.id)}
+            onApply={() => applyAnim(p.id, resolveValues(p, valuesById[p.id]), { range, seconds })}
           />
         ))}
         {group === 'mine' && custom.map((c) => {
@@ -179,6 +181,7 @@ export function MotionPresetLibrary() {
               values={resolveValues(base, c.values)}
               selected={customId === c.id}
               onClick={() => select(c.base, c.values, c.id)}
+              onApply={() => applyAnim(c.base, resolveValues(base, c.values), { range, seconds, label: c.name })}
               onDelete={() => { setCustom((l) => l.filter((x) => x.id !== c.id)); if (customId === c.id) setCustomId(null) }}
             />
           )
@@ -261,7 +264,7 @@ export function MotionPresetLibrary() {
           </div>
         )}
         {!hasSelection && (
-          <p className="text-[11px] m-0" style={{ color: 'var(--text-muted)' }}>先在时间线选中画面片段；可撤销（Ctrl+Z）</p>
+          <p className="text-[11px] m-0" style={{ color: 'var(--text-muted)' }}>先在时间线选中画面片段；双击卡片直接应用，可撤销（Ctrl+Z）</p>
         )}
       </div>
     </div>

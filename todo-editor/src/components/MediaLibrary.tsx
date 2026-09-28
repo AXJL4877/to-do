@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import {
   Upload, Type, Star, Camera, Sparkles, MoreHorizontal, Film,
-  Music, Blend, Wand2, Aperture, LayoutTemplate, CaseSensitive, History, Trash2,
+  Music, Blend, Wand2, Aperture, Zap, CaseSensitive, History, Trash2,
 } from 'lucide-react'
 import { useApp } from '../store'
 import { parseMediaFiles, filesFromDataTransfer } from '../lib/importFiles'
@@ -14,19 +14,19 @@ import type { LucideIcon } from 'lucide-react'
 import type { MediaItem } from '../types'
 
 /** 主页只露出高频；其余进「更多」 */
-const PRIMARY = ['media', 'text', 'ai'] as const
-const SECONDARY = ['audio', 'transition', 'effect', 'filter', 'preset', 'font', 'recent'] as const
+const PRIMARY = ['media', 'text', 'preset', 'ai'] as const
+const SECONDARY = ['audio', 'transition', 'effect', 'filter', 'font', 'recent'] as const
 type LibTab = (typeof PRIMARY)[number] | (typeof SECONDARY)[number]
 
 const LABELS: Record<LibTab, string> = {
   media: '媒体', audio: '音频', text: '文字', transition: '转场', effect: '特效',
-  filter: '滤镜', preset: '预设', font: '字体', recent: '最近', ai: 'AI+',
+  filter: '滤镜', preset: '动效预设', font: '字体', recent: '最近', ai: 'AI+',
 }
 
 const ICONS: Record<LibTab, LucideIcon> = {
   media: Film, text: Type, ai: Sparkles,
   audio: Music, transition: Blend, effect: Wand2, filter: Aperture,
-  preset: LayoutTemplate, font: CaseSensitive, recent: History,
+  preset: Zap, font: CaseSensitive, recent: History,
 }
 
 function MediaThumb({ m }: { m: MediaItem }) {

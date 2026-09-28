@@ -43,6 +43,36 @@ export function keyWhite(img, threshold) {
   return img
 }
 
+/**
+ * 绿幕抠像：按"绿色溢出度" g-max(r,b) 算透明度并去绿边，保留白色 / 灰色纸张的不透明度。
+ * 适合近单色素材生成在纯绿 (#00FF00) 底上。
+ * @param {number} threshold 0~0.5：溢出度低于它的像素完全保留；高于 threshold+0.3 的完全透明
+ */
+export function keyGreen(img, threshold) {
+  const d = img.data
+  const lo = threshold
+  const hi = threshold + 0.3
+  for (let i = 0; i < d.length; i += 4) {
+    const r = d[i], g = d[i + 1], b = d[i + 2]
+    const m = Math.max(r, b)
+    const spill = (g - m) / 255
+    if (spill <= 0) continue
+    if (spill >= hi) {
+      d[i] = d[i + 1] = d[i + 2] = d[i + 3] = 0
+      continue
+    }
+    d[i + 1] = m
+    if (spill > lo) d[i + 3] = Math.round(d[i + 3] * (hi - spill) / (hi - lo))
+  }
+  return img
+}
+
+export function applyCutout(img, method, threshold) {
+  if (method === 'keyWhite') return keyWhite(img, threshold)
+  if (method === 'keyGreen') return keyGreen(img, threshold)
+  throw new Error(`未知抠像方法 ${method}`)
+}
+
 /** 裁到不透明内容的包围盒，四周留 pad 比例的边 */
 export function trimTransparent(img, pad = 0.02) {
   const { width: w, height: h, data: d } = img
@@ -78,8 +108,7 @@ export function encodePng(img) {
 
 /** 读 inPath → 抠像 → 写 outPath(PNG)；返回输出尺寸 */
 export function cutoutFile(inPath, outPath, { method, threshold, trim }) {
-  if (method !== 'keyWhite') throw new Error(`未知抠像方法 ${method}`)
-  let img = keyWhite(decodeImage(readFileSync(inPath)), threshold)
+  let img = applyCutout(decodeImage(readFileSync(inPath)), method, threshold)
   if (trim) img = trimTransparent(img)
   writeFileSync(outPath, encodePng(img))
   return { width: img.width, height: img.height }

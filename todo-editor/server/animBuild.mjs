@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawn } from 'node:child_process'
-import { encodePng, keyWhite } from './imageCutout.mjs'
+import { applyCutout, encodePng } from './imageCutout.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -93,7 +93,7 @@ export function normalizeFrames(frames, { cutout, align }) {
   const H = frames[0].height
   let out = frames.map((f) => {
     const g = { width: f.width, height: f.height, data: Buffer.from(f.data) }
-    if (alpha) keyWhite(g, cutout.threshold)
+    if (alpha) applyCutout(g, cutout.method, cutout.threshold)
     return g.width === W && g.height === H
       ? g
       : place(g, W, H, Math.round((W - g.width) / 2), Math.round((H - g.height) / 2), bg)

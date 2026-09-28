@@ -63,8 +63,12 @@ const listJobs = db.prepare(`
   FROM ai_jobs ORDER BY created_at DESC LIMIT ?
 `)
 const getJob = db.prepare('SELECT * FROM ai_jobs WHERE id = ?')
-const nextQueued = db.prepare(`
-  SELECT id FROM ai_jobs WHERE status='queued' ORDER BY created_at ASC LIMIT 1
+const listQueued = db.prepare(`
+  SELECT id, kind, params FROM ai_jobs WHERE status='queued' ORDER BY created_at ASC
+`)
+const requeueJob = db.prepare(`
+  UPDATE ai_jobs SET status='queued', phase='排队中', error=NULL, result_name=NULL, result_url=NULL,
+    result_kind=NULL, updated_at=? WHERE id=? AND status='error'
 `)
 const claimById = db.prepare(`
   UPDATE ai_jobs SET status='running', phase=?, updated_at=? WHERE id=? AND status='queued'
@@ -267,37 +271,69 @@ export function ackAiJob(id) {
   return { ok: changes > 0, imported: changes > 0 }
 }
 
-let busy = false
+/** 失败任务重新入队（保留参数与参考图） */
+export function retryAiJob(id) {
+  const changes = requeueJob.run(Date.now(), id).changes
+  if (!changes) return { ok: false, error: getJob.get(id) ? '只有失败的任务可以重试' : 'not found' }
+  kickWorker()
+  return { ok: true, job: rowToJob(getJob.get(id)) }
+}
+
+/** 云端生图 / 生视频互不阻塞；本地 H3 独占 GPU 且 h3-studio 拒绝并行，单独一条道 */
+const LANE_LIMIT = {
+  cloud: Math.max(1, Math.min(16, Number(process.env.TODO_AI_CONCURRENCY) || 4)),
+  h3: 1,
+}
+const laneRunning = { cloud: 0, h3: 0 }
+let staleCleared = false
+
+function laneOf(row) {
+  if (row.kind !== 'video') return 'cloud'
+  try { return JSON.parse(row.params || '{}').engine === 'h3' ? 'h3' : 'cloud' } catch { return 'cloud' }
+}
+
+const TRANSIENT_RE = /fetch failed|ECONNRESET|ETIMEDOUT|ECONNREFUSED|EAI_AGAIN|socket hang up|UND_ERR|network|timed? ?out|\b(429|502|503|504)\b/i
+const AUTO_RETRIES = 2
+
+async function runJob(job) {
+  if (job.kind === 'anim') return runAnimJob(job)
+  if (job.kind === 'video') return runVideoJob(job)
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await runImageJob(job)
+    } catch (e) {
+      if (attempt >= AUTO_RETRIES || !TRANSIENT_RE.test(String(e))) throw e
+      const wait = 2000 * (attempt + 1)
+      setPhase.run(`网络波动，${wait / 1000}s 后自动重试（${attempt + 1}/${AUTO_RETRIES}）`, Date.now(), job.id)
+      await new Promise((r) => setTimeout(r, wait))
+    }
+  }
+}
 
 export function kickWorker() {
-  if (busy) return
-  busy = true
-  void (async () => {
-    try {
-      // 仅清启动前残留（崩溃留下的 running）
-      for (const r of listRunning.all()) {
-        updateJob.run('error', '中断', null, null, null, null, 'worker 重启，任务中断', Date.now(), r.id)
-      }
-      while (true) {
-        const next = nextQueued.get()
-        if (!next) break
-        const cas = claimById.run('启动…', Date.now(), next.id)
-        if (!cas.changes) continue
-        const job = rowToJob(getJob.get(next.id))
-        if (!job) continue
-        try {
-          if (job.kind === 'image') await runImageJob(job)
-          else if (job.kind === 'anim') await runAnimJob(job)
-          else await runVideoJob(job)
-        } catch (e) {
-          updateJob.run('error', '失败', null, null, null, null, String(e).slice(0, 400), Date.now(), job.id)
-        }
-      }
-    } finally {
-      busy = false
-      if (nextQueued.get()) setTimeout(() => kickWorker(), 30)
+  if (!staleCleared) {
+    staleCleared = true
+    // 仅清启动前残留（崩溃留下的 running）
+    for (const r of listRunning.all()) {
+      updateJob.run('error', '中断', null, null, null, null, 'worker 重启，任务中断', Date.now(), r.id)
     }
-  })()
+  }
+  for (const row of listQueued.all()) {
+    const lane = laneOf(row)
+    if (laneRunning[lane] >= LANE_LIMIT[lane]) continue
+    if (!claimById.run('启动…', Date.now(), row.id).changes) continue
+    const job = rowToJob(getJob.get(row.id))
+    if (!job) continue
+    laneRunning[lane]++
+    void runJob(job)
+      .catch((e) => {
+        updateJob.run('error', '失败', null, null, null, null, String(e).slice(0, 400), Date.now(), job.id)
+      })
+      .finally(() => {
+        laneRunning[lane]--
+        kickWorker()
+      })
+  }
 }
 
 async function runImageJob(job) {

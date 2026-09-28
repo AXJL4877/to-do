@@ -5,7 +5,7 @@ import {
   defaultAudio, defaultColor, defaultScene3d, defaultText, defaultTransform, defaultTransform3d, uid,
 } from './types'
 import { applyPresetKeyframes, findMotionPreset, presetDuration, type ParamValues } from './lib/motionPresets'
-import { autoBezierKeyframes, splitKeyframes, patchClipTransform, patchClipXY, resolveClipTransform, sampleKeyframes, seedPositionKeyframes, defaultHandles, snapToFrame } from './lib/keyframeEval'
+import { autoBezierKeyframes, isEntranceKeyframes, splitKeyframes, patchClipTransform, patchClipXY, resolveClipTransform, sampleKeyframes, seedPositionKeyframes, defaultHandles, snapToFrame } from './lib/keyframeEval'
 import { clearPreviewCache, getProgramPreviewCache, notifyPreviewCacheChanged } from './lib/previewCache'
 import { ensureScene3d } from './lib/scene3d'
 import { desktop } from './lib/desktop'
@@ -394,7 +394,7 @@ function applyEdgeAnimDuration(c: Clip, edge: 'in' | 'out', sec: number): Clip {
       const kf = next.keyframes[key]
       if (!kf || kf.length < 2) continue
       const sorted = [...kf].sort((a, b) => a.t - b.t)
-      if (sorted[0].t <= 0.08 && sorted[1].t - sorted[0].t > 0.04) {
+      if (isEntranceKeyframes(sorted)) {
         const rewritten = sorted.map((k, idx) => (idx === 1 ? { ...k, t: s } : k))
         next = { ...next, keyframes: { ...next.keyframes, [key]: rewritten } }
       }
@@ -849,7 +849,7 @@ function flushPendingDragMove(get: () => AppStore, set: (p: Partial<AppStore> | 
 
 /**
  * 在片段局部时间 L 切成两段：关键帧按切点精确拆分（右段时间归零），画面在切点前后完全不变；
- * 素材入/出点按速度与倒放换算；左段不带出场转场、右段不带入场转场。
+ * 素材入/出点按速度与倒放换算；入场（转场 / 文字入场 / 音频淡入）只留左段，出场只留右段。
  */
 function splitClipAt(c: Clip, L: number): [Clip, Clip] {
   const speed = Math.max(0.05, c.speed <= 0 ? 1 : (c.speed || 1))
@@ -867,15 +867,20 @@ function splitClipAt(c: Clip, L: number): [Clip, Clip] {
   const media = c.reverse
     ? { left: { inPoint: c.inPoint + span - cutMedia, outPoint: c.inPoint + span }, right: { inPoint: c.inPoint, outPoint: c.inPoint + span - cutMedia } }
     : { left: { inPoint: c.inPoint, outPoint: c.inPoint + cutMedia }, right: { inPoint: c.inPoint + cutMedia, outPoint: c.inPoint + span } }
+  const R = c.duration - L
   const left: Clip = {
     ...c, duration: L, ...media.left,
     keyframes: leftKf, speedKeyframes: sp.left, transitionOut: undefined,
     effects: c.effects.filter((e) => e.start < L).map((e) => ({ ...e, end: Math.min(e.end, L) })),
+    text: c.text && { ...c.text, animOut: 'none', animInDur: Math.min(c.text.animInDur, L) },
+    audio: { ...c.audio, fadeOut: 0, fadeIn: Math.min(c.audio.fadeIn, L) },
   }
   const right: Clip = {
-    ...c, id: uid('clip'), start: c.start + L, duration: c.duration - L, ...media.right,
+    ...c, id: uid('clip'), start: c.start + L, duration: R, ...media.right,
     keyframes: rightKf, speedKeyframes: sp.right, transitionIn: undefined,
     effects: c.effects.filter((e) => e.end > L).map((e) => ({ ...e, id: uid('fx'), start: Math.max(0, e.start - L), end: e.end - L })),
+    text: c.text && { ...c.text, animIn: 'none', animOutDur: Math.min(c.text.animOutDur, R) },
+    audio: { ...c.audio, fadeIn: 0, fadeOut: Math.min(c.audio.fadeOut, R) },
   }
   return [left, right]
 }
