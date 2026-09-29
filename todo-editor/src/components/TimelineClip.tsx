@@ -179,7 +179,9 @@ export const TimelineClip = memo(function TimelineClip({
       : 'hsl(200 55% 48% / 0.25)'
 
   const rate = tool === 'rate'
-  const w = Math.max(24, width)
+  // 按真实时长画，不设最小宽度：缩小时间轴时撑宽的短片段会盖住后面紧接的片段
+  const w = Math.max(1, width)
+  const trimmable = w >= 12
   const hints = useMemo(() => edgeHints(clip, w), [clip, w])
   const pxPerSec = w / Math.max(0.05, clip.duration)
 
@@ -233,20 +235,24 @@ export const TimelineClip = memo(function TimelineClip({
         ? '比率拉伸：拖左右边缘，缩短 = 加速，拉长 = 减速（0.25×~4×）'
         : 'S缩放 · R旋转（鼠标在时间轴上时 R 为比率拉伸）· 1 静态 · 2 K帧模式 · 3 转场；K帧下 T透明'}
     >
-      <div
-        className={clsx('absolute left-0 top-0 bottom-0 cursor-ew-resize z-20', rate ? 'w-2.5 opacity-70 hover:opacity-100' : 'w-1.5 opacity-0 group-hover:opacity-100')}
-        style={{ background: rate ? 'var(--warning, #f59e0b)' : 'var(--accent)' }}
-        data-testid={`clip-trim-in-${clip.id}`}
-        onPointerDown={onTrimIn}
-      />
-      <div
-        className={clsx('absolute right-0 top-0 bottom-0 cursor-ew-resize z-20', rate ? 'w-2.5 opacity-70 hover:opacity-100' : 'w-1.5 opacity-0 group-hover:opacity-100')}
-        style={{ background: rate ? 'var(--warning, #f59e0b)' : 'var(--accent)' }}
-        data-testid={`clip-trim-out-${clip.id}`}
-        onPointerDown={onTrimOut}
-      />
+      {trimmable && (
+        <div
+          className={clsx('absolute left-0 top-0 bottom-0 cursor-ew-resize z-20', rate ? 'w-2.5 opacity-70 hover:opacity-100' : 'w-1.5 opacity-0 group-hover:opacity-100')}
+          style={{ background: rate ? 'var(--warning, #f59e0b)' : 'var(--accent)' }}
+          data-testid={`clip-trim-in-${clip.id}`}
+          onPointerDown={onTrimIn}
+        />
+      )}
+      {trimmable && (
+        <div
+          className={clsx('absolute right-0 top-0 bottom-0 cursor-ew-resize z-20', rate ? 'w-2.5 opacity-70 hover:opacity-100' : 'w-1.5 opacity-0 group-hover:opacity-100')}
+          style={{ background: rate ? 'var(--warning, #f59e0b)' : 'var(--accent)' }}
+          data-testid={`clip-trim-out-${clip.id}`}
+          onPointerDown={onTrimOut}
+        />
+      )}
 
-      {hints.inPx > 0 && (
+      {trimmable && hints.inPx > 0 && (
         <div
           className="absolute left-0 top-0 bottom-0 z-[1]"
           style={{
@@ -265,7 +271,7 @@ export const TimelineClip = memo(function TimelineClip({
           />
         </div>
       )}
-      {hints.outPx > 0 && (
+      {trimmable && hints.outPx > 0 && (
         <div
           className="absolute right-0 top-0 bottom-0 z-[1]"
           style={{

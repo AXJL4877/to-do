@@ -239,6 +239,8 @@ export interface ProjectSettings {
   nativePreview: boolean
   canvasBg: 'black' | 'color' | 'blur' | 'image'; canvasColor: string
   safeFrame: boolean; magnetic: boolean; snap: boolean
+  /** 流式入轨的 AI 任务已放过的产物键（任务 id → 键），跟片段一起存进工程：刷新丢了片段也就没有记录，会重新补上 */
+  aiPlaced?: Record<string, string[]>
 }
 
 export interface Prefs {

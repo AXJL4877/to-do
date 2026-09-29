@@ -13,7 +13,7 @@ import { Monitor } from './components/Monitor'
 import { PropWheel } from './components/PropWheel'
 import { TransformGesture } from './components/TransformGesture'
 import { tryAutoBezierPickedKeyframes, tryDeletePickedKeyframes, trySelectAllKeyframes } from './lib/kfDelete'
-import { initStoreSync, isAiPopout, isTimelinePopout, isLocalPlayheadScrubbing } from './lib/storeSync'
+import { initStoreSync, isAiPopout, isStoreAuthority, isTimelinePopout, isLocalPlayheadScrubbing } from './lib/storeSync'
 import { setLivePlayhead } from './lib/livePlayhead'
 import { desktop } from './lib/desktop'
 import { bindNativePreviewLifecycle } from './lib/nativePreviewBridge'
@@ -119,9 +119,15 @@ export default function App() {
     const offClose = d?.onRequestClose?.(() => {
       void useApp.getState().flushProject().finally(() => d.closeReady?.())
     })
+    // 刷新 / 重载前把没存的改动写下去（写工程文件的请求同步发出，主进程收到就会写完）
+    const onUnload = () => {
+      if (isStoreAuthority() && useApp.getState().dirty) void useApp.getState().flushProject()
+    }
+    window.addEventListener('beforeunload', onUnload)
     return () => {
       clearInterval(autosave)
       offClose?.()
+      window.removeEventListener('beforeunload', onUnload)
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 

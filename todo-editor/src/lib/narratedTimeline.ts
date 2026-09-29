@@ -3,7 +3,8 @@
  *   配音一出来 → 放到播放头处的音频轨（之后所有片段都链接它、按它的时间戳换算位置）
  *   每块黑板渲好 → 每个元素一份裁到自身框的透明素材：书写视频（起笔 → 写完）+ 定格图（写完 → 换板），
  *   放回默认排版位置，同一元素位同一条轨；技能参数要手时给书写片段开「粉笔手书写」入场动画（不占时间轴）
- * 同一产物只入轨一次：放过的记在片段上和本机，重启 / 刷新也不会重复放，用户删掉的也不会被放回来。
+ * 同一产物只入轨一次：放过的记在片段上和工程里（放完立刻存盘），重启 / 刷新不会重复放，
+ * 没来得及存就刷新的会重新补上，用户删掉的也不会被放回来。
  * 以后的扩展按同一个约定出阶段产物（params.partial）就能直接复用。
  */
 import { useApp } from '../store'
@@ -71,13 +72,8 @@ export function narratedStage(j: NarratedJob): NarratedStage | null {
   return j.params.partial ?? null
 }
 
-const PLACED_KEY = (jobId: string) => `todo-narrated-placed:${jobId}`
-
 function loadPlaced(jobId: string) {
-  try {
-    const list = JSON.parse(localStorage.getItem(PLACED_KEY(jobId)) ?? '[]')
-    return new Set<string>(Array.isArray(list) ? list : [])
-  } catch { return new Set<string>() }
+  return new Set<string>(useApp.getState().settings.aiPlaced?.[jobId] ?? [])
 }
 
 type JobState = { t0: number; placed: Set<string> }
@@ -95,9 +91,11 @@ function stateOf(jobId: string): JobState {
   return { t0: firstSeen.get(jobId)!, placed }
 }
 
+/** 记录和片段在同一份工程状态里：没来得及保存就刷新时两者一起丢，下一轮照常补放 */
 function markPlaced(jobId: string, s: JobState, key: string) {
   s.placed.add(key)
-  try { localStorage.setItem(PLACED_KEY(jobId), JSON.stringify([...s.placed])) } catch { /* */ }
+  const settings = useApp.getState().settings
+  useApp.setState({ settings: { ...settings, aiPlaced: { ...settings.aiPlaced, [jobId]: [...s.placed] } } })
 }
 
 function folderFor(j: NarratedJob) {
@@ -123,8 +121,18 @@ export function syncNarratedJob(j: NarratedJob) {
   if (!isStoreAuthority() || !useApp.getState().started) return
   const stage = narratedStage(j)
   if (!stage?.voice) return
-  const place = !!j.params.autoTimeline
   const s = stateOf(j.id)
+  const placedBefore = s.placed.size
+  try {
+    placeStage(j, { ...stage, voice: stage.voice }, s)
+  } finally {
+    // 刚放上的片段马上存盘，别等 30 秒一次的自动保存
+    if (s.placed.size !== placedBefore) void useApp.getState().flushProject()
+  }
+}
+
+function placeStage(j: NarratedJob, stage: NarratedStage & { voice: NonNullable<NarratedStage['voice']> }, s: JobState) {
+  const place = !!j.params.autoTimeline
   const [fw, fh] = String(j.params.size || '1280x720').split('x').map(Number)
   const frame = { width: fw || 1280, height: fh || 720 }
   const folderId = folderFor(j)
