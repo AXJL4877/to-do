@@ -2,6 +2,8 @@
 export type DesktopApi = {
   isDesktop: true
   platform: string
+  /** 本机物理内存（MB），用于定预览 RAM 缓存预算 */
+  systemMemoryMb?: () => number
   getPaths: () => Promise<{ root: string; projects: string; cache: string; exports: string }>
   /** 独立 AI HTTP 服务根地址，如 http://127.0.0.1:PORT */
   getAiBaseUrl: () => string

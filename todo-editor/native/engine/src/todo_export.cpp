@@ -183,9 +183,19 @@ int todo_cmd_export(const wchar_t *graph_path, const wchar_t *out_path) {
   double work_in = (std::max)(0.0, g.work_in);
   double work_out = (std::max)(work_in + 0.05, g.work_out);
 
+  // 文字 / 纯色无素材文件，由合成直接画
+  auto synthetic = [](const Clip &c) {
+    return c.kind == "solid" || c.kind == "text" || !c.text_content.empty();
+  };
   std::vector<Clip> clips;
+  bool has_synthetic = false;
   for (const auto &c : g.clips) {
     if (!c.enabled) continue;
+    if (synthetic(c)) {
+      has_synthetic = true;
+      clips.push_back(c);
+      continue;
+    }
     if (!usable_path(c.media_path)) continue;
     clips.push_back(c);
   }
@@ -199,6 +209,7 @@ int todo_cmd_export(const wchar_t *graph_path, const wchar_t *out_path) {
   for (const auto &c : clips) {
     const Track *t = track_of(c.track_id);
     if (!t || t->kind != "video") continue;
+    if (synthetic(c)) continue;
     std::string k = c.kind;
     if (k.empty()) k = is_still_image(c.kind, c.media_path) ? "image" : "video";
     if (k == "video" || k == "image") video_clips.push_back(c);
@@ -216,6 +227,7 @@ int todo_cmd_export(const wchar_t *graph_path, const wchar_t *out_path) {
   for (const auto &c : clips) {
     const Track *t = track_of(c.track_id);
     if (!t || t->kind != "audio" || t->muted) continue;
+    if (synthetic(c)) continue;
     if (is_still_image(c.kind, c.media_path) || c.kind == "image") continue;
     audio_clips.push_back(c);
   }
@@ -227,7 +239,7 @@ int todo_cmd_export(const wchar_t *graph_path, const wchar_t *out_path) {
 
   /* Video: compose each frame (same rules as preview) then ffmpeg encode. */
   if (!audio_only) {
-    if (video_clips.empty() && audio_clips.empty()) {
+    if (video_clips.empty() && audio_clips.empty() && !has_synthetic) {
       return fail_json("没有可导出的媒体片段（需本机 path）");
     }
     const double t0 = range_only ? work_in : 0.0;
@@ -1080,13 +1092,14 @@ static bool gpu_composite_layers(int w, int h, const std::vector<PreparedLayer> 
     return false;
   }
 
+  // 顺时针：D3D11 默认剔除逆时针三角形，逆时针的全屏四边形一个像素都画不出
   const float quad[] = {
     -1, -1, 0, 1,
-     1, -1, 1, 1,
-    -1,  1, 0, 0,
     -1,  1, 0, 0,
      1, -1, 1, 1,
+    -1,  1, 0, 0,
      1,  1, 1, 0,
+     1, -1, 1, 1,
   };
   D3D11_BUFFER_DESC vbd{};
   vbd.ByteWidth = sizeof(quad);
@@ -1288,6 +1301,17 @@ static int compose_graph_rgb(const EditGraph &g, double time_sec, std::vector<ui
     const bool is_text = (c.kind == "text") || !c.text_content.empty();
     if (is_text) {
       paint_text_layer(layer.data(), w, h, c);
+    } else if (c.kind == "solid") {
+      int r = 0, gr = 0, b = 0;
+      hex_rgb(c.solid_color, &r, &gr, &b);
+      // 合成把纯黑 (0,0,0) 当透明，纯黑底抬到 1 才会盖住下层
+      if (r == 0 && gr == 0 && b == 0) r = gr = b = 1;
+      for (size_t p = 0; p < layer.size(); p += 3) {
+        layer[p] = static_cast<uint8_t>(r);
+        layer[p + 1] = static_cast<uint8_t>(gr);
+        layer[p + 2] = static_cast<uint8_t>(b);
+      }
+      apply_clip_look(layer.data(), w * h, w, h, c);
     } else {
       const bool still = is_still_image(c.kind, c.media_path);
       const double media_t = still ? 0.0 : clip_media_time(c, time_sec);

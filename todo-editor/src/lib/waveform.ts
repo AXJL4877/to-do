@@ -9,7 +9,7 @@ export type PeakSet = { peaks: Float32Array; duration: number }
 
 const peakCache = new Map<string, PeakSet>()
 const inflight = new Map<string, Promise<PeakSet | null>>()
-const CACHE_VER = 'v6'
+const CACHE_VER = 'v7'
 
 function cacheKey(mediaId: string, url: string, pathHint?: string) {
   return `${CACHE_VER}:${mediaId}:${pathHint || url}`
@@ -70,7 +70,7 @@ async function peaksViaElement(
 ): Promise<PeakSet | null> {
   const el = document.createElement('audio')
   el.preload = 'auto'
-  el.muted = true
+  // 不能用 el.muted：静音元素送进 MediaElementSource 的也是静音；靠下面 gain=0 消声
   el.src = url
 
   try {
@@ -140,6 +140,33 @@ async function peaksViaElement(
   }
 }
 
+/** 浏览器内整段解码（wav/mp3/webm/mp4 音轨），多声道取最大绝对值 */
+async function peaksViaDecode(data: ArrayBuffer, bins: number): Promise<PeakSet | null> {
+  const ac = new OfflineAudioContext(1, 1, 44100)
+  try {
+    const audio = await ac.decodeAudioData(data)
+    const n = audio.length
+    if (n < 8 || !(audio.duration > 0)) return null
+    const chans = Array.from({ length: audio.numberOfChannels }, (_, c) => audio.getChannelData(c))
+    const peaks = new Float32Array(bins)
+    for (let i = 0; i < bins; i++) {
+      const start = Math.floor((i / bins) * n)
+      const end = Math.max(start + 1, Math.floor(((i + 1) / bins) * n))
+      let peak = 0
+      for (const ch of chans) {
+        for (let j = start; j < end; j++) {
+          const v = Math.abs(ch[j] ?? 0)
+          if (v > peak) peak = v
+        }
+      }
+      peaks[i] = peak
+    }
+    return { peaks, duration: audio.duration }
+  } catch {
+    return null
+  }
+}
+
 function extFromUrl(url: string, pathHint?: string) {
   const s = pathHint || url
   const m = /\.([a-z0-9]{2,5})(?:\?|$)/i.exec(s)
@@ -162,42 +189,37 @@ export async function loadWaveformPeaks(
   const hint = opts?.durationHint && opts.durationHint > 0 ? opts.durationHint : 5
   const bins = binsForDuration(hint)
 
+  // 仅当与媒体时长几乎一致时用 hint 对齐标尺；绝不用长 hint 去「拉长」短峰值
+  const settle = (ff: PeakSet) => {
+    const duration =
+      hint > 0 && Math.abs(hint - ff.duration) / Math.max(hint, ff.duration) < 0.12
+        ? hint
+        : ff.duration
+    const out = { peaks: ff.peaks, duration }
+    peakCache.set(key, out)
+    return out
+  }
+
   const job = (async () => {
     try {
       if (localPath) {
         const ff = await peaksViaFfmpegPath(localPath, bins)
-        if (ff) {
-          // 仅当与媒体时长几乎一致时用 hint 对齐标尺；绝不用长 hint 去「拉长」短峰值
-          const duration =
-            hint > 0 && Math.abs(hint - ff.duration) / Math.max(hint, ff.duration) < 0.12
-              ? hint
-              : ff.duration
-          const out = { peaks: ff.peaks, duration }
-          peakCache.set(key, out)
-          return out
-        }
+        if (ff) return settle(ff)
       }
 
-      // 无 path / ffmpeg 失败：整文件丢给主进程抽（blob 也能用）
-      if (desktop()?.waveformPeaksBuffer) {
-        try {
-          const res = await fetch(url)
-          if (res.ok) {
-            const data = await res.arrayBuffer()
-            if (data.byteLength > 0 && data.byteLength < 400_000_000) {
-              const ff = await peaksViaFfmpegBuffer(data, bins, extFromUrl(url, localPath))
-              if (ff) {
-                const duration =
-                  hint > 0 && Math.abs(hint - ff.duration) / Math.max(hint, ff.duration) < 0.12
-                    ? hint
-                    : ff.duration
-                const out = { peaks: ff.peaks, duration }
-                peakCache.set(key, out)
-                return out
-              }
-            }
-          }
-        } catch { /* */ }
+      // 无 path / ffmpeg 失败：桌面端整文件丢给主进程抽；纯浏览器用 WebAudio 整段解码
+      let data: ArrayBuffer | null = null
+      try {
+        const res = await fetch(url)
+        if (res.ok) data = await res.arrayBuffer()
+      } catch { /* */ }
+      if (data && data.byteLength > 0 && data.byteLength < 400_000_000) {
+        if (desktop()?.waveformPeaksBuffer) {
+          const ff = await peaksViaFfmpegBuffer(data.slice(0), bins, extFromUrl(url, localPath))
+          if (ff) return settle(ff)
+        }
+        const dec = await peaksViaDecode(data, bins)
+        if (dec) return settle(dec)
       }
 
       // 最后：按媒体时长 seek（对得上视频，可能较慢）

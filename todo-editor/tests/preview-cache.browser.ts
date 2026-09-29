@@ -1,5 +1,6 @@
 import * as preview from '../src/lib/previewCache'
 import * as video from '../src/lib/videoCache'
+import * as disk from '../src/lib/previewDiskCache'
 import { defaultTransform, defaultColor, defaultAudio } from '../src/types'
 import { renderProgramFrame } from '../src/lib/monitorDraw'
 
@@ -56,7 +57,7 @@ async function test(name: string, fn: () => void | Promise<void>) {
     present(30)
     const foreground = videos.slice()
     const before = foreground.map(v => v.currentTime)
-    preview.prefetchProgramFrames({ cache, fromFrame: 90, fps: 30, seq, media, settings, imgCache: images, maxEdge: 320, ahead: 2 })
+    preview.autoCacheProgramFrames({ cache, fromFrame: 90, fps: 30, seq, media, settings, imgCache: images, maxEdge: 320 })
     await sleep(200)
     check(foreground.every((v, i) => v.currentTime === before[i]), 'prefetch changed foreground media time')
   })
@@ -107,7 +108,8 @@ async function test(name: string, fn: () => void | Promise<void>) {
     ] }
     const actual = create('canvas')
     renderProgramFrame(actual, layers, media, settings, 1, images, 320, 180, [], undefined, false, undefined, true)
-    await until(() => videos.every(v => !v.seeking && v.readyState >= 2), 'rotated layers seek')
+    // 开播时释放的预取槽已无 src，不会再就绪
+    await until(() => videos.filter(v => v.getAttribute('src')).every(v => !v.seeking && v.readyState >= 2), 'rotated layers seek')
     renderProgramFrame(actual, layers, media, settings, 1, images, 320, 180, [], undefined, false, undefined, true)
     const lower = create('canvas')
     renderProgramFrame(lower, { ...layers, clips: [layers.clips[1]] }, media, settings, 1, images, 320, 180, [], undefined, false, undefined, true)
@@ -118,8 +120,8 @@ async function test(name: string, fn: () => void | Promise<void>) {
   })
   await test('prefetched two-layer pixels match independently sought reference frames', async () => {
     const c = preview.createPreviewCache()
-    preview.prefetchProgramFrames({ cache: c, fromFrame: 90, fps: 30, seq, media, settings,
-      imgCache: images, maxEdge: 320, ahead: 2 })
+    preview.autoCacheProgramFrames({ cache: c, fromFrame: 90, fps: 30, seq, media, settings,
+      imgCache: images, maxEdge: 320 })
     await until(() => c.frames.has(91) && c.frames.has(92), 'prefetch never completed both frames')
     const reference = create('video')
     reference.muted = true; reference.src = TEST_VIDEO_URL
@@ -154,8 +156,8 @@ async function test(name: string, fn: () => void | Promise<void>) {
     const queued: (() => void)[] = []
     window.requestIdleCallback = ((cb: () => void) => { queued.push(cb); return queued.length }) as typeof idle
     try {
-      preview.prefetchProgramFrames({ cache: c, fromFrame: 60, fps: 30, seq, media, settings,
-        imgCache: images, maxEdge: 320, ahead: 1 })
+      preview.autoCacheProgramFrames({ cache: c, fromFrame: 60, fps: 30, seq, media, settings,
+        imgCache: images, maxEdge: 320 })
       const obsolete = queued.shift()!
       obsolete() // Start a real asynchronous seek, leaving its retry pending.
       const changed = { ...seq, clips: seq.clips.map((clip: any) => ({ ...clip, freeze: 2 })) }
@@ -163,12 +165,29 @@ async function test(name: string, fn: () => void | Promise<void>) {
       preview.ensurePreviewFingerprint(c, fp, 320, 180)
       obsolete()
       check(c.frames.size === 0, 'cancelled generation populated the replacement cache')
-      preview.prefetchProgramFrames({ cache: c, fromFrame: 90, fps: 30, seq: changed, media, settings,
-        imgCache: images, maxEdge: 320, ahead: 1 })
+      preview.autoCacheProgramFrames({ cache: c, fromFrame: 90, fps: 30, seq: changed, media, settings,
+        imgCache: images, maxEdge: 320 })
       queued.shift()!()
     } finally { window.requestIdleCallback = idle }
     await until(() => c.frames.has(91), 'replacement prefetch did not finish')
-    check(!c.frames.has(61), 'old seek retry survived invalidation')
+    preview.cancelPrefetchProgramFrames()
+    check(!c.frames.has(60), 'old seek retry survived invalidation')
+  })
+  await test('shared cache spills to disk once RAM is full and reads frames back', async () => {
+    const shared = preview.getProgramPreviewCache()
+    await disk.clearDiskCache()
+    shared.maxBytes = 320 * 180 * 4 * 3
+    preview.autoCacheProgramFrames({ cache: shared, fromFrame: 0, fps: 30, seq, media, settings,
+      imgCache: images, maxEdge: 320 })
+    const onDisk = () => [...disk.diskFrames()].filter(f => !shared.frames.has(f))
+    await until(() => shared.frames.size === 3 && onDisk().length >= 5, 'frames did not spill to disk')
+    preview.cancelPrefetchProgramFrames()
+    const f = onDisk()[0]
+    check(preview.cachedTimeRanges(shared, 30).some(r => r.start <= f / 30 && f / 30 < r.end), 'disk frame missing from cache bar')
+    const bmp = await disk.diskRead(f)
+    check(bmp && bmp.width === 320 && bmp.height === 180, 'disk frame did not decode back')
+    bmp!.close()
+    await disk.clearDiskCache()
   })
   video.pauseAllVideos()
   return { failed: results.filter(r => !r.ok).length, results, pixelFailure: (window as any).pixelFailure }

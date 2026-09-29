@@ -17,11 +17,12 @@ function AudioWaveform({
   widthPx: number
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const [set, setPeaks] = useState<{ peaks: Float32Array; duration: number } | null>(null)
+  /** undefined = 加载中；null = 读不到音频 */
+  const [set, setPeaks] = useState<{ peaks: Float32Array; duration: number } | null | undefined>(undefined)
 
   useEffect(() => {
     let alive = true
-    setPeaks(null)
+    setPeaks(undefined)
     void loadWaveformPeaks(mediaId, url, { path: mediaPath, durationHint }).then((p) => {
       if (alive) setPeaks(p)
     })
@@ -50,14 +51,19 @@ function AudioWaveform({
     ctx.clearRect(0, 0, w, h)
     const col = getComputedStyle(c).color || 'hsl(158 45% 30%)'
     ctx.fillStyle = col
-    const data = heights ?? Array.from({ length: bars }, (_, i) => 0.1 + 0.04 * Math.sin(i * 0.5))
+    if (set === undefined) return
+    if (!heights) {
+      ctx.fillRect(0, h - 1, w, 1)
+      return
+    }
+    const data = heights
     const bw = w / Math.max(1, data.length)
     // 画布本身只占片段下半，再乘高度系数，避免贴顶
     for (let i = 0; i < data.length; i++) {
       const bh = Math.max(1, (data[i] ?? 0) * h * 0.92)
       ctx.fillRect(i * bw, h - bh, Math.max(1, bw * 0.8), bh)
     }
-  }, [heights, bars, widthPx])
+  }, [set, heights, widthPx])
 
   return (
     <canvas
@@ -164,8 +170,9 @@ export const TimelineClip = memo(function TimelineClip({
   const resizeEdgeAnim = useApp((s) => s.resizeEdgeAnim)
   const media = useApp((s) => (clip.mediaId ? s.media.find((m) => m.id === clip.mediaId) : undefined))
   const drag = useRef<{ edge: 'in' | 'out'; startX: number; originSec: number } | null>(null)
-
-  const bg = clip.text
+  const bg = clip.solid
+    ? `color-mix(in oklab, ${clip.solid.color} 70%, transparent)`
+    : clip.text
     ? 'hsl(32 70% 48% / 0.25)'
     : track.kind === 'audio'
       ? 'hsl(158 45% 40% / 0.25)'

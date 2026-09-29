@@ -79,7 +79,20 @@ function isStillImage(c) {
  * @param {string} outPath
  * @param {{ nativeBin?: string, onProgress?: (p: number) => void, preferJs?: boolean }} [opts]
  */
-function exportSequence(seq, outPath, opts = {}) {
+async function exportSequence(seq, outPath, opts = {}) {
+  if (!seq.audioOnly && (seq.clips || []).some(c => c.enabled !== false && c.text?.fancy)) {
+    let prepared
+    try {
+      const { prepareChalkText } = require('./chalkTextExport.cjs')
+      prepared = await prepareChalkText(seq, { ffmpeg: resolveFfmpeg(opts.nativeBin), rendererUrl: opts.chalkRendererUrl, onProgress: opts.onProgress })
+      return await exportPreparedSequence(prepared.sequence, outPath, { ...opts, onProgress: p => opts.onProgress?.(25 + Math.round(p * 0.75)) })
+    } catch (e) { return { ok: false, error: e.message || '粉笔花字导出失败' } }
+    finally { prepared?.cleanup() }
+  }
+  return exportPreparedSequence(seq, outPath, opts)
+}
+
+function exportPreparedSequence(seq, outPath, opts = {}) {
   if (!opts.preferJs) {
     const engine = resolveEngine(opts.nativeBin)
     if (engine) {

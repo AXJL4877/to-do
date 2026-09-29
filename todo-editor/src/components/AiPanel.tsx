@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AudioLines, Camera, Clapperboard, Film, ImagePlus, LayoutGrid, Loader2, Music, Plus, RotateCcw, Settings, Sparkles, Trash2, Video, Wand2, X } from 'lucide-react'
+import { AudioLines, Camera, Captions, ChevronRight, Clapperboard, Film, ImageIcon, ImagePlus, LayoutGrid, Loader2, Mic, Music, Plus, Blocks, RotateCcw, Settings, Sparkles, Trash2, Video, X } from 'lucide-react'
 import { useApp } from '../store'
 import { AiFloatLaunch } from './AiFloat'
 import { isAiPopout } from '../lib/storeSync'
@@ -7,6 +7,8 @@ import { aiFetch, aiUrl } from '../lib/aiFetch'
 import { AiStyleForm, defaultStyleValues, styleValuesReady, type StylePack, type StyleValues } from './AiStyleForm'
 import { AiStylePicker } from './AiStylePicker'
 import { AiAnimStudio, type AnimPack, type AnimValues } from './AiAnimStudio'
+import { importAiJob, shouldImport } from '../lib/aiJobImport'
+import { phasePercent, phaseText } from '../lib/aiSkills'
 import clsx from 'clsx'
 
 const FALLBACK_SIZE_OPTIONS = [
@@ -46,9 +48,24 @@ type AiModel = {
 type AiConfig = { baseUrl: string; hasApiKey: boolean; apiKeyMasked: string }
 type AiMode = 'image' | 'video' | 'audio' | 'anim'
 
+const MODE_TABS: { id: AiMode; label: string; Icon: typeof Sparkles }[] = [
+  { id: 'image', label: '生图', Icon: Sparkles },
+  { id: 'video', label: '生视频', Icon: Video },
+  { id: 'audio', label: '生音频', Icon: AudioLines },
+  { id: 'anim', label: '动画', Icon: Film },
+]
+
+const JOB_KINDS: Record<string, { label: string; Icon: typeof Sparkles }> = {
+  image: { label: '图片', Icon: ImageIcon },
+  video: { label: '视频', Icon: Video },
+  audio: { label: '音频', Icon: AudioLines },
+  anim: { label: '动画', Icon: Film },
+  skill: { label: 'Skill', Icon: Blocks },
+}
+
 type AiJob = {
   id: string
-  kind: 'image' | 'video' | 'audio' | 'anim'
+  kind: 'image' | 'video' | 'audio' | 'anim' | 'skill'
   status: 'queued' | 'running' | 'done' | 'error' | 'imported'
   prompt: string
   params: {
@@ -61,7 +78,10 @@ type AiJob = {
     height?: number | null
     style?: { id: string; name: string; version: string; summary: string; cutout?: boolean } | null
     anim?: { id: string; name: string; summary: string; alpha: boolean; frames: number } | null
+    skill?: { id: string; name: string; summary: string; alpha: boolean; pipeline?: string } | null
+    output?: { character?: string } | null
     engine?: 'h3'
+    purpose?: 'texture'
   }
   resultName?: string | null
   resultUrl?: string | null
@@ -130,7 +150,6 @@ function audioModelProfile(modelId: string) {
 
 /** AI+：异步入队；截帧→SQLite；成果→媒体库 */
 export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
-  const importMedia = useApp((s) => s.importMedia)
   const addClipFromMedia = useApp((s) => s.addClipFromMedia)
   const captureFrame = useApp((s) => s.captureFrame)
   const media = useApp((s) => s.media)
@@ -181,8 +200,6 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
   const [animOpen, setAnimOpen] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const audioFileRef = useRef<HTMLInputElement>(null)
-  const importing = useRef(new Set<string>())
-
   const aiMedia = media.filter((m) => m.folderId === 'f_ai')
   const activeJobs = jobs.filter((j) => j.status === 'queued' || j.status === 'running')
   const selectedModel = useMemo(() => models.find((m) => m.id === model), [model, models])
@@ -259,7 +276,9 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
           quality: v.resolution,
           model: v.model,
           alpha: v.alpha,
-          imageDataUrl: refDataUrl ?? undefined,
+          segments: v.segments,
+          imageDataUrl: v.character === 'ref' ? refDataUrl ?? undefined : undefined,
+          characterFrom: v.character === 'reuse' ? v.characterFrom ?? undefined : undefined,
           autoTimeline,
         }),
       })
@@ -301,10 +320,7 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
       const items = data.items as AiJob[]
       setJobs(items)
       for (const j of items) {
-        if (j.status === 'done' && j.resultUrl && !importing.current.has(j.id)) {
-          importing.current.add(j.id)
-          void importDoneJob(j)
-        }
+        if (shouldImport(j)) void importDoneJob(j)
       }
     } catch { /* */ }
   }
@@ -374,41 +390,13 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
 
   async function importDoneJob(j: AiJob) {
     try {
-      const ack = await aiFetch(`/api/ai-jobs/${j.id}/ack`, { method: 'POST' })
-      const ackData = await ack.json()
-      if (!ackData.ok) return // 其它窗已入库
-
-      const kind = (j.resultKind || j.kind) === 'video' ? 'video' : 'image'
-      const [w, h] = String(j.params.size || '3840x2160').split('x').map(Number)
-      importMedia([{
-        name: j.resultName || `AI_${j.id}.${kind === 'video' ? 'mp4' : 'png'}`,
-        url: aiUrl(j.resultUrl!),
-        kind,
-        duration: kind === 'video'
-          ? (j.duration || j.params.duration || 5)
-          : useApp.getState().settings.stillDuration,
-        width: j.params.width || w || useApp.getState().settings.width,
-        height: j.params.height || h || useApp.getState().settings.height,
-      }])
-      const st = useApp.getState()
-      const added = st.media[st.media.length - 1]
-      if (added) {
-        useApp.setState({
-          media: st.media.map((m) => (m.id === added.id ? { ...m, folderId: 'f_ai' } : m)),
-        })
-        setJustAdded(added.id)
-        if (j.params.autoTimeline) {
-          addClipFromMedia(added.id, undefined, undefined, {
-            preferFreeTrack: true,
-            source: { type: 'ai', jobId: j.id, kind: j.kind },
-          })
-        }
+      const addedId = await importAiJob(j)
+      if (addedId) {
+        setJustAdded(addedId)
         window.setTimeout(() => setJustAdded(null), 1800)
-        useApp.getState().setToast(`AI ${j.kind === 'anim' ? '动画' : kind === 'video' ? '视频' : '图片'}已入库`)
       }
       void refreshJobs()
     } catch (e) {
-      importing.current.delete(j.id)
       setError(friendlyAiError(e instanceof Error ? e.message : String(e)))
     }
   }
@@ -579,62 +567,58 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
         </div>
       )}
 
-      <div className="tab-row" data-testid="ai-mode-tabs">
-        <button
-          type="button"
-          className={clsx('tab flex-1', mode === 'image' && 'active')}
-          data-testid="ai-mode-image"
-          onClick={() => setMode('image')}
-        >
-          <Sparkles size={12} className="inline mr-1" />生图
-        </button>
-        <button
-          type="button"
-          className={clsx('tab flex-1', mode === 'video' && 'active')}
-          data-testid="ai-mode-video"
-          onClick={() => setMode('video')}
-        >
-          <Video size={12} className="inline mr-1" />生视频
-        </button>
-        <button
-          type="button"
-          className={clsx('tab flex-1', mode === 'audio' && 'active')}
-          data-testid="ai-mode-audio"
-          onClick={() => setMode('audio')}
-        >
-          <AudioLines size={12} className="inline mr-1" />生音频
-        </button>
-        <button
-          type="button"
-          className={clsx('tab flex-1', mode === 'anim' && 'active')}
-          data-testid="ai-mode-anim"
-          onClick={() => setMode('anim')}
-        >
-          <Film size={12} className="inline mr-1" />动画
-        </button>
+      <div className="ai-mode-tabs" data-testid="ai-mode-tabs">
+        {MODE_TABS.map(({ id, label, Icon }) => (
+          <button
+            key={id}
+            type="button"
+            className={clsx('ai-mode-tab', mode === id && 'active')}
+            data-testid={`ai-mode-${id}`}
+            onClick={() => setMode(id)}
+          >
+            <Icon size={14} />
+            <span>{label}</span>
+          </button>
+        ))}
       </div>
 
       {mode === 'anim' && (
         <div className="field">
-          <label>风格动画</label>
           <button type="button" className="ai-style-trigger" data-testid="ai-anim-open" onClick={() => setAnimOpen(true)}>
             <span className="shrink-0 w-10 h-10 rounded-md overflow-hidden grid place-items-center bg-white border" style={{ borderColor: 'var(--border)' }}>
               {anims[0]?.previews[0]
                 ? <img src={anims[0].previews[0]} alt="" className="w-full h-full object-cover" />
                 : <Clapperboard size={16} style={{ color: 'var(--accent)' }} />}
             </span>
-            <span className="min-w-0 flex-1 flex flex-col">
-              <span className="text-[12px] font-semibold truncate">打开风格动画</span>
-              <span className="text-[10px] truncate" style={{ color: 'var(--text-muted)' }}>
-                {anims.length ? `5×5 精灵图 → 序列帧动画 · ${anims.length} 个动画包` : '没有可用的动画包'}
-              </span>
-            </span>
+            <span className="min-w-0 flex-1 text-[12px] font-semibold truncate">风格动画</span>
             <LayoutGrid size={14} className="shrink-0 mr-1" style={{ color: 'var(--text-muted)' }} />
+          </button>
+          <button type="button" className="ai-style-trigger" data-testid="ai-open-skill" onClick={() => useApp.getState().setLibraryTab('skill')}>
+            <span className="shrink-0 w-10 h-10 rounded-md grid place-items-center" style={{ background: '#1f2a26', color: '#f3efe2' }}>
+              <Blocks size={16} />
+            </span>
+            <span className="min-w-0 flex-1 text-[12px] font-semibold truncate">Skill 技能</span>
+            <ChevronRight size={14} className="shrink-0 mr-1" style={{ color: 'var(--text-muted)' }} />
+          </button>
+          <button type="button" className="ai-style-trigger" data-testid="ai-open-voice" onClick={() => useApp.getState().setLibraryTab('voice')}>
+            <span className="shrink-0 w-10 h-10 rounded-md grid place-items-center" style={{ background: 'var(--accent-dim)', color: 'var(--accent)' }}>
+              <Mic size={16} />
+            </span>
+            <span className="min-w-0 flex-1 text-[12px] font-semibold truncate">配音</span>
+            <ChevronRight size={14} className="shrink-0 mr-1" style={{ color: 'var(--text-muted)' }} />
           </button>
         </div>
       )}
       {animOpen && (
-        <AiAnimStudio anims={anims} hasRef={!!refDataUrl} onSubmit={enqueueAnim} onClose={() => setAnimOpen(false)} />
+        <AiAnimStudio
+          anims={anims}
+          hasRef={!!refDataUrl}
+          characters={jobs.flatMap((j) => (j.kind === 'anim' && j.params.output?.character
+            ? [{ jobId: j.id, url: aiUrl(j.params.output.character), name: j.params.anim?.summary ?? j.prompt }]
+            : []))}
+          onSubmit={enqueueAnim}
+          onClose={() => setAnimOpen(false)}
+        />
       )}
 
       {mode === 'image' && styles.length > 0 && (
@@ -646,12 +630,7 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
                 ? <img src={activeStyle.previews[0]} alt="" className="w-full h-full object-cover" />
                 : <Sparkles size={16} style={{ color: 'var(--accent)' }} />}
             </span>
-            <span className="min-w-0 flex-1 flex flex-col">
-              <span className="text-[12px] font-semibold truncate">{activeStyle ? activeStyle.name : '自由生成'}</span>
-              <span className="text-[10px] truncate" style={{ color: 'var(--text-muted)' }}>
-                {activeStyle ? activeStyle.tags.join(' · ') || activeStyle.author : `不限风格 · ${styles.length} 个风格可选`}
-              </span>
-            </span>
+            <span className="min-w-0 flex-1 text-[12px] font-semibold truncate">{activeStyle ? activeStyle.name : '自由生成'}</span>
             <LayoutGrid size={14} className="shrink-0 mr-1" style={{ color: 'var(--text-muted)' }} />
           </button>
         </div>
@@ -662,8 +641,8 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
 
       {mode !== 'audio' && (
       <div className="field">
-        <label>参考图（可选 · {mode === 'anim' ? '锁定动画角色外观' : mode === 'video' ? '有则图生视频' : '有则图生图'}）</label>
-        {refDataUrl ? (
+        <label>参考图</label>
+        {refDataUrl && (
           <div className="ai-ref-preview relative rounded-lg overflow-hidden border" style={{ borderColor: 'var(--border)' }}>
             <img src={refDataUrl} alt="参考图" className="w-full h-20 object-cover" />
             <button
@@ -676,10 +655,6 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
               <X size={12} />
             </button>
           </div>
-        ) : (
-          <p className="text-[11px] m-0 px-0.5 mb-1.5" style={{ color: 'var(--text-muted)' }}>
-            {mode === 'anim' ? '无参考图=按描述设计角色' : `无参考图=文生${mode === 'video' ? '视频' : '图'}`} · 截帧可作参考
-          </p>
         )}
         <div className="flex gap-1">
           <button type="button" className="btn btn-ghost flex-1" data-testid="ai-ref-capture" onClick={captureFrame}>
@@ -724,7 +699,7 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
         <textarea
           data-testid="ai-prompt"
           rows={3}
-          placeholder={mode === 'image' ? '描述画面…' : useH3 ? '描述画面与动作（可按秒写：0-2s …；H3 同时生成声音）' : mode === 'video' ? '描述运动…' : '输入要生成的声音、音乐或朗读文本…'}
+          placeholder={mode === 'video' ? '描述画面与运动…' : '描述画面…'}
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
         />
@@ -749,11 +724,11 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
                 style={{ background: h3Status?.comfy && h3Status.studio ? 'var(--success, #22c55e)' : 'var(--error)' }}
               />
               <span className="truncate flex-1">
-                {!h3Status ? '检测本地 H3…' : h3Status.comfy && h3Status.studio ? '本地 H3 就绪 · 8 步加速 · 免 Key' : `未运行（${h3Status.studio ? '' : 'h3-studio '}${h3Status.comfy ? '' : 'ComfyUI'}）· 生成时会自动启动`}
+                {!h3Status ? '检测中…' : h3Status.comfy && h3Status.studio ? '就绪' : '未运行'}
               </span>
               {h3Status && !(h3Status.comfy && h3Status.studio) && (
                 <button type="button" className="underline shrink-0" data-testid="ai-h3-start" disabled={h3Starting} onClick={() => void startH3()}>
-                  {h3Starting ? '启动中…' : '立即启动'}
+                  {h3Starting ? '启动中…' : '启动'}
                 </button>
               )}
             </div>
@@ -769,14 +744,14 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
             <option key={m.id} value={m.id}>{m.label || m.id}</option>
           ))}
         </select>
-        <div className="flex items-center justify-between gap-1 px-0.5 text-[10px]" style={{ color: 'var(--text-muted)' }}>
-          <span className="truncate">
-            {modelsLoading ? '模型读取中...' : modelsError ? modelsError : models.length ? `${models.length} 个可用模型` : config?.hasApiKey ? '当前能力暂无可用模型' : '请先配置 Key 后刷新模型'}
-          </span>
-          <button type="button" className="underline shrink-0" data-testid="ai-model-refresh" onClick={() => void refreshModels()}>
-            刷新
-          </button>
-        </div>
+        {(modelsError || (!modelsLoading && !models.length)) && (
+          <div className="flex items-center justify-between gap-1 px-0.5 text-[10px]" style={{ color: 'var(--error)' }}>
+            <span className="truncate">{modelsError || (config?.hasApiKey ? '暂无可用模型' : '请先配置 Key')}</span>
+            <button type="button" className="link-btn shrink-0" data-testid="ai-model-refresh" onClick={() => void refreshModels()}>
+              刷新
+            </button>
+          </div>
+        )}
       </div>
       )}
 
@@ -936,7 +911,7 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
       {mode !== 'audio' && (
       <label className="flex items-center gap-2 text-[11px] px-0.5 cursor-pointer" style={{ color: 'var(--text-secondary)' }}>
         <input type="checkbox" checked={autoTimeline} data-testid="ai-auto-timeline" onChange={(e) => setAutoTimeline(e.target.checked)} />
-        完成后自动入轨
+        自动入轨
       </label>
       )}
 
@@ -971,29 +946,44 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
         <div className="field" data-testid="ai-queue">
           <label>队列 · {activeJobs.length} 进行中</label>
           <div className="flex flex-col gap-1">
-            {jobs.slice(0, 12).map((j) => (
+            {jobs.slice(0, 12).map((j) => {
+              const base = JOB_KINDS[j.kind] ?? JOB_KINDS.image
+              const pipeline = j.params.skill?.pipeline
+              const skillIcon = pipeline === 'tts' || pipeline === 'voice' ? Mic : pipeline === 'subtitle' ? Captions : null
+              const kind = skillIcon ? { ...base, Icon: skillIcon } : base
+              const pct = j.status === 'running' ? phasePercent(j.phase) : null
+              return (
               <div
                 key={j.id}
-                className="flex items-start gap-1.5 rounded-md px-2 py-1.5 text-[11px]"
-                style={{ background: 'var(--surface-2)' }}
+                className={clsx('ai-job-row', `is-${j.status}`)}
                 data-testid={`ai-job-${j.id}`}
               >
+                <span className="ai-job-icon">
+                  {j.status === 'running' ? <Loader2 size={12} className="animate-spin" /> : <kind.Icon size={12} />}
+                </span>
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1">
-                    {j.status === 'running' && <Loader2 size={11} className="animate-spin shrink-0" />}
-                    <span className="font-medium shrink-0">{j.kind === 'anim' ? '动画' : j.kind === 'video' ? (j.params.engine === 'h3' ? '视频 · H3' : '视频') : '图片'}</span>
-                    <span style={{ color: j.status === 'error' ? 'var(--error)' : 'var(--text-muted)' }}>
-                      {statusLabel(j)}
+                  <div className="flex items-center gap-1 min-w-0">
+                    <span className="font-medium shrink-0">{j.kind === 'video' && j.params.engine === 'h3' ? '视频 · H3' : j.params.skill?.name ?? kind.label}</span>
+                    <span className="truncate" style={{ color: j.status === 'error' ? 'var(--error)' : 'var(--text-muted)' }}>
+                      {j.status === 'running' ? phaseText(j.phase) || '进行中' : statusLabel(j)}
                     </span>
+                    {pct != null && <span className="ml-auto shrink-0 tabular-nums" style={{ color: 'var(--text-muted)' }}>{pct}%</span>}
                   </div>
                   <p className="m-0 truncate opacity-80">
-                    {j.params.anim
-                      ? `〔${j.params.anim.name} · ${j.params.anim.frames} 帧${j.params.anim.alpha ? ' · 透明' : ''}〕${j.params.anim.summary}`
-                      : j.params.style
-                        ? `〔${j.params.style.name}${j.params.style.cutout ? ' · 透明底' : ''}〕${j.params.style.summary}`
-                        : j.prompt}
+                    {j.params.skill
+                      ? `${j.params.skill.alpha ? '〔透明〕' : ''}${j.params.skill.summary}`
+                      : j.params.anim
+                        ? `〔${j.params.anim.name} · ${j.params.anim.frames} 帧${j.params.anim.alpha ? ' · 透明' : ''}〕${j.params.anim.summary}`
+                        : j.params.style
+                          ? `〔${j.params.style.name}${j.params.style.cutout ? ' · 透明底' : ''}〕${j.params.style.summary}`
+                          : j.prompt}
                   </p>
-                  {j.error && <p className="m-0 mt-0.5" style={{ color: 'var(--error)' }}>{friendlyAiError(j.error)}</p>}
+                  {j.status === 'running' && (
+                    <div className="ai-progress mt-1">
+                      <div className={pct == null ? 'ai-progress-bar' : 'ai-progress-fill'} style={pct == null ? undefined : { width: `${pct}%` }} />
+                    </div>
+                  )}
+                  {j.error && <p className="m-0 mt-0.5 line-clamp-2" style={{ color: 'var(--error)' }} title={j.error}>{friendlyAiError(j.error)}</p>}
                 </div>
                 {j.status === 'error' && (
                   <button
@@ -1021,7 +1011,8 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
                   </button>
                 )}
               </div>
-            ))}
+              )
+            })}
           </div>
         </div>
       )}
@@ -1059,11 +1050,6 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
           </div>
         </>
       )}
-      <p className="text-[10px] m-0 px-0.5" style={{ color: 'var(--text-muted)' }}>
-        <Wand2 size={10} className="inline mr-1" />
-        异步队列 · 可连加多条
-      </p>
-
       {configOpen && (
         <div className="modal-backdrop" data-testid="ai-config-modal" onClick={() => setConfigOpen(false)}>
           <div className="modal" style={{ width: 'min(420px, 100%)' }} onClick={(e) => e.stopPropagation()}>
@@ -1093,9 +1079,6 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
                   onChange={(e) => setConfigKey(e.target.value)}
                 />
               </div>
-              <p className="text-[11px] m-0" style={{ color: 'var(--text-muted)' }}>
-                留空 API Key 会保留当前已保存密钥，只更新中转站地址。
-              </p>
               <div className="flex justify-end gap-2">
                 <button type="button" className="btn btn-ghost" onClick={() => setConfigOpen(false)}>取消</button>
                 <button

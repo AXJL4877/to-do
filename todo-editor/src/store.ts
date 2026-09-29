@@ -6,7 +6,8 @@ import {
 } from './types'
 import { applyPresetKeyframes, findMotionPreset, presetDuration, type ParamValues } from './lib/motionPresets'
 import { autoBezierKeyframes, isEntranceKeyframes, splitKeyframes, patchClipTransform, patchClipXY, resolveClipTransform, sampleKeyframes, seedPositionKeyframes, defaultHandles, snapToFrame } from './lib/keyframeEval'
-import { clearPreviewCache, getProgramPreviewCache, notifyPreviewCacheChanged } from './lib/previewCache'
+import { clearAllPreviewCaches, clearPreviewCache, getProgramPreviewCache, notifyPreviewCacheChanged } from './lib/previewCache'
+import { setDiskCacheLimitGb } from './lib/previewDiskCache'
 import { ensureScene3d } from './lib/scene3d'
 import { desktop } from './lib/desktop'
 import { aiFetch } from './lib/aiFetch'
@@ -499,6 +500,8 @@ export type AppStore = {
     performance: 'quality' | 'balanced' | 'speed'
     /** 预览 RAM 缓存最长边；0 = 与监视器同分辨率 */
     previewCacheMaxEdge: 0 | 480 | 720 | 1080
+    /** 预览磁盘缓存上限（GB），超出按最近使用淘汰 */
+    previewDiskCacheGb?: 2 | 5 | 10 | 20
     shortcuts: Record<string, string>
   }
   media: MediaItem[]
@@ -669,7 +672,19 @@ export type AppStore = {
   updateSelectedAudio: (p: Partial<Clip['audio']>) => void
   updateSelectedText: (p: Partial<NonNullable<Clip['text']>>) => void
   updateSelectedClip: (p: Partial<Clip>) => void
-  addTextClip: () => void
+  addTextClip: (opts?: { name?: string; text?: Partial<NonNullable<Clip['text']>>; transform?: Partial<Clip['transform']> }) => void
+  /** 每条字幕成为字幕轨文字片段（cue 为时间线绝对时间）；给了 linkTo 就链接到该片段（随它选中、移动，裁剪各自独立） */
+  addSubtitleCues: (opts: {
+    cues: { text: string; start: number; end: number }[]
+    linkTo?: string
+    text?: Partial<NonNullable<Clip['text']>>
+    transform?: Partial<Clip['transform']>
+    source?: NonNullable<Clip['meta']>['source']
+  }) => void
+  /** 在播放头新建纯色底（最底层视频轨，铺满画布） */
+  addSolidClip: (color: string) => void
+  /** 改选中纯色底的颜色；返回改了几个 */
+  setSelectedSolidColor: (color: string) => number
   addTransition: (type: TransitionType) => void
   addEffect: (type: string, name: string) => void
   setClipMask: (type: import('./types').MaskType | null) => void
@@ -1050,6 +1065,7 @@ export const useApp = create<AppStore>((set, get) => {
     prefs: {
       defaultDuration: 5, cachePath: './cache', performance: 'balanced',
       previewCacheMaxEdge: 720,
+      previewDiskCacheGb: 10,
       shortcuts: { split: 'Ctrl+B', import: 'Ctrl+I', snap: 'S', select: 'V', razor: 'C', undo: 'Ctrl+Z', play: 'Space' },
     },
     media: [],
@@ -1439,7 +1455,7 @@ export const useApp = create<AppStore>((set, get) => {
       if (p.previewCacheMaxEdge != null && p.previewCacheMaxEdge !== prev.previewCacheMaxEdge) {
         clearPreviewCache(getProgramPreviewCache())
         notifyPreviewCacheChanged(true)
-        notify('预览缓存分辨率已改，需重新播放填充')
+        notify('预览缓存分辨率已改，后台会自动重新缓存')
       }
     },
 
@@ -1868,9 +1884,13 @@ export const useApp = create<AppStore>((set, get) => {
       patchSeq((s) => {
         const primary = s.clips.find((c) => c.id === id)
         const targets = new Set<string>([id])
-        if (primary?.linkedId) targets.add(primary.linkedId)
-        for (const c of s.clips) {
-          if (c.linkedId === id) targets.add(c.id)
+        // 只有音视频配对跟着一起裁；链接的字幕等文字片段各自保留时长
+        if (primary && !primary.text) {
+          if (primary.linkedId) targets.add(primary.linkedId)
+          for (const c of s.clips) {
+            if (c.linkedId === id) targets.add(c.id)
+          }
+          for (const c of s.clips) if (c.text) targets.delete(c.id)
         }
         return enforceNoOverlap({
           ...s,
@@ -2159,15 +2179,26 @@ export const useApp = create<AppStore>((set, get) => {
 
     toggleClipEnabled() { get().pushHistory(); patchSelected((c) => ({ ...c, enabled: !c.enabled })) },
     unlinkSelected() {
+      const sel = new Set(get().selectedClipIds)
       get().pushHistory()
-      patchSelected((c) => ({ ...c, linkedId: undefined }))
+      patchSeq((s) => ({
+        ...s,
+        clips: s.clips.map((c) => (sel.has(c.id) || (c.linkedId && sel.has(c.linkedId)) ? { ...c, linkedId: undefined } : c)),
+      }))
       notify('已解链')
     },
     linkSelected() {
-      if (get().selectedClipIds.length < 2) return
+      const s = get().seq()
+      const sel = s.clips.filter((c) => get().selectedClipIds.includes(c.id))
+      if (sel.length < 2) return
       get().pushHistory()
-      const lid = uid('link')
-      patchSelected((c) => ({ ...c, linkedId: lid }))
+      // 以第一个非文字片段为主，其余指向它；主片段原有的音视频配对保留
+      const primary = sel.find((c) => !c.text) ?? sel[0]
+      const ids = new Set(sel.map((c) => c.id))
+      patchSeq((sq) => ({
+        ...sq,
+        clips: sq.clips.map((c) => (ids.has(c.id) && c.id !== primary.id ? { ...c, linkedId: primary.id } : c)),
+      }))
       notify('已链接')
     },
     groupSelected() {
@@ -2277,7 +2308,7 @@ export const useApp = create<AppStore>((set, get) => {
       patchSelected((c) => ({ ...c, ...p }))
     },
 
-    addTextClip() {
+    addTextClip(opts) {
       get().pushHistory()
       let seq = get().seq()
       let track = seq.tracks.find((t) => t.kind === 'subtitle')
@@ -2287,15 +2318,87 @@ export const useApp = create<AppStore>((set, get) => {
         set({ sequences: get().sequences.map((s) => (s.id === seq.id ? seq : s)) })
       }
       const clip: Clip = {
-        id: uid('clip'), trackId: track.id, name: '文本',
+        id: uid('clip'), trackId: track.id, name: opts?.name ?? '文本',
         start: get().playhead, duration: 3, inPoint: 0, outPoint: 3,
         enabled: true, speed: 1, reverse: false, speedKeyframes: [],
-        transform: defaultTransform(), color: defaultColor(), audio: defaultAudio(),
-        text: defaultText(), effects: [], blend: 'normal', keyframes: {},
+        transform: { ...defaultTransform(), ...opts?.transform },
+        color: defaultColor(), audio: defaultAudio(),
+        text: { ...defaultText(), ...opts?.text }, effects: [], blend: 'normal', keyframes: {},
       }
       clip.meta = buildClipMeta(clip, track, { type: 'manual' })
       patchSeq((s) => enforceNoOverlap({ ...s, clips: [...s.clips, clip] }))
       set({ selectedClipIds: [clip.id], propTab: 'text' })
+    },
+
+    addSubtitleCues({ cues, linkTo, text, transform, source }) {
+      const rows = cues.filter((q) => q.text.trim() && q.end > q.start)
+      if (!rows.length) return
+      get().pushHistory()
+      let sequence = get().seq()
+      const anchor = linkTo ? sequence.clips.find((c) => c.id === linkTo) : undefined
+      const first = Math.min(...rows.map((q) => q.start))
+      const last = Math.max(...rows.map((q) => q.end))
+      const s = resolveFreeTrack(sequence, 'subtitle', first, last - first)
+      sequence = s.seq
+      const subs = rows.map((q) => {
+        const d = q.end - q.start
+        const clip: Clip = {
+          id: uid('clip'), trackId: s.track.id, name: q.text.slice(0, 16), linkedId: anchor?.id,
+          start: q.start, duration: d, inPoint: 0, outPoint: d,
+          enabled: true, speed: 1, reverse: false, speedKeyframes: [],
+          transform: { ...defaultTransform(), ...transform },
+          color: defaultColor(), audio: defaultAudio(),
+          text: { ...defaultText(), animIn: 'none', animOut: 'none', ...text, content: q.text },
+          effects: [], blend: 'normal', keyframes: {},
+        }
+        clip.meta = buildClipMeta(clip, s.track, source)
+        return clip
+      })
+      const tracks = sequence.tracks
+      patchSeq((sq) => enforceNoOverlap({
+        ...sq,
+        tracks,
+        clips: [...sq.clips, ...subs],
+        workOut: Math.max(sq.workOut, last),
+      }))
+      set({ selectedClipIds: subs.map((c) => c.id) })
+    },
+
+    addSolidClip(color) {
+      get().pushHistory()
+      let seq = get().seq()
+      const start = get().playhead
+      const duration = Math.max(0.2, get().settings.stillDuration || 5)
+      // 当背景用：从最底下的视频轨往上找空位，都占了就在视频段最底部新建一条
+      const free = [...seq.tracks].reverse().find((t) => t.kind === 'video' && !t.locked
+        && !seq.clips.some((c) => c.trackId === t.id && rangeOverlap(start, duration, c.start, c.duration)))
+      let track = free
+      if (!track) {
+        track = newTrackOfKind(seq, 'video')
+        seq = { ...seq, tracks: renameKindTracks(insertTrack(seq.tracks, track, 'after')) }
+        track = seq.tracks.find((t) => t.id === track!.id)!
+        set({ sequences: get().sequences.map((s) => (s.id === seq.id ? seq : s)) })
+      }
+      const clip: Clip = {
+        id: uid('clip'), trackId: track.id, name: `纯色 ${color.toUpperCase()}`,
+        start, duration, inPoint: 0, outPoint: duration,
+        enabled: true, speed: 1, reverse: false, speedKeyframes: [],
+        transform: defaultTransform(), color: defaultColor(), audio: defaultAudio(),
+        solid: { color }, effects: [], blend: 'normal', keyframes: {},
+      }
+      clip.meta = buildClipMeta(clip, track, { type: 'manual' })
+      patchSeq((s) => enforceNoOverlap({ ...s, clips: [...s.clips, clip] }))
+      set({ selectedClipIds: [clip.id] })
+      notify('已添加纯色底')
+    },
+
+    setSelectedSolidColor(color) {
+      const ids = new Set(get().selectedClipIds)
+      const n = get().seq().clips.filter((c) => ids.has(c.id) && c.solid).length
+      if (!n) return 0
+      pushHistoryCoalesced(get, set)
+      patchSelected((c) => (c.solid ? { ...c, solid: { color }, name: `纯色 ${color.toUpperCase()}` } : c))
+      return n
     },
 
     addTransition(type) {
@@ -2880,8 +2983,7 @@ export const useApp = create<AppStore>((set, get) => {
       notify(`已应用动效「${opts.label ?? preset.name}」`)
     },
     clearCache() {
-      clearPreviewCache(getProgramPreviewCache())
-      notifyPreviewCacheChanged(true)
+      void clearAllPreviewCaches()
       set({ cacheMb: 0 })
       notify('缓存已清理')
     },
@@ -2997,6 +3099,12 @@ export const useApp = create<AppStore>((set, get) => {
       place()
     },
   }
+})
+
+setDiskCacheLimitGb(useApp.getState().prefs.previewDiskCacheGb ?? 10)
+useApp.subscribe((s, p) => {
+  const gb = s.prefs.previewDiskCacheGb ?? 10
+  if (gb !== (p.prefs.previewDiskCacheGb ?? 10)) setDiskCacheLimitGb(gb)
 })
 
 useApp.subscribe((s, p) => {

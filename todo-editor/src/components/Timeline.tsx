@@ -14,6 +14,9 @@ import {
 } from '../lib/previewCache'
 import { getLivePlayhead, setLivePlayhead, subscribeLivePlayhead } from '../lib/livePlayhead'
 import { broadcastPlayheadSeek, setLocalPlayheadScrubbing, isTimelinePopout } from '../lib/storeSync'
+import { subtitleTargets } from '../lib/subtitleBurn'
+import { SubtitleBurnDialog } from './SubtitleBurnDialog'
+import { linkedClosure } from '../lib/clipLinks'
 import { ContextMenu } from './ContextMenu'
 import { TimelineClip } from './TimelineClip'
 import { PlayheadOverlay } from './PlayheadOverlay'
@@ -62,14 +65,6 @@ export function Timeline({
   const setTimelineZoom = useApp((s) => s.setTimelineZoom)
   const pushHistory = useApp((s) => s.pushHistory)
   const slipClip = useApp((s) => s.slipClip)
-  const duplicateSelected = useApp((s) => s.duplicateSelected)
-  const toggleClipEnabled = useApp((s) => s.toggleClipEnabled)
-  const matchFrame = useApp((s) => s.matchFrame)
-  const liftExtract = useApp((s) => s.liftExtract)
-  const nestSelected = useApp((s) => s.nestSelected)
-  const pasteAttributes = useApp((s) => s.pasteAttributes)
-  const copyAttributes = useApp((s) => s.copyAttributes)
-  const extractAudio = useApp((s) => s.extractAudio)
   const setTool = useApp((s) => s.setTool)
   const undo = useApp((s) => s.undo)
   const redo = useApp((s) => s.redo)
@@ -85,6 +80,8 @@ export function Timeline({
   const popout = isTimelinePopout()
 
   const [ctx, setCtx] = useState<{ x: number; y: number; clipId: string } | null>(null)
+  const [burnClipIds, setBurnClipIds] = useState<string[] | null>(null)
+  const closeBurn = useCallback(() => setBurnClipIds(null), [])
   const [marquee, setMarquee] = useState<null | {
     x0: number; y0: number; x1: number; y1: number; additive: boolean; base: string[]
   }>(null)
@@ -473,15 +470,7 @@ export function Timeline({
           // 多选中单击未拖 → 收成当前片段（+链接 A/V）
           const st = useApp.getState()
           const cur = st.sequences.find((s) => s.id === st.activeSeqId) ?? st.sequences[0]
-          const only = new Set<string>([d.clipId])
-          if (!d.collapseAlt) {
-            const c = cur.clips.find((x) => x.id === d.clipId)
-            if (c?.linkedId) only.add(c.linkedId)
-            for (const o of cur.clips) {
-              if (o.linkedId === d.clipId) only.add(o.id)
-            }
-          }
-          st.selectClips([...only])
+          st.selectClips(d.collapseAlt ? [d.clipId] : linkedClosure(cur.clips, [d.clipId]))
         }
       }
       drag.current = null
@@ -559,15 +548,7 @@ export function Timeline({
 
   function expandLinkedAv(clipIds: string[], withLinked: boolean) {
     if (!withLinked) return [...clipIds]
-    const linked = new Set(clipIds)
-    for (const id of clipIds) {
-      const c = seq.clips.find((x) => x.id === id)
-      if (c?.linkedId) linked.add(c.linkedId)
-      for (const o of seq.clips) {
-        if (o.linkedId === id) linked.add(o.id)
-      }
-    }
-    return [...linked]
+    return linkedClosure(seq.clips, clipIds)
   }
 
   function onClipPointerDown(e: React.PointerEvent, clipId: string, trackLocked: boolean) {
@@ -983,7 +964,7 @@ export function Timeline({
                     onTrimOut={(e) => !track.locked && onTrimPointerDown(e, clip.id, 'out')}
                     onContextMenu={(e) => {
                       e.preventDefault()
-                      selectClips([clip.id])
+                      if (!selectedClipIds.includes(clip.id)) selectClips([clip.id])
                       setCtx({ x: e.clientX, y: e.clientY, clipId: clip.id })
                     }}
                   />
@@ -1044,29 +1025,30 @@ export function Timeline({
         <TimelineTimecode fps={fps} duration={duration} />
       </div>
 
-      {ctx && (
+      {ctx && (() => {
+        const subs = subtitleTargets(selectedClipIds)
+        const burnItem = subs.audio.length ? [{
+          id: 'burn-subtitles',
+          label: subs.burnable.length > 1 ? `烧录字幕（${subs.burnable.length} 段）` : '烧录字幕',
+          disabled: !subs.burnable.length,
+          onClick: () => setBurnClipIds(subs.burnable.map((b) => b.clip.id)),
+        }] : []
+        const sel = new Set(selectedClipIds)
+        const hasLink = seq.clips.some((c) => c.linkedId && (sel.has(c.id) || sel.has(c.linkedId)))
+        return (
         <ContextMenu
           x={ctx.x}
           y={ctx.y}
           onClose={() => setCtx(null)}
           items={[
-            { id: 'props', label: '静态属性（监视器）', shortcut: '1', onClick: () => useApp.getState().openPropWheelOnMonitor('static') },
-            { id: 'split', label: '分割', shortcut: 'Ctrl+K', onClick: razorAtPlayhead },
-            { id: 'dup', label: '复制', shortcut: 'Ctrl+D', onClick: duplicateSelected },
-            { id: 'lift', label: '提升 (Lift)', onClick: () => liftExtract(false) },
-            { id: 'extract', label: '抽出 (Extract)', onClick: () => liftExtract(true) },
-            { id: 'nest', label: '嵌套复合片段', onClick: nestSelected },
-            { id: 'copy-attrs', label: '复制属性', onClick: copyAttributes },
-            { id: 'paste-attrs', label: '粘贴属性', onClick: pasteAttributes },
-            { id: 'extract-audio', label: '提取音频', onClick: extractAudio },
-            { id: 'del', label: '删除', shortcut: 'Del', danger: true, onClick: () => deleteSelected(true) },
-            { id: 'enable', label: '启用/禁用', onClick: toggleClipEnabled },
-            { id: 'match', label: '匹配帧', onClick: matchFrame },
-            { id: 'link', label: '链接', onClick: linkSelected },
-            { id: 'unlink', label: '解链', onClick: unlinkSelected },
+            ...burnItem,
+            { id: 'link', label: '链接', disabled: selectedClipIds.length < 2, onClick: linkSelected },
+            { id: 'unlink', label: '解链', disabled: !hasLink, onClick: unlinkSelected },
           ]}
         />
-      )}
+        )
+      })()}
+      {burnClipIds && <SubtitleBurnDialog clipIds={burnClipIds} onClose={closeBurn} />}
     </section>
   )
 }

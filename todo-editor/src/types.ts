@@ -52,6 +52,37 @@ export interface TextStyle {
   animInDur: number
   /** 出场时长（秒） */
   animOutDur: number
+  /** 花字：存在时替代 color / stroke / shadow 的简单样式 */
+  fancy?: FancyText
+}
+
+/** 花字尺寸类数值均以 1080p 画面像素计，渲染时按画布高度缩放 */
+export interface FancyStroke { color: string; width: number }
+
+export interface FancyText {
+  chalk?: { duration: number; grain: number; hand: boolean }
+  /** 来源预设 id（仅展示用） */
+  preset?: string
+  fontWeight: number
+  italic?: boolean
+  /** 1 色为纯色；2~4 色为线性渐变 */
+  fill: string[]
+  /** 渐变方向（度）：90 = 自上而下 */
+  fillAngle: number
+  /** 由内向外的多层描边 */
+  strokes: FancyStroke[]
+  shadow?: { color: string; blur: number; x: number; y: number }
+  /** 立体厚度：沿 angle 方向堆叠 depth 层 */
+  extrude?: { color: string; depth: number; angle: number }
+  glow?: { color: string; blur: number }
+  /** 顶部高光 0~1 */
+  gloss?: number
+  /** 文字背后的底块 */
+  bg?: { color: string; radius: number; padX: number; padY: number }
+  /** 字内质感纹理（小尺寸 JPEG dataURL，随工程保存） */
+  texture?: string
+  textureOpacity?: number
+  textureBlend?: 'normal' | 'multiply' | 'overlay'
 }
 
 export interface MediaItem {
@@ -148,7 +179,10 @@ export interface Clip {
   linkedId?: string; enabled: boolean; groupId?: string
   speed: number; reverse: boolean; freeze?: number
   speedKeyframes: Keyframe[]; transform: Transform2D; color: ColorGrade; audio: AudioParams
-  text?: TextStyle; effects: EffectInstance[]; mask?: Mask; blend: BlendMode
+  text?: TextStyle
+  /** 纯色底：无素材，铺满画布的纯色层（#RRGGBB） */
+  solid?: { color: string }
+  effects: EffectInstance[]; mask?: Mask; blend: BlendMode
   transitionIn?: TransitionRef; transitionOut?: TransitionRef
   keyframes: Record<string, Keyframe[]>
   chromaKey?: { color: string; tolerance: number; enabled: boolean }
@@ -187,6 +221,8 @@ export interface Prefs {
   performance: 'quality' | 'balanced' | 'speed'
   /** 预览 RAM 缓存最长边；0 = 与监视器预览同分辨率 */
   previewCacheMaxEdge: 0 | 480 | 720 | 1080
+  /** 预览磁盘缓存上限（GB），超出按最近使用淘汰 */
+  previewDiskCacheGb?: 2 | 5 | 10 | 20
   shortcuts: Record<string, string>
 }
 

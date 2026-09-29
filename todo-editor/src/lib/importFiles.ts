@@ -1,5 +1,6 @@
 import type { MediaItem, MediaKind } from '../types'
 import { desktop } from './desktop'
+import { aiUrl } from './aiFetch'
 
 export type ParsedMedia = {
   name: string
@@ -35,9 +36,16 @@ function durableFromFile(file: File): { url: string; path?: string } {
   return { url: URL.createObjectURL(file) }
 }
 
+/** 桌面端 AI 服务每次启动端口随机，旧草稿里的 http://127.0.0.1:旧端口/ai-generated/… 要换成当前地址 */
+function rebaseAiUrl(url: string): string {
+  const m = /^https?:\/\/(?:127\.0\.0\.1|localhost):\d+(\/ai-generated\/.*)$/i.exec(url)
+  return m ? aiUrl(m[1]) : url
+}
+
 /** 草稿恢复：blob 失效则用 path 重建；仍无 path 则标离线 */
 export function reviveMediaList(media: MediaItem[]): MediaItem[] {
-  return media.map((m) => {
+  return media.map((raw) => {
+    const m = { ...raw, url: rebaseAiUrl(raw.url ?? ''), ...(raw.proxyUrl ? { proxyUrl: rebaseAiUrl(raw.proxyUrl) } : {}) }
     if (m.path && (!m.url || m.url.startsWith('blob:') || m.offline)) {
       return { ...m, url: pathToFileUrl(m.path), offline: false }
     }

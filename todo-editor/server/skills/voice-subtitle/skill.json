@@ -1,0 +1,75 @@
+{
+  "spec": "todo-skill-pack/1",
+  "id": "builtin.voice-subtitle",
+  "name": "字幕",
+  "version": "2.2.0",
+  "author": "TO DO",
+  "description": "给时间轴上的音频烧字幕：有配音文案的直接用文案和 TTS 逐字时间戳，没有的先语音识别出文字和时间；按 burn-subtitles 规则切条（气口切窗、关键词强调），字幕进时间轴对齐并链接该音频，另烧一份透明底 WebM 备用。",
+  "tags": ["字幕", "口播", "WebM"],
+  "previews": ["previews/01-subtitle.png"],
+  "pipeline": "subtitle",
+  "input": {
+    "label": "配音",
+    "maxLength": 5000
+  },
+  "output": {
+    "mime": "video/webm",
+    "codec": "vp9",
+    "alphaWhen": {}
+  },
+  "params": [
+    {
+      "id": "size", "type": "select", "group": "output", "label": "画幅", "default": "1920x1080",
+      "options": [
+        { "value": "1920x1080", "label": "16:9 · 1080p" },
+        { "value": "1280x720", "label": "16:9 · 720p" },
+        { "value": "1080x1920", "label": "9:16 竖屏" },
+        { "value": "1080x1080", "label": "1:1 方形" }
+      ]
+    },
+    {
+      "id": "font", "type": "select", "group": "text", "label": "字体", "default": "smiley",
+      "options": [
+        { "value": "smiley", "label": "得意黑" },
+        { "value": "yahei", "label": "微软雅黑" },
+        { "value": "heiti", "label": "黑体" },
+        { "value": "kaiti", "label": "楷体" },
+        { "value": "xingkai", "label": "行楷" },
+        { "value": "lishu", "label": "隶书" },
+        { "value": "hupo", "label": "琥珀" }
+      ]
+    },
+    {
+      "id": "fontPx", "type": "number", "group": "text", "label": "字号",
+      "min": 28, "max": 120, "step": 2, "default": 54, "unit": "px", "hint": "按画面短边 1080 换算"
+    },
+    {
+      "id": "bottomPct", "type": "number", "group": "text", "label": "距底",
+      "min": 2, "max": 90, "step": 1, "default": 6, "unit": "%", "hint": "字幕底边离画面底部的距离，占画面高度"
+    },
+    {
+      "id": "keywords", "type": "select", "group": "text", "label": "关键词", "default": "on",
+      "options": [
+        { "value": "on", "label": "变色强调", "hint": "只在烧录的 WebM 里生效" },
+        { "value": "off", "label": "纯白" }
+      ]
+    },
+    {
+      "id": "maxChars", "type": "number", "group": "timing", "label": "每条字数",
+      "min": 8, "max": 30, "step": 1, "default": 18, "hint": "单条字幕最多几个字"
+    },
+    {
+      "id": "fps", "type": "select", "group": "output", "label": "帧率", "default": "30",
+      "options": [
+        { "value": "25", "label": "25 fps" },
+        { "value": "30", "label": "30 fps" },
+        { "value": "60", "label": "60 fps" }
+      ]
+    }
+  ],
+  "runtime": {
+    "type": "python",
+    "entry": "render.py",
+    "timeoutSec": 3600
+  }
+}

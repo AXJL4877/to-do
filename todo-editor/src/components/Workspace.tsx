@@ -1,3 +1,4 @@
+import { Inspector } from './Inspector'
 import { useCallback, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { MediaLibrary } from './MediaLibrary'
 import { Monitor } from './Monitor'
@@ -14,7 +15,6 @@ import {
   type DockSlot,
 } from '../lib/panelDock'
 import clsx from 'clsx'
-import { usePreviewSuspend } from '../hooks/usePreviewSuspend'
 
 function ResizeHandle({ axis, onDelta, testId }: {
   axis: 'x' | 'y'
@@ -31,60 +31,26 @@ function ResizeHandle({ axis, onDelta, testId }: {
   )
 }
 
-function MonitorArea() {
+function MonitorArea({ focused, onFocus, inspector, onInspector }: { focused: boolean; onFocus: () => void; inspector: boolean; onInspector: () => void }) {
   const monitorView = useApp((s) => s.monitorView)
   const setMonitorView = useApp((s) => s.setMonitorView)
-  const [viewOpen, setViewOpen] = useState(false)
-  usePreviewSuspend(viewOpen, 'menu')
-
-  const viewLabel =
-    monitorView === 'dual' ? '编辑+节目'
-      : monitorView === 'edit' ? '编辑'
-        : monitorView === 'source' ? '源'
-          : '节目'
-
+  const performance = useApp(s => s.prefs.performance)
+  const updatePrefs = useApp(s => s.updatePrefs)
   return (
     <div className="flex flex-col flex-1 min-h-0 min-w-0" data-testid="monitor-area">
-      <div className="flex items-center gap-1 px-1.5 py-0.5 shrink-0 relative" data-testid="monitor-view-tabs">
-        <button
-          type="button"
-          className="tab active"
-          data-testid="monitor-view-menu"
-          onClick={() => setViewOpen((v) => !v)}
-        >
-          {viewLabel} ▾
-        </button>
-        {viewOpen && (
-          <div
-            className="absolute left-1 top-full z-20 mt-0.5 min-w-[132px] rounded-lg border p-1 shadow-lg menu-pop"
-            style={{ background: 'var(--surface-1)', borderColor: 'var(--border)' }}
-            data-testid="monitor-view-dropdown"
-          >
-            {([
-              ['dual', '编辑 + 节目'],
-              ['edit', '编辑窗'],
-              ['program', '节目窗'],
-              ['source', '源监视器'],
-            ] as const).map(([id, label]) => (
-              <button
-                key={id}
-                type="button"
-                className={clsx(
-                  'w-full text-left px-2.5 py-1.5 rounded-md text-[12px]',
-                  monitorView === id ? 'bg-[var(--accent-dim)] text-[var(--accent)]' : 'hover:bg-[var(--surface-2)]',
-                )}
-                data-testid={`monitor-view-${id}`}
-                onClick={() => { setMonitorView(id); setViewOpen(false) }}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        )}
+      <div className="preview-toolbar" data-testid="monitor-view-tabs">
+        <div className="preview-tabs" aria-label="预览模式">{([
+          ['edit', '编辑'], ['program', '节目'], ['dual', '双窗'], ['source', '源素材'],
+        ] as const).map(([id, label]) => <button key={id} type="button" className={monitorView === id ? 'active' : ''} aria-pressed={monitorView === id} data-testid={`monitor-view-${id}`} onClick={() => setMonitorView(id)}>{label}</button>)}</div>
+        <div className="preview-tools">
+          <select aria-label="预览画质" value={performance} onChange={e => updatePrefs({ performance: e.target.value as typeof performance })} title="只调整预览精度，导出保持工程画质"><option value="speed">流畅</option><option value="balanced">均衡</option><option value="quality">清晰</option></select>
+          <button type="button" className={focused ? 'active' : ''} aria-pressed={focused} onClick={onFocus} data-testid="preview-focus">{focused ? '返回编辑' : '预览优先'}</button>
+          {!inspector && <button type="button" onClick={onInspector} title="展开右侧属性栏" data-testid="inspector-toggle">属性</button>}
+        </div>
       </div>
 
       {monitorView === 'dual' && (
-        <div className="flex flex-1 min-h-0 min-w-0 gap-1" data-testid="dual-monitors" onClick={() => setViewOpen(false)}>
+        <div className="flex flex-1 min-h-0 min-w-0 gap-1" data-testid="dual-monitors">
           <div className="flex-1 min-w-0 min-h-0 overflow-hidden">
             <Monitor mode="edit" />
           </div>
@@ -96,19 +62,19 @@ function MonitorArea() {
       )}
 
       {monitorView === 'edit' && (
-        <div className="flex-1 min-h-0 overflow-hidden" onClick={() => setViewOpen(false)}>
+        <div className="flex-1 min-h-0 overflow-hidden">
           <Monitor mode="edit" />
         </div>
       )}
 
       {monitorView === 'program' && (
-        <div className="flex-1 min-h-0 overflow-hidden" onClick={() => setViewOpen(false)}>
+        <div className="flex-1 min-h-0 overflow-hidden">
           <Monitor mode="program" />
         </div>
       )}
 
       {monitorView === 'source' && (
-        <div className="flex-1 min-h-0 overflow-hidden" onClick={() => setViewOpen(false)}>
+        <div className="flex-1 min-h-0 overflow-hidden">
           <Monitor mode="source" />
         </div>
       )}
@@ -241,8 +207,10 @@ function DockDropOverlay() {
   )
 }
 
-/** 右侧属性栏已移除：改用片段旁渐进式属性轮盘 */
+/** 常用属性常驻，保留片段轮盘快捷操作。 */
 export function Workspace() {
+  const [focused, setFocused] = useState(false)
+  const [inspector, setInspector] = useState(true)
   const layout = useApp((s) => s.layout)
   const setLayout = useApp((s) => s.setLayout)
   const dock = layout.panelDock ?? { media: 'left' as const, ai: 'tab' as const }
@@ -261,8 +229,8 @@ export function Workspace() {
   }, [layout.dockH, setLayout])
 
   return (
-    <div className="nle-upper flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-hidden relative" data-testid="workspace">
-      <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
+    <div className="nle-upper flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-hidden relative" data-testid="workspace" data-preview-focused={focused}>
+      <div className="workspace-row flex min-h-0 min-w-0 flex-1 overflow-hidden">
         {left.length > 0 && (
           <>
             <aside className="nle-panel-col shrink-0" style={{ width: layout.sidebarW }}>
@@ -272,7 +240,7 @@ export function Workspace() {
           </>
         )}
         <main className="nle-center flex-1 min-w-0 min-h-0 flex flex-col p-1 overflow-hidden">
-          <MonitorArea />
+          <MonitorArea focused={focused} onFocus={() => setFocused(v => !v)} inspector={inspector && !focused} onInspector={() => { if (focused) { setFocused(false); setInspector(true) } else setInspector(v => !v) }} />
         </main>
         {right.length > 0 && (
           <>
@@ -282,6 +250,7 @@ export function Workspace() {
             </aside>
           </>
         )}
+        {inspector && <Inspector onClose={() => setInspector(false)} />}
       </div>
       {bottom.length > 0 && (
         <>

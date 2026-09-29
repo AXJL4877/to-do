@@ -39,6 +39,28 @@ if (process.env.TODO_DISABLE_GPU === '1') {
   app.disableHardwareAcceleration()
 }
 
+/** 崩溃诊断：子进程/渲染进程异常退出、主进程未捕获异常都写到 userData/logs/crash.log */
+function crashLog(...parts) {
+  const line = `[${new Date().toISOString()}] ${parts.map((p) => (typeof p === 'string' ? p : JSON.stringify(p))).join(' ')}\n`
+  try {
+    const dir = path.join(app.getPath('userData'), 'logs')
+    fs.mkdirSync(dir, { recursive: true })
+    fs.appendFileSync(path.join(dir, 'crash.log'), line)
+  } catch { /* */ }
+  console.error('[crash]', line.trim())
+}
+process.on('uncaughtException', (e) => crashLog('main uncaughtException', String(e?.stack || e)))
+process.on('unhandledRejection', (e) => crashLog('main unhandledRejection', String(e?.stack || e)))
+process.on('exit', (code) => crashLog('main exit', { code }))
+app.on('child-process-gone', (_e, d) => crashLog('child-process-gone', d))
+app.on('render-process-gone', (_e, wc, d) => crashLog('render-process-gone', { url: wc.getURL(), ...d }))
+app.on('web-contents-created', (_e, wc) => {
+  wc.on('console-message', (_ev, level, message, line, sourceId) => {
+    if (level >= 3) crashLog('renderer error', { message, sourceId, line })
+  })
+  wc.on('unresponsive', () => crashLog('renderer unresponsive', { url: wc.getURL() }))
+})
+
 function appUrl(search = '') {
   const base = (process.env.VITE_DEV_SERVER_URL || 'http://127.0.0.1:5173').replace(/\/$/, '')
   return search ? `${base}${search.startsWith('?') ? search : `?${search}`}` : base
@@ -691,6 +713,7 @@ app.whenReady().then(async () => {
       filePath,
       {
         nativeBin,
+        chalkRendererUrl: isDev ? new URL('/chalk-render.html', appUrl()).href : undefined,
         onProgress: (progress) => {
           if (!sender.isDestroyed()) {
             sender.send('desktop:export-progress', { jobId, progress, status: 'running' })

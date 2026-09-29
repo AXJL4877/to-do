@@ -26,6 +26,10 @@ import { readAiConfig, writeAiConfig } from './huniuConfig.mjs'
 import { listStylePacks, stylePreviewPath } from './stylePacks.mjs'
 import { animPreviewPath, listAnimPacks } from './animPacks.mjs'
 import { H3_QUALITIES, ensureH3, h3Health } from './h3Client.mjs'
+import { designFancyText, texturePrompt } from './fancyTextAi.mjs'
+import { directAnim } from './animDirector.mjs'
+import { getSkillEntry, listSkillPacks, planSkill, resolveSkillParams, skillPreviewPath } from './skillPacks.mjs'
+import { cleanText } from './stylePacks.mjs'
 
 export { kickWorker as kickAiWorker }
 
@@ -234,9 +238,9 @@ export async function handleAiHttp(req, res) {
       return true
     }
 
-    const previewMatch = url.match(/^\/api\/ai-(styles|anims)\/([^/?]+)\/previews\/(\d+)/)
+    const previewMatch = url.match(/^\/api\/ai-(styles|anims|skills)\/([^/?]+)\/previews\/(\d+)/)
     if (previewMatch) {
-      const lookup = previewMatch[1] === 'anims' ? animPreviewPath : stylePreviewPath
+      const lookup = { anims: animPreviewPath, skills: skillPreviewPath, styles: stylePreviewPath }[previewMatch[1]]
       const file = lookup(decodeURIComponent(previewMatch[2]), Number(previewMatch[3]))
       if (!file || !existsSync(file)) {
         sendJson(res, 404, { ok: false, error: 'not found' })
@@ -248,6 +252,65 @@ export async function handleAiHttp(req, res) {
       res.setHeader('Content-Length', String(buf.length))
       res.setHeader('Cache-Control', 'private, max-age=3600')
       res.end(buf)
+      return true
+    }
+
+    if (url === '/api/ai-skills' || url.startsWith('/api/ai-skills?')) {
+      if (req.method !== 'GET') {
+        sendJson(res, 405, { ok: false, error: 'GET only' })
+        return true
+      }
+      sendJson(res, 200, { ok: true, ...listSkillPacks() })
+      return true
+    }
+
+    if (url === '/api/ai-skill-plan' && req.method === 'POST') {
+      try {
+        const body = JSON.parse((await readBody(req)) || '{}')
+        const entry = getSkillEntry(body.skillId)
+        const prompt = cleanText(body.prompt)
+        if (!prompt) throw new Error(`请填写「${entry.pack.input.label}」`)
+        const plan = await planSkill(readAiConfig({ revealKey: true }), entry, prompt.slice(0, entry.pack.input.maxLength), resolveSkillParams(entry.pack, body.params))
+        sendJson(res, 200, { ok: true, plan })
+      } catch (e) {
+        sendJson(res, 400, { ok: false, error: String(e instanceof Error ? e.message : e) })
+      }
+      return true
+    }
+
+    if (url === '/api/ai-anim-direct' && req.method === 'POST') {
+      try {
+        const body = JSON.parse((await readBody(req)) || '{}')
+        const direction = await directAnim(readAiConfig({ revealKey: true }), body)
+        sendJson(res, 200, { ok: true, direction })
+      } catch (e) {
+        sendJson(res, 400, { ok: false, error: String(e instanceof Error ? e.message : e) })
+      }
+      return true
+    }
+
+    if (url === '/api/ai-fancy-text' && req.method === 'POST') {
+      try {
+        const body = JSON.parse((await readBody(req)) || '{}')
+        const style = await designFancyText(readAiConfig({ revealKey: true }), body)
+        sendJson(res, 200, { ok: true, style })
+      } catch (e) {
+        sendJson(res, 400, { ok: false, error: String(e instanceof Error ? e.message : e) })
+      }
+      return true
+    }
+
+    if (url === '/api/ai-fancy-texture' && req.method === 'POST') {
+      try {
+        const body = JSON.parse((await readBody(req)) || '{}')
+        const job = enqueueAiJob({
+          kind: 'image', prompt: texturePrompt(body.desc), size: '1:1', quality: '1K',
+          model: 'gpt-image-2', purpose: 'texture',
+        })
+        sendJson(res, 200, { ok: true, job })
+      } catch (e) {
+        sendJson(res, 400, { ok: false, error: String(e instanceof Error ? e.message : e) })
+      }
       return true
     }
 

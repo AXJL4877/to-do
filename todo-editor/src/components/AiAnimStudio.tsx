@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Clapperboard, Film, ImageOff, Loader2, Scissors, Square, X } from 'lucide-react'
+import { ChevronDown, ChevronRight, Clapperboard, Film, ImageOff, Loader2, Plus, Scissors, Sparkles, Square, X } from 'lucide-react'
 import clsx from 'clsx'
+import { aiFetch } from '../lib/aiFetch'
 import type { StyleInput } from './AiStyleForm'
 
 export type AnimPack = {
@@ -14,7 +15,7 @@ export type AnimPack = {
   previews: string[]
   outputs: string[]
   inputs: StyleInput[]
-  sprite: { grid: number; frames: number; align: string }
+  sprite: { grid: number; frames: number; align: string; segmentInput?: string | null; maxSegments?: number }
   playback: { fps: number[]; defaultFps: number; loops: ('forward' | 'pingpong')[]; defaultLoop: 'forward' | 'pingpong'; maxRepeat: number }
   image: { models: string[]; resolutions: string[]; defaultResolution: string }
   cutout: { default: boolean; lockInputs: Record<string, string> } | null
@@ -29,9 +30,17 @@ export type AnimValues = {
   resolution: string
   model: string
   alpha: boolean
+  /** 第 2 段起每段的动作；第 1 段用 sprite.segmentInput 对应的输入 */
+  segments: string[]
+  /** 角色参照：auto 先生成角色设定图；ref 用 AI 面板参考图；reuse 沿用 characterFrom 任务的角色 */
+  character: 'auto' | 'ref' | 'reuse'
+  characterFrom: string | null
 }
 
-export function defaultAnimValues(pack: AnimPack): AnimValues {
+/** 已完成动画任务留下的角色参照图，可被新任务沿用 */
+export type AnimCharacter = { jobId: string; url: string; name: string }
+
+export function defaultAnimValues(pack: AnimPack, hasRef = false): AnimValues {
   const inputs: Record<string, string> = {}
   for (const inp of pack.inputs) inputs[inp.id] = inp.type === 'select' ? inp.default : ''
   return {
@@ -43,6 +52,9 @@ export function defaultAnimValues(pack: AnimPack): AnimValues {
     resolution: pack.image.defaultResolution,
     model: pack.image.models[0],
     alpha: pack.cutout?.default ?? false,
+    segments: [],
+    character: hasRef ? 'ref' : 'auto',
+    characterFrom: null,
   }
 }
 
@@ -52,16 +64,23 @@ function playFrames(v: AnimValues, frames: number) {
 }
 
 /** 风格动画弹窗：左侧动画包，右侧精灵图分镜 + 输出设置，直接入队 */
-export function AiAnimStudio({ anims, hasRef, onSubmit, onClose }: {
+export function AiAnimStudio({ anims, hasRef, characters, onSubmit, onClose }: {
   anims: AnimPack[]
   hasRef: boolean
+  characters: AnimCharacter[]
   onSubmit: (pack: AnimPack, v: AnimValues) => Promise<boolean>
   onClose: () => void
 }) {
   const [packId, setPackId] = useState(anims[0]?.id ?? '')
   const pack = anims.find((a) => a.id === packId) ?? null
-  const [value, setValue] = useState<AnimValues | null>(pack ? defaultAnimValues(pack) : null)
+  const [value, setValue] = useState<AnimValues | null>(pack ? defaultAnimValues(pack, hasRef) : null)
   const [submitting, setSubmitting] = useState(false)
+  const [idea, setIdea] = useState('')
+  /** AI 导演对当前 idea 的拆分结果；idea 改动后作废 */
+  const [direction, setDirection] = useState<{ title: string; notes: string } | null>(null)
+  const [directing, setDirecting] = useState(false)
+  const [directErr, setDirectErr] = useState<string | null>(null)
+  const [showDetail, setShowDetail] = useState(false)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
@@ -73,17 +92,51 @@ export function AiAnimStudio({ anims, hasRef, onSubmit, onClose }: {
     if (id === packId) return
     setPackId(id)
     const p = anims.find((a) => a.id === id)
-    setValue(p ? defaultAnimValues(p) : null)
+    setValue(p ? defaultAnimValues(p, hasRef) : null)
+    setDirection(null)
   }
 
-  const ready = useMemo(() => !!pack && !!value
-    && pack.inputs.every((inp) => inp.type !== 'text' || !inp.required || !!value.inputs[inp.id]?.trim()), [pack, value])
+  async function direct(): Promise<AnimValues | null> {
+    if (!pack || !value || !idea.trim() || directing) return null
+    setDirecting(true)
+    setDirectErr(null)
+    try {
+      const r = await aiFetch('/api/ai-anim-direct', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ animId: pack.id, idea: idea.trim() }),
+      })
+      const data = await r.json()
+      if (!data.ok) throw new Error(data.error || 'AI 拆分失败')
+      const d = data.direction as { title: string; notes: string; values: Pick<AnimValues, 'inputs' | 'segments' | 'beats' | 'fps' | 'loop' | 'repeat' | 'alpha'> }
+      const next = { ...value, ...d.values }
+      setValue(next)
+      setDirection({ title: d.title, notes: d.notes })
+      return next
+    } catch (e) {
+      setDirectErr(e instanceof Error ? e.message : String(e))
+      return null
+    } finally {
+      setDirecting(false)
+    }
+  }
+
+  const isReady = (v: AnimValues | null) => !!pack && !!v
+    && pack.inputs.every((inp) => inp.type !== 'text' || !inp.required || !!v.inputs[inp.id]?.trim())
+    && v.segments.every((s) => !!s.trim())
+    && (v.character !== 'ref' || hasRef)
+    && (v.character !== 'reuse' || !!v.characterFrom)
+  const ready = useMemo(() => isReady(value), [pack, value, hasRef]) // eslint-disable-line react-hooks/exhaustive-deps
+  /** 写了一句话但还没拆分：提交时先让 AI 拆分再入队 */
+  const needsDirect = !!idea.trim() && !direction
 
   async function submit() {
-    if (!pack || !value || !ready || submitting) return
+    if (!pack || !value || submitting || directing) return
+    if (!needsDirect && !ready) return
     setSubmitting(true)
     try {
-      if (await onSubmit(pack, value)) onClose()
+      const v = needsDirect ? await direct() : value
+      if (v && isReady(v) && await onSubmit(pack, v)) onClose()
     } finally {
       setSubmitting(false)
     }
@@ -93,6 +146,11 @@ export function AiAnimStudio({ anims, hasRef, onSubmit, onClose }: {
   const locked = value?.alpha && pack?.cutout ? pack.cutout.lockInputs : {}
   const grid = pack?.sprite.grid ?? 5
   const frames = grid * grid
+  const segInput = pack?.sprite.segmentInput ? pack.inputs.find((i) => i.id === pack.sprite.segmentInput) : undefined
+  const maxSegs = segInput ? pack?.sprite.maxSegments ?? 1 : 1
+  const sheets = 1 + (value?.segments.length ?? 0)
+  const totalFrames = frames + (sheets - 1) * (frames - 1)
+  const imageCalls = sheets + (value?.character === 'auto' ? 1 : 0)
 
   return createPortal(
     <div className="modal-backdrop" data-testid="ai-anim-studio" onClick={onClose}>
@@ -152,6 +210,85 @@ export function AiAnimStudio({ anims, hasRef, onSubmit, onClose }: {
 
           {pack && value ? (
             <div className="flex-1 md:min-h-0 md:overflow-y-auto p-4 grid gap-4 md:grid-cols-2 content-start" data-testid={`ai-anim-form-${pack.id}`}>
+              <section className="flex flex-col gap-2.5 md:col-span-2">
+                <span className="eyebrow">一句话描述</span>
+                <textarea
+                  rows={3}
+                  data-testid="ai-anim-idea"
+                  maxLength={400}
+                  placeholder="例如：上班族早上起床伸懒腰，然后刷牙，最后背上包出门"
+                  value={idea}
+                  onChange={(e) => { setIdea(e.target.value); setDirection(null) }}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) void submit() }}
+                />
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    data-testid="ai-anim-direct"
+                    disabled={!idea.trim() || directing}
+                    onClick={async () => { if (await direct()) setShowDetail(true) }}
+                  >
+                    {directing ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
+                    {directing ? 'AI 拆分中…' : 'AI 拆分 · 先看方案'}
+                  </button>
+                  <span className="text-[10px]" style={{ color: directErr ? 'var(--danger, #e11d48)' : 'var(--text-muted)' }} data-testid="ai-anim-direction">
+                    {directErr
+                      ?? (direction
+                        ? `「${direction.title}」${sheets > 1 ? `分 ${sheets} 段` : '1 段'}${direction.notes ? ` · ${direction.notes}` : ''}`
+                        : '直接点「生成」也行：AI 会自动写角色、拆分段和分镜')}
+                  </span>
+                </div>
+                <div className="field">
+                  <label>角色参照（保证每次生成同一个人物）</label>
+                  <div className="tab-row" data-testid="ai-anim-character">
+                    <button type="button" className={clsx('tab flex-1', value.character === 'auto' && 'active')} data-testid="ai-anim-char-auto" onClick={() => set({ character: 'auto' })}>
+                      自动生成
+                    </button>
+                    <button type="button" className={clsx('tab flex-1', value.character === 'ref' && 'active')} data-testid="ai-anim-char-ref" disabled={!hasRef} onClick={() => set({ character: 'ref' })}>
+                      用参考图
+                    </button>
+                    <button type="button" className={clsx('tab flex-1', value.character === 'reuse' && 'active')} data-testid="ai-anim-char-reuse" disabled={!characters.length} onClick={() => set({ character: 'reuse', characterFrom: value.characterFrom ?? characters[0]?.jobId ?? null })}>
+                      沿用角色
+                    </button>
+                  </div>
+                  {value.character === 'reuse' ? (
+                    <div className="flex flex-wrap gap-1.5 pt-1" data-testid="ai-anim-char-list">
+                      {characters.map((c) => (
+                        <button
+                          key={c.jobId}
+                          type="button"
+                          title={c.name}
+                          data-testid={`ai-anim-char-${c.jobId}`}
+                          className={clsx('rounded overflow-hidden border-2', value.characterFrom === c.jobId ? 'border-[var(--accent)]' : 'border-transparent')}
+                          style={{ width: 52, height: 52, background: '#fff' }}
+                          onClick={() => set({ characterFrom: c.jobId })}
+                        >
+                          <img src={c.url} alt={c.name} className="w-full h-full object-contain" />
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-[10px] px-0.5" style={{ color: 'var(--text-muted)' }}>
+                      {value.character === 'ref'
+                        ? '以 AI 面板的参考图作为角色设定，所有分段都参照它'
+                        : `先按描述生成一张角色设定图（多 1 次生图），所有分段都参照它；生成后可在「沿用角色」里复用${hasRef ? '' : '。也可在 AI 面板截帧 / 上传参考图'}`}
+                    </span>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  className="self-start flex items-center gap-1 text-[11px]"
+                  style={{ color: 'var(--text-secondary)' }}
+                  data-testid="ai-anim-detail-toggle"
+                  onClick={() => setShowDetail((x) => !x)}
+                >
+                  {showDetail ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                  详细设置（角色、分段动作、分镜、帧率等，AI 拆分后可在这里微调）
+                </button>
+              </section>
+
+              {showDetail && (<>
               <section className="flex flex-col gap-2.5">
                 <span className="eyebrow">角色与动作</span>
                 {pack.inputs.map((inp) => (
@@ -183,9 +320,50 @@ export function AiAnimStudio({ anims, hasRef, onSubmit, onClose }: {
                     )}
                   </div>
                 ))}
-                <p className="text-[10px] m-0 px-0.5" style={{ color: 'var(--text-muted)' }}>
-                  {hasRef ? '已带参考图：角色外观以参考图为准' : '可在 AI 面板先截帧 / 上传参考图，锁定角色外观'}
-                </p>
+                {maxSegs > 1 && segInput && (
+                  <div className="field">
+                    <label>长镜头分段（每段一张精灵图，下一段首帧接上一段末帧）</label>
+                    <div className="flex flex-col gap-1" data-testid="ai-anim-segments">
+                      <div className="flex items-center gap-1.5">
+                        <span className="shrink-0 w-12 text-[10px] text-right" style={{ color: 'var(--text-muted)' }}>第 1 段</span>
+                        <span className="flex-1 text-[11px] truncate" style={{ color: 'var(--text-secondary)' }}>
+                          {value.inputs[segInput.id]?.trim() || `用上方「${segInput.label}」`}
+                        </span>
+                      </div>
+                      {value.segments.map((s, i) => (
+                        <div key={i} className="flex items-center gap-1.5">
+                          <span className="shrink-0 w-12 text-[10px] text-right" style={{ color: 'var(--text-muted)' }}>第 {i + 2} 段</span>
+                          <input
+                            className="flex-1"
+                            data-testid={`ai-anim-segment-${i + 1}`}
+                            maxLength={segInput.type === 'text' ? segInput.maxLength : undefined}
+                            placeholder="接着上一段的动作，如：转身走向门口"
+                            value={s}
+                            onChange={(e) => set({ segments: value.segments.map((x, j) => (j === i ? e.target.value : x)) })}
+                          />
+                          <button
+                            type="button"
+                            className="icon-btn"
+                            aria-label="删除这一段"
+                            onClick={() => set({ segments: value.segments.filter((_, j) => j !== i) })}
+                          >
+                            <X size={12} />
+                          </button>
+                        </div>
+                      ))}
+                      {sheets < maxSegs && (
+                        <button
+                          type="button"
+                          className="btn btn-ghost self-start"
+                          data-testid="ai-anim-segment-add"
+                          onClick={() => set({ segments: [...value.segments, ''] })}
+                        >
+                          <Plus size={12} />添加下一段（最多 {maxSegs} 段）
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
               </section>
 
               <section className="flex flex-col gap-2.5">
@@ -201,7 +379,9 @@ export function AiAnimStudio({ anims, hasRef, onSubmit, onClose }: {
                     ))}
                   </div>
                   <span className="text-[11px] leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
-                    一次生成 {grid}×{grid} 角色精灵图，自动切成 {frames} 帧序列帧再拼成动画；角色一致，只需 1 次生图
+                    {sheets > 1
+                      ? `${sheets} 张 ${grid}×${grid} 精灵图接力，每张 ${frames} 帧，衔接处去重后共 ${totalFrames} 帧`
+                      : `一次生成 ${grid}×${grid} 角色精灵图，自动切成 ${frames} 帧序列帧再拼成动画`}
                   </span>
                 </div>
                 {pack.image.resolutions.length > 1 && (
@@ -213,7 +393,7 @@ export function AiAnimStudio({ anims, hasRef, onSubmit, onClose }: {
                   </div>
                 )}
                 <div className="field">
-                  <label>分镜（可选 · 每行 {grid} 帧一个阶段，留空自动均分动作）</label>
+                  <label>分镜（可选 · {sheets > 1 ? '仅作用于第 1 段 · ' : ''}每行 {grid} 帧一个阶段，留空自动均分动作）</label>
                   <div className="flex flex-col gap-1" data-testid="ai-anim-beats">
                     {value.beats.map((b, i) => (
                       <div key={i} className="flex items-center gap-1.5">
@@ -271,6 +451,7 @@ export function AiAnimStudio({ anims, hasRef, onSubmit, onClose }: {
                   </div>
                 )}
               </section>
+              </>)}
             </div>
           ) : (
             <div className="flex-1 grid place-items-center text-[12px]" style={{ color: 'var(--text-muted)' }}>没有可用的风格动画包</div>
@@ -280,7 +461,9 @@ export function AiAnimStudio({ anims, hasRef, onSubmit, onClose }: {
         <div className="px-4 py-3 border-t flex items-center gap-3" style={{ borderColor: 'var(--border)' }}>
           {value && (
             <span className="text-[11px]" style={{ color: 'var(--text-muted)' }} data-testid="ai-anim-summary">
-              {grid}×{grid} 精灵图 · {frames} 帧 · 1 次生图 · 成片 {(playFrames(value, frames) / value.fps).toFixed(1)} 秒 · {value.alpha ? '透明' : '不透明'}
+              {needsDirect
+                ? `AI 拆分后生成 · 分段数由 AI 决定（最多 ${maxSegs} 段）`
+                : `${sheets > 1 ? `${sheets} 张 ` : ''}${grid}×${grid} 精灵图 · ${totalFrames} 帧 · ${imageCalls} 次生图 · 成片 ${(playFrames(value, totalFrames) / value.fps).toFixed(1)} 秒 · ${value.alpha ? '透明' : '不透明'}`}
             </span>
           )}
           <button type="button" className="btn btn-ghost ml-auto" onClick={onClose}>取消</button>
@@ -288,11 +471,11 @@ export function AiAnimStudio({ anims, hasRef, onSubmit, onClose }: {
             type="button"
             className="btn btn-primary"
             data-testid="ai-anim-submit"
-            disabled={!ready || submitting}
+            disabled={(!ready && !needsDirect) || submitting || directing}
             onClick={() => void submit()}
           >
-            {submitting ? <Loader2 size={13} className="animate-spin" /> : <Film size={13} />}
-            {submitting ? '入队中…' : '生成动画 · 入队'}
+            {submitting || directing ? <Loader2 size={13} className="animate-spin" /> : <Film size={13} />}
+            {directing ? 'AI 拆分中…' : submitting ? '入队中…' : needsDirect ? '一键生成动画' : '生成动画 · 入队'}
           </button>
         </div>
       </div>

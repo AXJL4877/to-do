@@ -596,6 +596,8 @@ bool parse_clip_obj(const std::string &s, size_t *i, Clip *c) {
       if (!parse_number(s, i, &c->tint)) return false;
     } else if (key == "blend") {
       if (!parse_string(s, i, &c->blend)) return false;
+    } else if (key == "solidColor") {
+      if (!parse_string(s, i, &c->solid_color)) return false;
     } else if (key == "text") {
       if (!parse_text_obj(s, i, c)) return false;
     } else if (key == "effects") {

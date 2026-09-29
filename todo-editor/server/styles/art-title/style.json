@@ -1,0 +1,91 @@
+{
+  "spec": "todo-style-pack/1",
+  "id": "builtin.art-title",
+  "name": "AI 艺术字",
+  "version": "1.0.0",
+  "author": "TO DO",
+  "description": "把一句标题直接生成有材质的艺术字图片（立体卡通、金属、霓虹、鎏金、书法等），默认抠成透明底，可直接叠在视频上。",
+  "tags": ["花字", "艺术字", "标题", "透明底"],
+  "previews": [
+    "previews/01-puffy.png",
+    "previews/02-variety.png",
+    "previews/03-gold.png",
+    "previews/04-neon.png"
+  ],
+  "outputs": ["image"],
+  "inputs": [
+    {
+      "id": "words",
+      "type": "text",
+      "label": "文字内容",
+      "required": true,
+      "maxLength": 24,
+      "placeholder": "例如：今天吃什么"
+    },
+    {
+      "id": "look",
+      "type": "select",
+      "label": "字效",
+      "default": "puffy",
+      "options": [
+        { "value": "puffy", "label": "立体卡通", "prompt": "puffy inflated 3D cartoon letters with rounded glossy surfaces, bright candy colors, thick white outline and a soft darker extruded side" },
+        { "value": "variety", "label": "综艺大字", "prompt": "bold Chinese variety-show title lettering, heavy sans strokes filled with bright yellow-to-orange gradient, thick black inner outline, white outer outline and a hard drop shadow, slightly tilted and energetic" },
+        { "value": "gold", "label": "鎏金古风", "prompt": "elegant Chinese calligraphic title in polished embossed gold leaf metal with fine engraved highlights and a deep red lacquer edge, luxurious and festive" },
+        { "value": "metal", "label": "金属铬", "prompt": "heavy chrome metal lettering with mirror reflections, beveled edges and sharp specular highlights, cool silver-blue tones" },
+        { "value": "neon", "label": "霓虹灯管", "prompt": "glowing neon tube lettering in hot pink and electric cyan, visible glass tubes with bright light bloom, on its own with no wall" },
+        { "value": "jelly", "label": "果冻糖果", "prompt": "translucent jelly candy letters with inner glow, glossy wet highlights and tiny bubbles, pastel strawberry and lemon colors" },
+        { "value": "fire", "label": "火焰", "prompt": "letters made of blazing fire with molten orange-yellow cores and flickering flame tips" },
+        { "value": "ice", "label": "冰雪", "prompt": "letters carved from clear blue ice with frost, snow caps on top and crisp refractive highlights" },
+        { "value": "cream", "label": "奶油蛋糕", "prompt": "letters piped from whipped cream and frosting on sponge cake, with sprinkles and a strawberry, soft and delicious" },
+        { "value": "brush", "label": "毛笔书法", "prompt": "expressive black ink brush calligraphy with dry-brush texture, splatters and a small red seal stamp accent" }
+      ]
+    },
+    {
+      "id": "extra",
+      "type": "text",
+      "label": "补充要求",
+      "required": false,
+      "maxLength": 60,
+      "placeholder": "可选：配色、装饰元素，如「加一些小星星」"
+    },
+    {
+      "id": "background",
+      "type": "select",
+      "label": "背景",
+      "default": "green",
+      "options": [
+        { "value": "green", "label": "纯绿底（抠像用）", "prompt": "The lettering floats on a perfectly flat solid pure chroma-key green background (#00FF00), evenly lit, no shadow on the background, no gradient; absolutely no green color anywhere on the lettering itself" },
+        { "value": "white", "label": "纯白底", "prompt": "The lettering floats on a plain pure white background" },
+        { "value": "dark", "label": "深色底", "prompt": "The lettering floats on a plain dark charcoal background with a subtle vignette" }
+      ]
+    }
+  ],
+  "prompt": {
+    "template": "Typographic title artwork of the exact words \"{{words}}\", rendered as {{look}}. The characters must be written exactly as given with every stroke correct and legible, on one line or two balanced lines if long, centered with generous empty margin on every side, and nothing else in the picture. Premium short-video title design with rich material texture, crisp clean edges and subtle studio lighting. {{extra}}. {{background}}.",
+    "avoid": [
+      "misspelled or wrong characters",
+      "extra words",
+      "random letters",
+      "people",
+      "mockup",
+      "photo frame",
+      "cropped letters",
+      "watermark",
+      "signature"
+    ]
+  },
+  "cutout": {
+    "method": "keyGreen",
+    "threshold": 0.12,
+    "trim": true,
+    "default": true,
+    "lockInputs": { "background": "green" }
+  },
+  "image": {
+    "models": ["gpt-image-2"],
+    "aspectRatios": ["16:9", "4:3", "1:1", "3:4", "9:16"],
+    "defaultAspectRatio": "16:9",
+    "resolutions": ["1K", "2K"],
+    "defaultResolution": "2K"
+  }
+}

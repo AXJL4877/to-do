@@ -139,6 +139,48 @@ export function place(img, w, h, dx, dy, bg) {
   return out
 }
 
+/** 双线性缩放到指定高度（保持宽高比），透明像素压到白底上 */
+export function scaleToHeight(img, H) {
+  const W = Math.max(1, Math.round((img.width * H) / img.height))
+  const out = Buffer.alloc(W * H * 4)
+  const { width: sw, height: sh, data: s } = img
+  for (let y = 0; y < H; y++) {
+    const fy = Math.min(sh - 1, Math.max(0, ((y + 0.5) * sh) / H - 0.5))
+    const y0 = Math.floor(fy), y1 = Math.min(sh - 1, y0 + 1), wy = fy - y0
+    for (let x = 0; x < W; x++) {
+      const fx = Math.min(sw - 1, Math.max(0, ((x + 0.5) * sw) / W - 0.5))
+      const x0 = Math.floor(fx), x1 = Math.min(sw - 1, x0 + 1), wx = fx - x0
+      const o = (y * W + x) * 4
+      const a00 = (y0 * sw + x0) * 4, a01 = (y0 * sw + x1) * 4, a10 = (y1 * sw + x0) * 4, a11 = (y1 * sw + x1) * 4
+      const alpha = (i) => s[i + 3] / 255
+      for (let c = 0; c < 3; c++) {
+        const px = (i) => s[i + c] * alpha(i) + 255 * (1 - alpha(i))
+        const top = px(a00) * (1 - wx) + px(a01) * wx
+        const bot = px(a10) * (1 - wx) + px(a11) * wx
+        out[o + c] = Math.round(top * (1 - wy) + bot * wy)
+      }
+      out[o + 3] = 255
+    }
+  }
+  return { width: W, height: H, data: out }
+}
+
+/** 续段参考图：左 = 角色设定，右 = 上一段末帧，中间留白 + 细灰分隔线 */
+export function composeContinuationRef(character, lastFrame, H = 768) {
+  const a = scaleToHeight(character, H)
+  const b = scaleToHeight(lastFrame, H)
+  const gap = Math.round(H * 0.05)
+  const W = a.width + gap + b.width
+  const out = place(a, W, H, 0, 0, [255, 255, 255])
+  for (let y = 0; y < H; y++) b.data.copy(out.data, (y * W + a.width + gap) * 4, y * b.width * 4, (y + 1) * b.width * 4)
+  const lineX = a.width + (gap >> 1)
+  for (let y = 0; y < H; y++) for (let x = lineX - 1; x <= lineX; x++) {
+    const i = (y * W + x) * 4
+    out.data[i] = out.data[i + 1] = out.data[i + 2] = 200
+  }
+  return out
+}
+
 /** 内容包围盒：透明帧看 alpha，不透明帧看"离白程度" */
 export function contentBox(img, alpha, threshold = 0.1) {
   const { width: w, height: h, data: d } = img

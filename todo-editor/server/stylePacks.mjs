@@ -284,7 +284,8 @@ export function compileStyleJob(entry, req) {
   const model = req.model || pack.image.models[0]
   if (!pack.image.models.includes(model)) throw new Error(`风格「${pack.name}」不支持模型 ${model}`)
 
-  let prompt = pack.prompt.template.replace(PLACEHOLDER_RE, (_, id) => values[id])
+  // 可选文本留空时收掉残留的 ". ."
+  let prompt = pack.prompt.template.replace(PLACEHOLDER_RE, (_, id) => values[id]).replace(/\.(\s+\.)+/g, '.')
   if (pack.prompt.avoid.length) prompt += ` Avoid: ${pack.prompt.avoid.join(', ')}.`
 
   const refPath = pack.references ? path.join(dir, pack.references.images[0]) : null

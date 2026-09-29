@@ -4,6 +4,7 @@ import { sampleKeyframes, resolveClipTransform, effectiveTransform } from './key
 import type { SnapGuide } from './monitorSnap'
 import { pauseUnusedVideoSlots, resetFrameSampleStability, videoFrameAt } from './videoCache'
 import { mediaTimeAt, pictureClipsAt } from './programPlayer'
+import { drawFancyText, fontStack } from './fancyText'
 
 export type ImageCache = Map<string, HTMLImageElement>
 export type { SnapGuide } from './monitorSnap'
@@ -447,7 +448,10 @@ function drawClip(
       ctx.clip()
     }
     const m = media.find((x) => x.id === clip.mediaId)
-    if (m && (m.kind === 'image' || m.kind === 'sticker')) {
+    if (clip.solid) {
+      ctx.fillStyle = clip.solid.color
+      ctx.fillRect(-w / 2, -h / 2, w, h)
+    } else if (m && (m.kind === 'image' || m.kind === 'sticker')) {
       const img = cache.get(m.id)
       const iw = img?.naturalWidth || m.width || w
       const ih = img?.naturalHeight || m.height || h
@@ -522,7 +526,7 @@ function drawMediaPlaceholder(
   ctx.fillText(name.slice(0, 22), 0, 0)
 }
 
-function drawTextClip(
+export function drawTextClip(
   ctx: CanvasRenderingContext2D,
   clip: Clip,
   w: number,
@@ -565,26 +569,45 @@ function drawTextClip(
   }
 
   ctx.globalAlpha *= alphaMul
-  ctx.font = `600 ${fontPx}px ${t.fontFamily}, "Segoe UI", sans-serif`
-  ctx.textAlign = t.align
-  ctx.textBaseline = 'middle'
-  if (t.shadowBlur > 0) {
-    ctx.shadowBlur = t.shadowBlur * (h / 1080)
-    ctx.shadowColor = t.shadowColor
-  }
+  const k = h / 1080
+  const lines = content.split('\n')
+  const lh = fontPx * (t.lineHeight || 1.25)
+  const blockH = lh * lines.length
   const y = bilingual ? -fontPx * 0.35 : 0
-  if (t.strokeWidth > 0) {
-    ctx.lineWidth = t.strokeWidth * (h / 1080)
-    ctx.strokeStyle = t.strokeColor
-    ctx.strokeText(content, 0, y)
+  if (t.fancy) {
+    ctx.save()
+    ctx.translate(0, y)
+    drawFancyText(ctx, {
+      lines, fontPx, family: t.fontFamily, align: t.align, lineHeight: t.lineHeight,
+      letterSpacing: t.letterSpacing, fancy: t.fancy, k, time: localT,
+    })
+    ctx.restore()
+  } else {
+    ctx.font = `600 ${fontPx}px ${fontStack(t.fontFamily)}`
+    ctx.textAlign = t.align
+    ctx.textBaseline = 'middle'
+    if (t.shadowBlur > 0) {
+      ctx.shadowBlur = t.shadowBlur * k
+      ctx.shadowColor = t.shadowColor
+    }
+    lines.forEach((line, i) => {
+      const ly = y + (i - (lines.length - 1) / 2) * lh
+      if (t.strokeWidth > 0) {
+        ctx.lineWidth = t.strokeWidth * k
+        ctx.strokeStyle = t.strokeColor
+        ctx.strokeText(line, 0, ly)
+      }
+      ctx.fillStyle = t.color
+      ctx.fillText(line, 0, ly)
+    })
   }
-  ctx.fillStyle = t.color
-  ctx.fillText(content, 0, y)
   if (bilingual) {
-    ctx.font = `400 ${Math.round(fontPx * 0.55)}px ${t.fontFamily}, "Segoe UI", sans-serif`
-    ctx.fillStyle = t.color
+    ctx.font = `400 ${Math.round(fontPx * 0.55)}px ${fontStack(t.fontFamily)}`
+    ctx.textAlign = t.align
+    ctx.textBaseline = 'middle'
+    ctx.fillStyle = t.fancy?.fill[0] ?? t.color
     ctx.globalAlpha *= 0.85
-    ctx.fillText(bilingual, 0, fontPx * 0.55)
+    ctx.fillText(bilingual, 0, y + blockH / 2 + fontPx * 0.3)
   }
   ctx.shadowBlur = 0
 }

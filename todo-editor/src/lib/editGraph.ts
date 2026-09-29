@@ -1,3 +1,4 @@
+import type { FancyText } from '../types'
 /** 预览/导出共用的时间线描述（v1）。compose / export / Monitor 均消费此结构。 */
 export const EDIT_GRAPH_VERSION = 1 as const
 
@@ -13,6 +14,13 @@ export type EditGraphKeyframe = {
 }
 
 export type EditGraphText = {
+  fancy?: FancyText
+  lineHeight?: number
+  letterSpacing?: number
+  animIn?: string
+  animOut?: string
+  animInDur?: number
+  animOutDur?: number
   content: string
   fontFamily?: string
   fontSize?: number
@@ -69,6 +77,8 @@ export type EditGraphClip = {
   temperature?: number
   tint?: number
   blend?: string
+  /** kind === 'solid' 时的填充色 #RRGGBB */
+  solidColor?: string
   text?: EditGraphText
   effects?: EditGraphEffect[]
   mask?: EditGraphMask
@@ -124,7 +134,9 @@ type ClipIn = {
     highlights?: number; shadows?: number; whites?: number; blacks?: number; hueShift?: number
   }
   blend?: string
+  solid?: { color: string }
   text?: {
+    fancy?: FancyText; lineHeight?: number; letterSpacing?: number; animIn?: string; animOut?: string; animInDur?: number; animOutDur?: number
     content: string; fontFamily: string; fontSize: number; color: string
     align: string; bilingual?: string; strokeWidth: number; strokeColor: string
   }
@@ -175,7 +187,7 @@ export function buildEditGraph(input: {
           if (k.ih) out.ih = { x: k.ih.x, y: k.ih.y }
           return out
         })
-      const kind = c.text ? 'text' : (m?.kind || undefined)
+      const kind = c.text ? 'text' : c.solid ? 'solid' : (m?.kind || undefined)
       return {
         ...(c.id ? { id: c.id } : {}),
         mediaPath: m?.path || '',
@@ -205,8 +217,10 @@ export function buildEditGraph(input: {
         temperature: col?.temperature ?? 0,
         tint: col?.tint ?? 0,
         blend: c.blend || 'normal',
+        ...(c.solid ? { solidColor: c.solid.color } : {}),
         text: c.text
           ? {
+              ...c.text,
               content: c.text.content,
               fontFamily: c.text.fontFamily,
               fontSize: c.text.fontSize,
@@ -244,6 +258,7 @@ export function buildEditGraph(input: {
               scaleY: mapKf('scaleY'),
               rotation: mapKf('rotation'),
               opacity: mapKf('opacity'),
+              ...(c.text?.fancy ? { fontSize: mapKf('fontSize') } : {}),
             }
           : undefined,
       }

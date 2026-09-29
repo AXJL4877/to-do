@@ -10,6 +10,7 @@ bool native_clip_unsupported(const Clip &c) {
   if (c.chroma_on) return true;
   if (!c.mask_type.empty()) return true;
   if (c.kind == "text" || !c.text_content.empty()) return true;
+  if (c.kind == "solid") return true;
   if (std::fabs(c.exposure) > 1e-9 || std::fabs(c.contrast) > 1e-9 ||
       std::fabs(c.saturation) > 1e-9 || std::fabs(c.temperature) > 1e-9 ||
       std::fabs(c.tint) > 1e-9) {

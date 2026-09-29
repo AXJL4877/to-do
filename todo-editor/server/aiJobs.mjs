@@ -3,7 +3,7 @@
  * ponytail: 并发=1；要并行多路时再加 claimNext 槽位。
  */
 import { DatabaseSync } from 'node:sqlite'
-import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
+import { mkdirSync, writeFileSync, readFileSync, existsSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execFileSync, spawn } from 'node:child_process'
@@ -14,9 +14,11 @@ import {
 import { readAiConfig } from './huniuConfig.mjs'
 import { compileStyleById } from './stylePacks.mjs'
 import { cutoutFile, decodeImage, encodePng } from './imageCutout.mjs'
-import { compileAnimById, spritePrompt } from './animPacks.mjs'
-import { normalizeFrames, resolveFfmpeg, sliceSprite, writeAnimation } from './animBuild.mjs'
+import { characterPrompt, compileAnimById, spritePrompt } from './animPacks.mjs'
+import { composeContinuationRef, normalizeFrames, resolveFfmpeg, sliceSprite, writeAnimation } from './animBuild.mjs'
 import { H3_QUALITIES, ensureH3, h3Download, h3Generate, h3UploadImage } from './h3Client.mjs'
+import { compileSkillJob, getSkillEntry } from './skillPacks.mjs'
+import { elementImageName, executeSkillJob } from './skillJobs.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const DATA_DIR = process.env.TODO_DATA_DIR
@@ -133,6 +135,7 @@ function rowToJob(r) {
 }
 
 export function enqueueAiJob(body) {
+  if (body.kind === 'skill' || body.skillId) return enqueueSkillJob(body)
   if (body.kind === 'anim' || body.animId) return enqueueAnimJob(body)
   if (body.styleId) return enqueueStyledJob(body)
   const kind = body.kind === 'video' ? 'video' : 'image'
@@ -154,6 +157,8 @@ export function enqueueAiJob(body) {
     autoTimeline: !!body.autoTimeline,
     width: body.width || null,
     height: body.height || null,
+    /** texture = 花字纹理，由花字面板取用，不入媒体库 */
+    purpose: body.purpose === 'texture' ? 'texture' : undefined,
   }
 
   let refPath = null
@@ -214,6 +219,7 @@ function enqueueAnimJob(body) {
     model: body.model,
     alpha: body.alpha,
     beats: body.beats,
+    segments: body.segments,
   })
   const id = `a_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`
   const now = Date.now()
@@ -229,13 +235,98 @@ function enqueueAnimJob(body) {
     plan,
     output: null,
   }
+  // 角色参照：上传图 > 沿用某个旧动画任务的角色设定图 > 运行时自动生成
   let refPath = null
   if (body.imageDataUrl) {
     const b64 = String(body.imageDataUrl).replace(/^data:image\/\w+;base64,/, '')
     refPath = path.join(AI_OUT, `${id}_ref.png`)
     writeFileSync(refPath, Buffer.from(b64, 'base64'))
+  } else if (body.characterFrom != null) {
+    const from = String(body.characterFrom)
+    if (!/^a_[a-z0-9_]+$/.test(from)) throw new Error('characterFrom 不合法')
+    const src = path.join(AI_OUT, `${from}_char.png`)
+    if (!existsSync(src)) throw new Error('找不到要沿用的角色参照图')
+    refPath = path.join(AI_OUT, `${id}_ref.png`)
+    writeFileSync(refPath, readFileSync(src))
+    params.characterFrom = from
   }
   insertJob.run(id, 'anim', plan.basePrompt, JSON.stringify(params), refPath, now, now)
+  kickWorker()
+  return rowToJob(getJob.get(id))
+}
+
+/**
+ * 技能包任务：提示词 + 参数按技能包编译；plan 可选（用户在工作台编辑过的规划）。
+ * images[i] 为 dataUrl 时第 i 个元素直接用上传图，不再生图（须同时给 plan）。
+ * subtitle 管线不收文案，二选一：
+ * - sourceJobId：带配音（output.narration）的任务，文案 / 配音 / 时间戳都取自它；
+ * - sourceMedia：{ url, path?, name? } 任意音视频，渲染端做语音识别出文案和时间。
+ */
+const ASR_MEDIA_EXT = new Set(['.wav', '.mp3', '.m4a', '.aac', '.flac', '.ogg', '.opus', '.mp4', '.mov', '.mkv', '.webm', '.avi', '.m4v'])
+
+function narrationSource(sourceJobId) {
+  const job = rowToJob(getJob.get(String(sourceJobId || '')))
+  const n = job?.params?.output?.narration
+  if (!job || !n?.text || !n.timing || !['done', 'imported'].includes(job.status)) return null
+  return { mode: 'script', jobId: job.id, text: n.text, audio: n.audio, timing: n.timing, duration: n.duration }
+}
+
+/** 语音识别来源：AI 产物按 /ai-generated/ 文件名找；其余只认本机绝对路径上的音视频文件 */
+function mediaSource(m) {
+  if (!m || typeof m !== 'object') return null
+  const url = typeof m.url === 'string' ? m.url.slice(0, 2000) : ''
+  const name = (typeof m.name === 'string' ? m.name : '').replace(/[\r\n]/g, ' ').trim().slice(0, 80)
+  let file = null
+  const ai = /\/ai-generated\/([^/?#]+)(?:[?#].*)?$/.exec(url)
+  if (ai) file = path.join(AI_OUT, path.basename(decodeURIComponent(ai[1])))
+  else if (typeof m.path === 'string' && path.isAbsolute(m.path)) file = path.resolve(m.path)
+  if (!file) throw new Error('这段素材没有本地文件（浏览器里导入的素材读不到，请在桌面版里烧录）')
+  if (!ASR_MEDIA_EXT.has(path.extname(file).toLowerCase())) throw new Error(`不支持的音视频格式：${path.extname(file) || '无扩展名'}`)
+  if (!existsSync(file) || !statSync(file).isFile()) throw new Error(`找不到素材文件：${path.basename(file)}`)
+  return { mode: 'asr', jobId: null, text: '', audio: url, file, name: name || path.basename(file), duration: null }
+}
+
+function subtitleSource(body) {
+  const narration = body.sourceJobId ? narrationSource(body.sourceJobId) : null
+  const source = narration ?? mediaSource(body.sourceMedia)
+  if (!source) throw new Error('这段音频没有配音文案和时间戳，也没有给出素材文件，烧不了字幕')
+  return source
+}
+
+function enqueueSkillJob(body) {
+  const entry = getSkillEntry(body.skillId)
+  const source = entry.pack.pipeline === 'subtitle' ? subtitleSource(body) : null
+  // 语音识别没有文案，任务标题用素材名；渲染端不读它
+  const prompt = !source ? body.prompt : source.mode === 'asr' ? `语音识别 · ${source.name}` : source.text
+  const compiled = compileSkillJob(entry, { prompt, params: body.params, plan: body.plan })
+  const images = body.images == null ? [] : body.images
+  if (!Array.isArray(images)) throw new Error('images 必须是数组')
+  if (images.some(Boolean) && !compiled.plan) throw new Error('上传元素图时必须同时提供 plan')
+  if (compiled.plan && images.length > compiled.plan.elements.length) throw new Error('images 多于规划元素')
+  const id = `s_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`
+  const now = Date.now()
+  images.forEach((dataUrl, i) => {
+    if (!dataUrl) return
+    const m = /^data:image\/(png|jpe?g|webp);base64,/.exec(String(dataUrl))
+    if (!m) throw new Error(`images[${i}] 须为 png/jpg/webp 的 dataUrl`)
+    writeFileSync(path.join(AI_OUT, elementImageName(id, i)), Buffer.from(String(dataUrl).slice(m[0].length), 'base64'))
+  })
+  const [w, h] = String(compiled.params.size || '').split('x').map(Number)
+  const params = {
+    size: compiled.params.size,
+    model: '',
+    quality: '',
+    duration: compiled.params.duration,
+    autoTimeline: !!body.autoTimeline,
+    // 字幕要对齐的时间线片段（前端自用，服务端只透传）
+    anchorClipId: typeof body.anchorClipId === 'string' ? body.anchorClipId.slice(0, 64) : null,
+    width: w || null,
+    height: h || null,
+    skill: compiled.meta,
+    request: { skillId: compiled.meta.id, prompt: compiled.prompt, params: compiled.params, plan: compiled.plan, ...(source ? { source } : {}) },
+    output: null,
+  }
+  insertJob.run(id, 'skill', compiled.prompt, JSON.stringify(params), null, now, now)
   kickWorker()
   return rowToJob(getJob.get(id))
 }
@@ -280,11 +371,14 @@ export function retryAiJob(id) {
 const LANE_LIMIT = {
   cloud: Math.max(1, Math.min(16, Number(process.env.TODO_AI_CONCURRENCY) || 4)),
   h3: 1,
+  // 技能渲染吃满 CPU，本地串行
+  skill: 1,
 }
-const laneRunning = { cloud: 0, h3: 0 }
+const laneRunning = { cloud: 0, h3: 0, skill: 0 }
 let staleCleared = false
 
 function laneOf(row) {
+  if (row.kind === 'skill') return 'skill'
   if (row.kind !== 'video') return 'cloud'
   try { return JSON.parse(row.params || '{}').engine === 'h3' ? 'h3' : 'cloud' } catch { return 'cloud' }
 }
@@ -292,7 +386,42 @@ function laneOf(row) {
 const TRANSIENT_RE = /fetch failed|ECONNRESET|ETIMEDOUT|ECONNREFUSED|EAI_AGAIN|socket hang up|UND_ERR|network|timed? ?out|\b(429|502|503|504)\b/i
 const AUTO_RETRIES = 2
 
+async function withTransientRetry(jobId, fn) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fn()
+    } catch (e) {
+      if (attempt >= AUTO_RETRIES || !TRANSIENT_RE.test(String(e))) throw e
+      const wait = 2000 * (attempt + 1)
+      setPhase.run(`网络波动，${wait / 1000}s 后自动重试（${attempt + 1}/${AUTO_RETRIES}）`, Date.now(), jobId)
+      await new Promise((r) => setTimeout(r, wait))
+    }
+  }
+}
+
+async function runSkillJob(job) {
+  const output = await executeSkillJob(job, {
+    outDir: AI_OUT,
+    config: readAiConfig({ revealKey: true }),
+    phase: (s) => setPhase.run(s, Date.now(), job.id),
+    saveParams: (p) => setParams.run(JSON.stringify(p), Date.now(), job.id),
+    withRetry: (fn) => withTransientRetry(job.id, fn),
+  })
+  const params = job.params
+  params.width = output.width
+  params.height = output.height
+  params.duration = output.duration
+  params.output = output
+  setParams.run(JSON.stringify(params), Date.now(), job.id)
+  const result = output.video ?? output.audio
+  updateJob.run(
+    'done', output.alpha ? '完成 · 透明通道' : '完成', path.basename(result), result, output.video ? 'video' : 'audio',
+    output.duration, null, Date.now(), job.id,
+  )
+}
+
 async function runJob(job) {
+  if (job.kind === 'skill') return runSkillJob(job)
   if (job.kind === 'anim') return runAnimJob(job)
   if (job.kind === 'video') return runVideoJob(job)
   for (let attempt = 0; ; attempt++) {
@@ -406,38 +535,71 @@ async function generateImage(config, plan, prompt, imageDataUrl, outPath) {
 }
 
 /**
- * 风格动画：1 次生成 N×N 角色精灵图，自适应切格成序列帧，再抠像 / 对齐 / 合成。
- * 产物：<id>.webm|mp4、<id>_fNN.png、拼图 <id>_sheet.png、清单 <id>.json（todo-anim-output/1）。
+ * 风格动画：先定角色参照图，再逐段生成 N×N 精灵图（续段首帧接上一段末帧），切格后统一抠像 / 对齐 / 合成。
+ * 产物：<id>.webm|mp4、<id>_fNN.png、拼图 <id>_sheet[k].png、角色 <id>_char.png、清单 <id>.json（todo-anim-output/1）。
  */
 async function runAnimJob(job) {
   const params = job.params
   const plan = params.plan
   const config = readAiConfig({ revealKey: true })
   const row = getJob.get(job.id)
-  const refUrl = row?.ref_path && existsSync(row.ref_path) ? fileToDataUrl(row.ref_path) : ''
   const n = plan.frames
-
   const { cols, rows } = plan.grid
-  setPhase.run(`生成 ${cols}×${rows} 精灵图（${n} 帧）…`, Date.now(), job.id)
-  const sheetPath = path.join(AI_OUT, `${job.id}_sheet_raw`)
-  let sheet
-  for (let attempt = 0; ; attempt++) {
-    try {
-      sheet = await generateImage(config, plan, spritePrompt(plan, { hasRef: !!refUrl }), refUrl, sheetPath)
-      break
-    } catch (e) {
-      if (attempt >= AUTO_RETRIES || !TRANSIENT_RE.test(String(e))) throw e
-      const wait = 2000 * (attempt + 1)
-      setPhase.run(`网络波动，${wait / 1000}s 后自动重试（${attempt + 1}/${AUTO_RETRIES}）`, Date.now(), job.id)
-      await new Promise((r) => setTimeout(r, wait))
+  const segs = plan.segments?.length ?? 1
+
+  const withRetry = async (fn) => {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await fn()
+      } catch (e) {
+        if (attempt >= AUTO_RETRIES || !TRANSIENT_RE.test(String(e))) throw e
+        const wait = 2000 * (attempt + 1)
+        setPhase.run(`网络波动，${wait / 1000}s 后自动重试（${attempt + 1}/${AUTO_RETRIES}）`, Date.now(), job.id)
+        await new Promise((r) => setTimeout(r, wait))
+      }
     }
   }
-  const sheetName = `${job.id}_sheet.png`
-  writeFileSync(path.join(AI_OUT, sheetName), encodePng(sheet))
 
-  setPhase.run(plan.cutout ? `切成 ${n} 帧 · 抠像 · 对齐…` : `切成 ${n} 帧 · 对齐…`, Date.now(), job.id)
-  const cells = sliceSprite(sheet, cols, rows)
-  const frames = normalizeFrames(cells, { cutout: plan.cutout, align: plan.align })
+  // 1. 角色参照：有上传/沿用的参考图就用它，否则先按同风格生成一张角色设定图；存成 <id>_char.png 供以后沿用
+  const charName = `${job.id}_char.png`
+  let character
+  if (row?.ref_path && existsSync(row.ref_path)) {
+    character = decodeImage(readFileSync(row.ref_path))
+  } else {
+    setPhase.run('生成角色参照图…', Date.now(), job.id)
+    character = await withRetry(() => generateImage(config, plan, characterPrompt(plan), '', path.join(AI_OUT, `${job.id}_char_raw`)))
+  }
+  writeFileSync(path.join(AI_OUT, charName), encodePng(character))
+  const charUrl = `data:image/png;base64,${encodePng(character).toString('base64')}`
+
+  // 2. 逐段生成精灵图：第 1 段参照角色图，之后参照「角色图 | 上一段末帧」拼图，首帧接上一段末帧
+  const sheetNames = []
+  const allCells = []
+  let lastCell = null
+  for (let k = 0; k < segs; k++) {
+    const tag = segs > 1 ? `第 ${k + 1}/${segs} 段 · ` : ''
+    setPhase.run(`${tag}生成 ${cols}×${rows} 精灵图（${n} 帧）…`, Date.now(), job.id)
+    const continuation = k > 0 && !!lastCell
+    const refUrl = continuation
+      ? `data:image/png;base64,${encodePng(composeContinuationRef(character, lastCell)).toString('base64')}`
+      : charUrl
+    const sheet = await withRetry(() => generateImage(
+      config, plan, spritePrompt(plan, { hasRef: true, segment: k, continuation }), refUrl,
+      path.join(AI_OUT, `${job.id}_sheet${k + 1}_raw`),
+    ))
+    const sheetName = segs > 1 ? `${job.id}_sheet${k + 1}.png` : `${job.id}_sheet.png`
+    writeFileSync(path.join(AI_OUT, sheetName), encodePng(sheet))
+    sheetNames.push(sheetName)
+    const cells = sliceSprite(sheet, cols, rows)
+    // 续段首帧是上一段末帧的重画，丢掉避免同一姿势停顿
+    allCells.push(...(k > 0 ? cells.slice(1) : cells))
+    lastCell = cells[cells.length - 1]
+  }
+  const sheetName = sheetNames[0]
+
+  const total = allCells.length
+  setPhase.run(plan.cutout ? `切成 ${total} 帧 · 抠像 · 对齐…` : `切成 ${total} 帧 · 对齐…`, Date.now(), job.id)
+  const frames = normalizeFrames(allCells, { cutout: plan.cutout, align: plan.align })
   setPhase.run(plan.cutout ? '合成透明动画…' : '合成动画…', Date.now(), job.id)
   const built = await writeAnimation(frames, {
     outDir: AI_OUT, id: job.id, fps: plan.fps, loop: plan.loop, repeat: plan.repeat, alpha: !!plan.cutout,
@@ -461,6 +623,9 @@ async function runAnimJob(job) {
     video: url(built.video),
     frames: built.frames.map(url),
     sheet: url(sheetName),
+    sheets: sheetNames.map(url),
+    segments: plan.segments ?? [],
+    character: url(charName),
     manifest: url(`${job.id}.json`),
   }
   writeFileSync(path.join(AI_OUT, `${job.id}.json`), JSON.stringify(output, null, 2))

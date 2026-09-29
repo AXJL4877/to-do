@@ -1,12 +1,15 @@
 import { useMemo, useRef, useState } from 'react'
 import {
   Upload, Type, Star, Camera, Sparkles, MoreHorizontal, Film,
-  Music, Blend, Wand2, Aperture, Zap, CaseSensitive, History, Trash2,
+  Music, Blend, Wand2, Aperture, Zap, CaseSensitive, History, Trash2, Square, Blocks, Mic,
 } from 'lucide-react'
 import { useApp } from '../store'
 import { parseMediaFiles, filesFromDataTransfer } from '../lib/importFiles'
 import { AiPanel } from './AiPanel'
 import { MotionPresetLibrary } from './MotionPresetLibrary'
+import { FancyTextPanel } from './FancyTextPanel'
+import { SkillsPanel } from './SkillsPanel'
+import { VoicePanel } from './VoicePanel'
 import { beginDockDrag, defaultPanelDock, shouldIgnoreDockClick } from '../lib/panelDock'
 import { beginMediaDrag, finishMediaDrag } from '../lib/mediaDrag'
 import clsx from 'clsx'
@@ -14,19 +17,81 @@ import type { LucideIcon } from 'lucide-react'
 import type { MediaItem } from '../types'
 
 /** 主页只露出高频；其余进「更多」 */
-const PRIMARY = ['media', 'text', 'preset', 'ai'] as const
+const PRIMARY = ['media', 'text', 'preset', 'skill', 'voice', 'ai'] as const
 const SECONDARY = ['audio', 'transition', 'effect', 'filter', 'font', 'recent'] as const
 type LibTab = (typeof PRIMARY)[number] | (typeof SECONDARY)[number]
 
 const LABELS: Record<LibTab, string> = {
   media: '媒体', audio: '音频', text: '文字', transition: '转场', effect: '特效',
-  filter: '滤镜', preset: '动效预设', font: '字体', recent: '最近', ai: 'AI+',
+  filter: '滤镜', preset: '动效预设', font: '字体', recent: '最近', ai: 'AI+', skill: 'Skill', voice: '配音',
 }
 
 const ICONS: Record<LibTab, LucideIcon> = {
-  media: Film, text: Type, ai: Sparkles,
+  media: Film, text: Type, ai: Sparkles, skill: Blocks, voice: Mic,
   audio: Music, transition: Blend, effect: Wand2, filter: Aperture,
   preset: Zap, font: CaseSensitive, recent: History,
+}
+
+const SOLID_SWATCHES = ['#000000', '#FFFFFF', '#1F2937', '#F5F2EC', '#E11D48', '#F59E0B', '#10B981', '#2563EB', '#7C3AED', '#00FF00']
+
+/** 纯色底：选色 → 添加到播放头；选中纯色片段时可直接改色 */
+function SolidColorRow() {
+  const addSolidClip = useApp((s) => s.addSolidClip)
+  const setSelectedSolidColor = useApp((s) => s.setSelectedSolidColor)
+  const selectedSolid = useApp((s) => {
+    const ids = new Set(s.selectedClipIds)
+    return s.seq().clips.find((c) => ids.has(c.id) && c.solid)?.solid?.color ?? null
+  })
+  const [color, setColor] = useState('#000000')
+  const pick = (c: string) => {
+    setColor(c)
+    if (selectedSolid) setSelectedSolidColor(c)
+  }
+  return (
+    <div className="rounded-lg border p-2 mb-2 flex flex-col gap-1.5" style={{ borderColor: 'var(--border)' }} data-testid="solid-row">
+      <div className="flex items-center gap-2">
+        <span className="text-[11px] font-semibold">纯色底</span>
+        <span className="text-[10px] truncate" style={{ color: 'var(--text-muted)' }}>
+          {selectedSolid ? '已选中纯色片段 · 点色块直接改色' : '铺满画布，放在最底层视频轨'}
+        </span>
+      </div>
+      <div className="flex items-center gap-1 flex-wrap">
+        {SOLID_SWATCHES.map((c) => (
+          <button
+            key={c}
+            type="button"
+            title={c}
+            aria-label={`颜色 ${c}`}
+            data-testid={`solid-swatch-${c.slice(1)}`}
+            onClick={() => pick(c)}
+            style={{
+              width: 18, height: 18, borderRadius: 4, background: c, padding: 0,
+              border: '1px solid var(--border)',
+              outline: (selectedSolid ?? color).toUpperCase() === c ? '2px solid var(--accent)' : 'none',
+              outlineOffset: 1,
+            }}
+          />
+        ))}
+        <input
+          type="color"
+          data-testid="solid-custom"
+          title="自定义颜色"
+          value={(selectedSolid ?? color).toLowerCase()}
+          onChange={(e) => pick(e.target.value.toUpperCase())}
+          style={{ width: 22, height: 20, padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}
+        />
+        <button
+          type="button"
+          className="btn btn-ghost ml-auto"
+          style={{ height: 24, padding: '0 8px', fontSize: 11 }}
+          data-testid="solid-add"
+          onClick={() => addSolidClip(selectedSolid ?? color)}
+        >
+          <Square size={11} fill={selectedSolid ?? color} />添加
+        </button>
+      </div>
+    </div>
+  )
 }
 
 function MediaThumb({ m }: { m: MediaItem }) {
@@ -234,15 +299,10 @@ export function MediaLibrary() {
           )
         )}
         {libraryTab === 'text' && (
-          <div className="grid gap-1">
-            <button className="btn btn-ghost w-full justify-start" data-testid="text-preset-title" onClick={addTextClip}>
-              <Type size={13} />新建文本
-            </button>
-            <button className="btn btn-ghost w-full justify-start" data-testid="text-preset-subtitle" onClick={addTextClip}>字幕条</button>
-            <button className="btn btn-ghost w-full justify-start" data-testid="text-preset-lower" onClick={addTextClip}>下三分之一</button>
-            <button className="btn btn-ghost w-full justify-start" data-testid="sticker-emoji" onClick={() => addEffect('sticker', '贴纸')}>贴纸叠加</button>
-          </div>
+          <FancyTextPanel />
         )}
+        {libraryTab === 'skill' && <SkillsPanel />}
+        {libraryTab === 'voice' && <VoicePanel />}
         {libraryTab === 'transition' && (
           <div className="grid grid-cols-2 gap-1">
             {(['dissolve', 'fadeBlack', 'fadeWhite', 'push', 'wipe'] as const).map((id) => (
@@ -268,6 +328,7 @@ export function MediaLibrary() {
             <button className="btn btn-ghost w-full" data-testid="btn-import-font" onClick={() => importFont('Custom')}>导入字体</button>
           </>
         )}
+        {libraryTab === 'media' && <SolidColorRow />}
         {(['media', 'audio', 'recent'].includes(libraryTab) || (libraryTab === 'ai' && panelDock.ai !== 'tab')) && (
           list.length === 0 ? (
             <div className="h-full min-h-[120px] grid place-items-center text-[12px] text-center px-2" style={{ color: 'var(--text-muted)' }} data-testid="media-empty">

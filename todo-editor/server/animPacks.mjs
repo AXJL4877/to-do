@@ -29,6 +29,8 @@ const ALIGN_MODES = ['none', 'baseline']
 export const SPRITE_GRIDS = [4, 5, 6]
 const PREVIEW_EXT = ['.png', '.jpg', '.jpeg', '.webp', '.gif']
 const BEAT_MAX = 80
+/** 长镜头最多拆成几张精灵图（每张一段动作，首尾相接） */
+export const MAX_SEGMENTS = 6
 
 function intList(v, where, { allowed, min, max }) {
   if (!Array.isArray(v) || v.length < 1 || v.length > 12) fail(where, '须为 1~12 项的数组')
@@ -76,9 +78,18 @@ export function validateAnimPack(raw, packDir) {
   strList(raw.prompt.avoid, 'prompt.avoid', { min: 0, max: 40 })
 
   const s = raw.sprite
-  onlyKeys(s, ['grid', 'align'], 'sprite')
+  onlyKeys(s, ['grid', 'align', 'segmentInput', 'maxSegments'], 'sprite')
   if (!SPRITE_GRIDS.includes(s.grid)) fail('sprite.grid', `取值须为 ${SPRITE_GRIDS.join(' / ')}（N×N 格）`)
   if (!ALIGN_MODES.includes(s.align)) fail('sprite.align', `取值须为 ${ALIGN_MODES.join(' / ')}`)
+  if (s.maxSegments != null && (!Number.isInteger(s.maxSegments) || s.maxSegments < 1 || s.maxSegments > MAX_SEGMENTS)) {
+    fail('sprite.maxSegments', `须为 1~${MAX_SEGMENTS} 的整数`)
+  }
+  if (s.segmentInput != null) {
+    const inp = raw.inputs.find((x) => x.id === s.segmentInput)
+    if (!inp || inp.type !== 'text') fail('sprite.segmentInput', '须为已声明的 text 输入 id')
+  } else if ((s.maxSegments ?? 1) > 1) {
+    fail('sprite.segmentInput', 'maxSegments > 1 时必须指定每段替换的 text 输入')
+  }
 
   const p = raw.playback
   onlyKeys(p, ['fps', 'defaultFps', 'loops', 'defaultLoop', 'maxRepeat'], 'playback')
@@ -147,7 +158,13 @@ export function publicAnim({ pack }) {
     inputs: pack.inputs.map((x) => (x.type === 'select'
       ? { id: x.id, type: x.type, label: x.label, default: x.default, options: x.options.map((o) => ({ value: o.value, label: o.label })) }
       : { id: x.id, type: x.type, label: x.label, required: !!x.required, maxLength: x.maxLength, placeholder: x.placeholder || '' })),
-    sprite: { ...pack.sprite, frames: pack.sprite.grid * pack.sprite.grid },
+    sprite: {
+      grid: pack.sprite.grid,
+      align: pack.sprite.align,
+      frames: pack.sprite.grid * pack.sprite.grid,
+      segmentInput: pack.sprite.segmentInput ?? null,
+      maxSegments: pack.sprite.maxSegments ?? 1,
+    },
     playback: { ...pack.playback },
     image: { ...pack.image },
     cutout: pack.cutout ? { default: pack.cutout.default, lockInputs: pack.cutout.lockInputs || {} } : null,
@@ -230,12 +247,34 @@ export function compileAnimJob(entry, req) {
     return s
   })
 
-  let base = pack.prompt.template.replace(PLACEHOLDER_RE, (_, id) => values[id])
-  if (pack.prompt.avoid.length) base += ` Avoid: ${pack.prompt.avoid.join(', ')}.`
-  const summary = pack.inputs.filter((x) => x.type === 'text' && x.required).map((x) => resolved[x.id]).join(' · ')
+  // 长镜头分段：第 1 段用 segmentInput 本身，后续每段替换它的内容，其余输入不变
+  const segInput = pack.sprite.segmentInput ? pack.inputs.find((x) => x.id === pack.sprite.segmentInput) : null
+  const maxSeg = pack.sprite.maxSegments ?? 1
+  const rawExtra = req.segments == null ? [] : req.segments
+  if (!Array.isArray(rawExtra)) throw new Error('segments 必须是数组')
+  if (rawExtra.length > maxSeg - 1) throw new Error(`风格动画「${name}」最多 ${maxSeg} 段`)
+  const segments = [segInput ? resolved[segInput.id] : '']
+  for (const [i, x] of rawExtra.entries()) {
+    const s = cleanText(x)
+    if (!s) throw new Error(`请填写第 ${i + 2} 段的「${segInput.label}」`)
+    if (s.length > segInput.maxLength) throw new Error(`第 ${i + 2} 段「${segInput.label}」最多 ${segInput.maxLength} 字`)
+    segments.push(s)
+  }
+  const avoid = pack.prompt.avoid.length ? ` Avoid: ${pack.prompt.avoid.join(', ')}.` : ''
+  const compose = (segText) => pack.prompt.template.replace(PLACEHOLDER_RE, (_, id) => (segInput && id === segInput.id ? segText : values[id])) + avoid
+  const segmentPrompts = segments.map((s) => compose(s))
+  const base = segmentPrompts[0]
+  const totalFrames = frames + (segments.length - 1) * (frames - 1)
+  const summary = [
+    pack.inputs.filter((x) => x.type === 'text' && x.required).map((x) => resolved[x.id]).join(' · '),
+    ...segments.slice(1),
+  ].join(' → ')
 
   return {
     basePrompt: base,
+    segmentPrompts,
+    segments,
+    totalFrames,
     frames,
     grid: { cols: grid, rows: grid },
     beats,
@@ -255,7 +294,8 @@ export function compileAnimJob(entry, req) {
       summary,
       alpha,
       grid,
-      frames,
+      frames: totalFrames,
+      sheets: segments.length,
       fps,
       loop,
       repeat,
@@ -278,27 +318,52 @@ function rowBeat(beat, r, rows) {
   return `the motion continues (about ${a}%–${b}% of the action)`
 }
 
-/** 精灵图：一次生成 N×N 连续序列帧 */
-export function spritePrompt(plan, { hasRef = false } = {}) {
+/**
+ * 精灵图：一次生成 N×N 连续序列帧。
+ * segment：长镜头第几段（0 起）；hasRef：带角色参照；continuation：参考图为「左角色设定 | 右上一段末帧」拼图。
+ */
+export function spritePrompt(plan, { hasRef = false, segment = 0, continuation = false } = {}) {
   const { cols, rows } = plan.grid
   const n = plan.frames
-  const phases = plan.beats
+  const total = plan.segments?.length ?? 1
+  const beats = segment === 0 ? plan.beats : plan.beats.map(() => '')
+  const phases = beats
     .map((b, r) => `row ${r + 1} (frames ${r * cols + 1}-${(r + 1) * cols}): ${rowBeat(b, r, rows)}`)
     .join('; ')
-  const cycle = plan.loop === 'pingpong'
-    ? `Frame ${n} is the extreme pose; the frames will also be played in reverse, so the motion must read well backwards.`
-    : plan.repeat > 1
-      ? `The motion is a seamless loop cycle: frame ${n} flows directly back into frame 1.`
+  const last = segment === total - 1
+  const cycle = !last
+    ? `This is part ${segment + 1} of ${total} of one continuous shot: frame ${n} must end mid-motion in a pose the next part can continue from, not a final resting pose.`
+    : plan.loop === 'pingpong'
+      ? `Frame ${n} is the extreme pose; the frames will also be played in reverse, so the motion must read well backwards.`
+      : plan.repeat > 1 && total === 1
+        ? `The motion is a seamless loop cycle: frame ${n} flows directly back into frame 1.`
+        : ''
+  const ref = continuation
+    ? 'The reference image has two panels. LEFT panel: the character design sheet — the character must match it exactly (same proportions, face, clothes, colors, props). '
+      + 'RIGHT panel: the last frame of the previous part of this same shot. Frame 1 of this sheet must be nearly identical to the RIGHT panel pose, with the same size, position and camera, and then the motion continues smoothly from there.'
+    : hasRef
+      ? 'The character must match the character in the reference image exactly (same proportions, face, clothes, colors, props).'
       : ''
   return [
     `Character animation sprite sheet: a strict ${cols}×${rows} grid of ${n} equal square cells, read left to right, top to bottom.`,
     `The ${n} cells are consecutive frames of one smooth continuous motion, like a frame-by-frame hand-drawn animation at ${plan.fps} fps: each frame changes only slightly from the previous one, with evenly spaced in-betweens and no jumps.`,
+    total > 1 && segment > 0 ? `This is part ${segment + 1} of ${total} of one continuous shot.` : '',
     `Phases: ${phases}.`,
     cycle,
     'Every cell shows the exact same single character at the same size, standing on the same ground line at the same spot inside its cell, from the same fixed camera angle; only the pose changes.',
     'The whole character stays fully inside its own cell with clear empty margin on all sides and never crosses into neighboring cells. Cells are separated only by empty background: no borders, no grid lines, no frame numbers, no captions, no text.',
-    hasRef ? 'The character must match the character in the reference image exactly.' : '',
-    `Character and art style: ${plan.basePrompt}`,
+    ref,
+    `Character and art style: ${plan.segmentPrompts?.[segment] ?? plan.basePrompt}`,
   ].filter(Boolean).join(' ')
+}
+
+/** 角色设定图：同风格、单人全身、中性站姿、白底，作为整段动画的角色参照 */
+export function characterPrompt(plan) {
+  return [
+    'Character design reference sheet for a 2D animation: exactly one character, full body, standing in a neutral relaxed pose, front three-quarter view, centered, large in frame with clear empty margin on all sides.',
+    'Plain pure white background, no scenery, no ground shadow, no text, no labels, no color swatches, no multiple views.',
+    'Show the character design clearly (face, hairstyle, proportions, clothing, colors and any signature props) so it can be matched exactly in later animation frames. Ignore any action described below; the character just stands still.',
+    `Character and art style: ${plan.basePrompt}`,
+  ].join(' ')
 }
 

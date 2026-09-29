@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import type { Clip, MediaItem } from '../../types'
 import { proxyMaxEdge, resolveCamera3d, resolveLayer3d, type SceneFrameInput } from './math'
+import { drawFancyText, fontStack } from '../fancyText'
 
 type LayerMesh = THREE.Mesh & { userData: { clipId: string; url?: string; pendingUrl?: string } }
 
@@ -83,7 +84,7 @@ export class Scene3dRenderer {
       if (!inRange) return false
       if (c.threeD) return true
       if (!input.scene.enabled) return false
-      return !!(c.mediaId || c.text)
+      return !!(c.mediaId || c.text || c.solid)
     })
 
     const keep = new Set(active.map((c) => c.id))
@@ -124,7 +125,7 @@ export class Scene3dRenderer {
       mat.transparent = true
       mat.depthWrite = false
       mat.color.set(selected ? 0xfff4e8 : 0xffffff)
-      this.bindTexture(mesh, clip, mediaMap.get(clip.mediaId ?? ''))
+      this.bindTexture(mesh, clip, mediaMap.get(clip.mediaId ?? ''), input.playhead)
     })
   }
 
@@ -175,11 +176,30 @@ export class Scene3dRenderer {
     mesh.scale.set(Math.max(0.01, t.scaleX), Math.max(0.01, t.scaleY), 1)
   }
 
-  private bindTexture(mesh: LayerMesh, clip: Clip, media?: MediaItem) {
+  private bindTexture(mesh: LayerMesh, clip: Clip, media?: MediaItem, playhead = 0) {
     if (clip.text) {
-      const key = `text:${clip.id}:${clip.text.content}:${clip.text.fontSize}:${clip.text.color}`
+      const { fancy, ...plain } = clip.text
+      const localT = Math.max(0, playhead - clip.start)
+      const frame = fancy?.chalk ? Math.floor(Math.min(fancy.chalk.duration, localT) * 30) : 0
+      const key = `text:${clip.id}:${frame}:${JSON.stringify([plain, fancy && { ...fancy, texture: fancy.texture?.slice(-48) }])}`
       if (mesh.userData.url === key) return
-      const tex = this.textTexture(clip)
+      const previous = (mesh.material as THREE.MeshBasicMaterial).map
+      const tex = this.textTexture(clip, localT)
+      previous?.dispose()
+      this.setMap(mesh, tex, key)
+      return
+    }
+    if (clip.solid) {
+      const key = `solid:${clip.solid.color}`
+      if (mesh.userData.url === key) return
+      const c = document.createElement('canvas')
+      c.width = 320
+      c.height = 180
+      const ctx = c.getContext('2d')!
+      ctx.fillStyle = clip.solid.color
+      ctx.fillRect(0, 0, c.width, c.height)
+      const tex = new THREE.CanvasTexture(c)
+      tex.colorSpace = THREE.SRGBColorSpace
       this.setMap(mesh, tex, key)
       return
     }
@@ -257,19 +277,29 @@ export class Scene3dRenderer {
     }
   }
 
-  private textTexture(clip: Clip): THREE.Texture {
+  private textTexture(clip: Clip, time = 0): THREE.Texture {
     const t = clip.text!
     const c = document.createElement('canvas')
     c.width = 1024
     c.height = 512
     const ctx = c.getContext('2d')!
     ctx.clearRect(0, 0, c.width, c.height)
-    ctx.fillStyle = t.color
-    ctx.font = `${t.fontSize * 2}px ${t.fontFamily}, sans-serif`
-    ctx.textAlign = t.align
-    ctx.textBaseline = 'middle'
     const x = t.align === 'left' ? 40 : t.align === 'right' ? c.width - 40 : c.width / 2
-    ctx.fillText(t.content, x, c.height / 2)
+    const lines = t.content.split('\n')
+    if (t.fancy) {
+      ctx.translate(x, c.height / 2)
+      drawFancyText(ctx, {
+        lines, fontPx: t.fontSize * 2, family: t.fontFamily, align: t.align, lineHeight: t.lineHeight,
+        letterSpacing: t.letterSpacing, fancy: t.fancy, k: 2, time,
+      })
+    } else {
+      ctx.fillStyle = t.color
+      ctx.font = `${t.fontSize * 2}px ${fontStack(t.fontFamily)}`
+      ctx.textAlign = t.align
+      ctx.textBaseline = 'middle'
+      const lh = t.fontSize * 2 * (t.lineHeight || 1.25)
+      lines.forEach((line, i) => ctx.fillText(line, x, c.height / 2 + (i - (lines.length - 1) / 2) * lh))
+    }
     const tex = new THREE.CanvasTexture(c)
     tex.colorSpace = THREE.SRGBColorSpace
     tex.premultiplyAlpha = false

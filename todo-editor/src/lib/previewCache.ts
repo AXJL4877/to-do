@@ -1,7 +1,11 @@
 import type { MediaItem, ProjectSettings, Sequence } from '../types'
 import type { ImageCache } from './monitorDraw'
 import { renderProgramFrame } from './monitorDraw'
-import { anyVideoSeeking, frameSampleUnstable, frameSampleCacheable, holdVideoDecode, releaseVideoDecode, withVideoFrameScope } from './videoCache'
+import { anyVideoSeeking, frameSampleUnstable, frameSampleCacheable, frameSampleMissing, holdVideoDecode, releaseVideoDecode, withVideoFrameScope } from './videoCache'
+import {
+  clearDiskCache, diskBusy, diskFrames, diskHas, diskRead, diskReadPending, diskReadSlots, diskReady,
+  diskWritable, diskWrite, hashKey, totalDiskBytes, useDiskKey,
+} from './previewDiskCache'
 
 /** 节目窗 RAM 帧缓存：固定分辨率，与监视器显示尺寸解耦，避免叠层改分辨率整表作废 */
 export type PreviewRamCache = {
@@ -15,14 +19,27 @@ export type PreviewRamCache = {
   cacheH: number
 }
 
-const MAX_BYTES = 512 * 1024 * 1024
+const MB = 1024 * 1024
+
+/** RAM 预算：本机内存的 30%，夹在 512MB～6GB，其余留给解码、系统和别的软件 */
+function ramBudgetBytes() {
+  let totalMb = 0
+  try {
+    const desktop = (window as Window & { todoDesktop?: { systemMemoryMb?: () => number } }).todoDesktop
+    totalMb = desktop?.systemMemoryMb?.() ?? 0
+  } catch { /* */ }
+  if (!totalMb) totalMb = ((navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? 4) * 1024
+  return Math.round(Math.min(6144, Math.max(512, totalMb * 0.3)) * MB)
+}
+
+const MAX_BYTES = ramBudgetBytes()
 
 let sharedCache = createPreviewCache()
 let cacheRev = 0
 let notifyTimer = 0
 const cacheSubs = new Set<() => void>()
 
-/** 预取：按播放头向前补帧 */
+/** 后台自动缓存的代号，播放/改动时递增以作废进行中的任务 */
 let prefetchGen = 0
 let scratch: HTMLCanvasElement | null = null
 let composeScratch: HTMLCanvasElement | null = null
@@ -31,7 +48,12 @@ let lastPresentedFrame = -1
 const sheetPool: HTMLCanvasElement[] = []
 
 function acquireSheet(w: number, h: number) {
-  const sheet = sheetPool.pop() ?? document.createElement('canvas')
+  let sheet = sheetPool.pop()
+  if (!sheet) {
+    sheet = document.createElement('canvas')
+    // 上千张缓存帧必须放 CPU 内存，GPU 加速画布会把显存吃光
+    sheet.getContext('2d', { willReadFrequently: true })
+  }
   if (sheet.width !== w || sheet.height !== h) {
     sheet.width = w
     sheet.height = h
@@ -111,6 +133,7 @@ export function previewFingerprint(
       JSON.stringify(c.keyframes),
       JSON.stringify(c.color),
       c.text ? JSON.stringify(c.text) : '',
+      c.solid?.color ?? '',
       JSON.stringify(c.effects),
       c.transitionOut ? JSON.stringify(c.transitionOut) : '',
     ].join(','),
@@ -233,7 +256,7 @@ function blitLastPresented(dest: HTMLCanvasElement, w: number, h: number): boole
 export function putCachedFrame(
   cache: PreviewRamCache,
   frame: number,
-  source: HTMLCanvasElement,
+  source: CanvasImageSource,
   keepNear = frame,
 ) {
   if (cache.frames.has(frame)) return
@@ -251,7 +274,32 @@ export function putCachedFrame(
   ctx.drawImage(source, 0, 0, cache.cacheW, cache.cacheH)
   cache.frames.set(frame, sheet)
   cache.bytes += bytes
+  // 播放中编码跟不上就先不落盘，空闲时自动缓存会补
+  if (cache === sharedCache && !diskHas(frame) && !diskBusy()) void diskWrite(frame, sheet)
   notifyPreviewCacheChanged()
+}
+
+let diskKeyMemo: { fp: string; media: MediaItem[]; key: string } | null = null
+let syncedDiskKey = ''
+
+/** 共享缓存对应的磁盘内容键：画面指纹 + 所用素材文件；只有共享缓存落盘 */
+function syncDiskKey(cache: PreviewRamCache, seq: Sequence, media: MediaItem[]) {
+  if (cache !== sharedCache || !cache.fingerprint) return false
+  if (!diskKeyMemo || diskKeyMemo.fp !== cache.fingerprint || diskKeyMemo.media !== media) {
+    const used = new Set(seq.clips.map((c) => c.mediaId).filter(Boolean))
+    const files = media
+      .filter((m) => used.has(m.id))
+      .map((m) => `${m.id}:${m.path ?? m.url}:${m.duration}`)
+      .sort()
+      .join('|')
+    diskKeyMemo = { fp: cache.fingerprint, media, key: hashKey(`${cache.fingerprint}#${files}`) }
+  }
+  const key = diskKeyMemo.key
+  if (key !== syncedDiskKey) {
+    syncedDiskKey = key
+    void useDiskKey(key).then(() => notifyPreviewCacheChanged(true))
+  }
+  return true
 }
 
 export function blitCachedFrame(
@@ -315,6 +363,7 @@ export function presentCachedProgramFrame(
   const { w: cw, h: ch } = stableCacheSize(settings, maxEdge)
   const fp = fingerprintOf(seq, settings, cw, ch)
   ensurePreviewFingerprint(cache, fp, cw, ch)
+  syncDiskKey(cache, seq, media)
   const t = frame / Math.max(1, fps)
   const followOnly = !!opts?.followOnly
 
@@ -345,8 +394,11 @@ export function presentCachedProgramFrame(
   const compose = composeScratchCanvas(displayW, displayH)
   renderProgramFrame(compose, seq, media, settings, t, imgCache, displayW, displayH, [], undefined, false, undefined, true)
   const unstable = anyVideoSeeking() || frameSampleUnstable()
+  // 播放中某层在 seek 时它自己退回上一帧即可，其余层照常走；
+  // 整帧沿用上一帧只用于有层连旧帧都没有（否则会闪占位块）或静止 scrub
+  const holdPrevious = unstable && (!opts?.playing || frameSampleMissing())
 
-  if (unstable && (lastPresentedFrame >= 0 || cache.frames.has(frame - 1))) {
+  if (holdPrevious && (lastPresentedFrame >= 0 || cache.frames.has(frame - 1))) {
     const prev = cache.frames.get(frame - 1)
     if (prev) blitCachedFrame(dest, prev, displayW, displayH)
     else blitLastPresented(dest, displayW, displayH)
@@ -386,8 +438,25 @@ export function renderAndCacheFrame(
   )
 }
 
-/** 播放时向前预取若干帧（每 idle 一片，不堵主线程） */
-export function prefetchProgramFrames(opts: {
+function sequenceEndFrame(seq: Sequence, fps: number) {
+  const end = seq.clips.reduce((m, c) => (c.enabled ? Math.max(m, c.start + c.duration) : m), 0)
+  return Math.max(0, Math.ceil(end * fps - 1e-6))
+}
+
+function scheduleIdle(cb: () => void, timeout: number) {
+  const ric = (window as Window & {
+    requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number
+  }).requestIdleCallback
+  if (ric) ric(cb, { timeout })
+  else window.setTimeout(cb, 0)
+}
+
+/**
+ * 后台自动缓存整条序列：从 fromFrame 往后到结尾，再从头补到 fromFrame。
+ * 每个 idle 片只处理一帧不堵主线程。RAM 有空优先进 RAM（盘上有就直接读回），
+ * RAM 满了就只落盘；两级都满才停，不挤掉已缓存帧。
+ */
+export function autoCacheProgramFrames(opts: {
   cache: PreviewRamCache
   fromFrame: number
   fps: number
@@ -396,63 +465,124 @@ export function prefetchProgramFrames(opts: {
   settings: ProjectSettings
   imgCache: ImageCache
   maxEdge?: number
-  ahead?: number
 }) {
-  const ahead = Math.max(1, Math.min(24, opts.ahead ?? 8))
   const maxEdge = opts.maxEdge ?? 720
+  const fps = Math.max(1, opts.fps)
   const { w: cw, h: ch } = stableCacheSize(opts.settings, maxEdge)
   const fp = previewFingerprint(opts.seq, opts.settings, cw, ch)
-  ensurePreviewFingerprint(opts.cache, fp, cw, ch)
+  const cache = opts.cache
+  ensurePreviewFingerprint(cache, fp, cw, ch)
+  const useDisk = syncDiskKey(cache, opts.seq, opts.media)
   const gen = ++prefetchGen
 
-  let i = 1
+  const endFrame = sequenceEndFrame(opts.seq, fps)
+  if (endFrame <= 0) return
+  const start = Math.min(Math.max(0, opts.fromFrame), endFrame - 1)
+  let i = 0
   let attempts = 0
+  const frameAt = (k: number) => (start + k) % endFrame
+  const alive = () => gen === prefetchGen && cache.fingerprint === fp
+  const ramFull = () => cache.bytes + frameBytes(cache) > cache.maxBytes
+  const done = (f: number) => {
+    const inRam = cache.frames.has(f)
+    if (!useDisk) return inRam
+    if (inRam) return diskHas(f) || !diskWritable()
+    return diskHas(f) && ramFull()
+  }
+
   const step = () => {
-    if (gen !== prefetchGen || opts.cache.fingerprint !== fp) return
-    while (i <= ahead) {
-      const f = opts.fromFrame + i
-      if (opts.cache.frames.has(f)) { i++; continue }
-      const t = f / Math.max(1, opts.fps)
-      const sheet = scratchCanvas(cw, ch)
-      const ready = withVideoFrameScope('prefetch', () => {
-        renderProgramFrame(
-          sheet, opts.seq, opts.media, opts.settings, t, opts.imgCache,
-          cw, ch, [], undefined, false, undefined, true,
-        )
-        return !anyVideoSeeking() && frameSampleCacheable()
+    if (!alive()) return
+    if (useDisk && diskBusy()) {
+      window.setTimeout(step, 30)
+      return
+    }
+    while (i < endFrame && done(frameAt(i))) i++
+    if (i >= endFrame) return
+    const f = frameAt(i)
+
+    if (cache.frames.has(f)) {
+      void diskWrite(f, cache.frames.get(f)!)
+      i++
+      scheduleIdle(step, 80)
+      return
+    }
+    if (useDisk && diskHas(f)) {
+      void diskRead(f).then((bmp) => {
+        if (bmp) {
+          if (alive()) putCachedFrame(cache, f, bmp, start)
+          bmp.close()
+        }
+        if (!alive()) return
+        i++
+        scheduleIdle(step, 80)
       })
-      if (!ready) {
-        if (++attempts < 100) window.setTimeout(step, 20)
+      return
+    }
+    const toDiskOnly = ramFull()
+    if (toDiskOnly && !(useDisk && diskWritable())) return
+
+    const sheet = scratchCanvas(cw, ch)
+    const ready = withVideoFrameScope('prefetch', () => {
+      renderProgramFrame(
+        sheet, opts.seq, opts.media, opts.settings, f / fps, opts.imgCache,
+        cw, ch, [], undefined, false, undefined, true,
+      )
+      return !anyVideoSeeking() && frameSampleCacheable()
+    })
+    if (!ready) {
+      // 素材迟迟解不出来就跳过这帧，别卡住后面整条
+      if (++attempts < 50) {
+        window.setTimeout(step, 20)
         return
       }
-      putCachedFrame(opts.cache, f, sheet, opts.fromFrame)
-      attempts = 0
-      i++
-      break
+    } else if (!toDiskOnly) {
+      putCachedFrame(cache, f, sheet, start)
+    } else {
+      void diskWrite(f, sheet).then((ok) => { if (ok) notifyPreviewCacheChanged() })
     }
-    if (i <= ahead && gen === prefetchGen) {
-      const ric = (window as Window & {
-        requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number
-      }).requestIdleCallback
-      if (ric) ric(step, { timeout: 80 })
-      else window.setTimeout(step, 0)
-    }
+    attempts = 0
+    i++
+    if (i < endFrame) scheduleIdle(step, 80)
   }
-  const ric = (window as Window & {
-    requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number
-  }).requestIdleCallback
-  if (ric) ric(step, { timeout: 50 })
-  else window.setTimeout(step, 0)
+  if (useDisk) void diskReady().then(() => { if (alive()) scheduleIdle(step, 50) })
+  else scheduleIdle(step, 50)
 }
 
 export function cancelPrefetchProgramFrames() {
   prefetchGen++
 }
 
+/** 播放中把前方已落盘、RAM 里没有的帧提前读回 RAM */
+export function readAheadFromDisk(cache: PreviewRamCache, frame: number, count: number) {
+  if (cache !== sharedCache) return
+  const fp = cache.fingerprint
+  for (let f = frame + 1; f <= frame + count && diskReadSlots() > 0; f++) {
+    if (cache.frames.has(f) || !diskHas(f) || diskReadPending(f)) continue
+    void diskRead(f).then((bmp) => {
+      if (!bmp) return
+      if (cache.fingerprint === fp) putCachedFrame(cache, f, bmp, frame)
+      bmp.close()
+    })
+  }
+}
+
+export function previewCacheUsage() {
+  return { ramBytes: sharedCache.bytes, ramMaxBytes: sharedCache.maxBytes, diskBytes: totalDiskBytes() }
+}
+
+/** 手动清理：RAM 和磁盘两级一起清 */
+export async function clearAllPreviewCaches() {
+  clearPreviewCache(sharedCache)
+  await clearDiskCache()
+  notifyPreviewCacheChanged(true)
+}
+
 /** Only contiguous, actually cached frames count as a cached interval. */
 export function cachedTimeRanges(cache: PreviewRamCache, fps: number): { start: number; end: number }[] {
-  if (!cache.frames.size || fps <= 0) return []
-  const frames = [...cache.frames.keys()].sort((a, b) => a - b)
+  const frames = [...cache.frames.keys()]
+  if (cache === sharedCache) for (const f of diskFrames()) if (!cache.frames.has(f)) frames.push(f)
+  if (!frames.length || fps <= 0) return []
+  frames.sort((a, b) => a - b)
   const gapOk = 1
   const ranges: { start: number; end: number }[] = []
   let a = frames[0]

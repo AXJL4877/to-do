@@ -57,6 +57,7 @@ export function NumInput({
       <div className="flex items-center gap-1">
         <input
           type="number"
+          aria-label={label || testId || '数值'}
           value={Number.isFinite(value) ? value : 0}
           step={step}
           min={min}
@@ -70,6 +71,7 @@ export function NumInput({
       {hasSlider && (
         <input
           type="range"
+          aria-label={`${label || testId || '数值'}滑块`}
           min={min}
           max={max}
           step={step}

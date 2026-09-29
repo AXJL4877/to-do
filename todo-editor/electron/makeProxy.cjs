@@ -51,9 +51,11 @@ function makeProxy(opts = {}) {
 
   const args = [
     '-y', '-hide_banner', '-loglevel', 'error',
+    // 后台转码限线程，给预览解码留 CPU
+    '-threads', '2',
     '-i', filePath,
     '-vf', `scale=-2:'min(${height},ih)'`,
-    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '28',
+    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '28', '-threads', '2',
     '-an',
     '-movflags', '+faststart',
     tmp,

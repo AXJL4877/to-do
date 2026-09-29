@@ -20,7 +20,7 @@ std::vector<LayerRef> collect_visible_layers(const EditGraph &g, double time_sec
     const Track *t = track_of(c.track_id);
     if (!t || t->kind != "video") continue;
     const bool is_text = (c.kind == "text") || !c.text_content.empty();
-    if (is_text) {
+    if (is_text || c.kind == "solid") {
       drawables.push_back(i);
       continue;
     }

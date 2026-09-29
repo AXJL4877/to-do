@@ -1,0 +1,32 @@
+{
+  "spec": "todo-skill-pack/1",
+  "id": "builtin.tts-voice",
+  "name": "配音",
+  "version": "1.0.0",
+  "author": "TO DO",
+  "description": "粘贴口播文案，经 TTS_timeline 合成配音，同时产出句 / 短语 / 字三级时间戳，供「字幕」技能对时。",
+  "tags": ["配音", "TTS", "口播"],
+  "pipeline": "tts",
+  "input": {
+    "label": "口播文案",
+    "maxLength": 5000,
+    "placeholder": "粘贴要配音的文案"
+  },
+  "output": {
+    "mime": "audio/wav",
+    "codec": "pcm"
+  },
+  "params": [
+    {
+      "id": "voice", "type": "select", "group": "voice", "label": "音色", "default": "mizai",
+      "options": [
+        { "value": "mizai", "label": "咪仔" },
+        { "value": "clone", "label": "克隆音", "hint": "火山声音复刻 2.0 的音色 ID" }
+      ]
+    },
+    {
+      "id": "cloneId", "type": "text", "group": "voice", "label": "克隆音 ID", "when": { "voice": ["clone"] },
+      "default": "", "maxLength": 64, "pattern": "^S_[A-Za-z0-9_-]{2,60}$", "placeholder": "S_xxxxxxxx"
+    }
+  ]
+}

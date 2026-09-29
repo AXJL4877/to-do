@@ -1,0 +1,143 @@
+{
+  "spec": "todo-skill-pack/1",
+  "id": "builtin.chalk-hand",
+  "name": "黑板手绘",
+  "version": "1.0.0",
+  "author": "TO DO",
+  "description": "一句话描述画面，AI 拆成 1~6 个粉笔元素分别生图，按蒙版逐个用粉笔手写出来，输出 WebM（可透明底，直接叠在视频上）。渲染核心来自黑板报管线。",
+  "tags": ["黑板报", "粉笔", "手绘书写", "WebM"],
+  "previews": ["previews/01-board.png", "previews/02-alpha.png"],
+  "input": {
+    "label": "画面描述",
+    "maxLength": 400,
+    "placeholder": "例如：一个小人把工资分成三份，一份存银行，一份买基金，一份留作生活费"
+  },
+  "output": {
+    "mime": "video/webm",
+    "codec": "vp9",
+    "alphaWhen": { "background": ["transparent"] }
+  },
+  "params": [
+    {
+      "id": "elements", "type": "number", "group": "scene", "label": "元素数",
+      "min": 0, "max": 6, "step": 1, "default": 0, "hint": "0 = AI 按描述决定（通常 2~4 个）"
+    },
+    {
+      "id": "layout", "type": "select", "group": "scene", "label": "版式", "default": "auto",
+      "options": [
+        { "value": "auto", "label": "自动" },
+        { "value": "hero_left", "label": "左主角" },
+        { "value": "diagonal_fall", "label": "斜线下落" },
+        { "value": "conveyor_wave", "label": "传送带" },
+        { "value": "fork_right", "label": "右分叉" },
+        { "value": "stack_rise", "label": "层层升高" },
+        { "value": "climax_right", "label": "右侧高潮" },
+        { "value": "grid", "label": "均分网格" }
+      ]
+    },
+    {
+      "id": "size", "type": "select", "group": "scene", "label": "画幅", "default": "1280x720",
+      "options": [
+        { "value": "1280x720", "label": "16:9 · 720p" },
+        { "value": "1920x1080", "label": "16:9 · 1080p" },
+        { "value": "1080x1920", "label": "9:16 竖屏" },
+        { "value": "1080x1080", "label": "1:1 方形" }
+      ]
+    },
+    {
+      "id": "background", "type": "select", "group": "scene", "label": "背景", "default": "board",
+      "options": [
+        { "value": "board", "label": "黑板底", "hint": "黑砂黑板纹理" },
+        { "value": "transparent", "label": "透明底", "hint": "只留粉笔和手，可叠加" },
+        { "value": "black", "label": "纯黑底" }
+      ]
+    },
+    {
+      "id": "tone", "type": "select", "group": "scene", "label": "笔色", "default": "chalk",
+      "when": { "background": ["transparent"] },
+      "options": [
+        { "value": "chalk", "label": "白粉笔", "hint": "适合叠在深色画面" },
+        { "value": "ink", "label": "深色墨线", "hint": "适合叠在浅色画面" }
+      ]
+    },
+    {
+      "id": "palette", "type": "select", "group": "scene", "label": "配色", "default": "color",
+      "options": [
+        { "value": "color", "label": "彩色粉笔", "prompt": "white chalk with a few vivid red, green, cool blue and pale-yellow chalk accents" },
+        { "value": "mono", "label": "纯白粉笔", "prompt": "white chalk only, no colored chalk" }
+      ]
+    },
+    {
+      "id": "duration", "type": "number", "group": "timing", "label": "总时长",
+      "min": 3, "max": 30, "step": 0.5, "default": 8, "unit": "秒"
+    },
+    {
+      "id": "hold", "type": "number", "group": "timing", "label": "尾部停留",
+      "min": 0, "max": 5, "step": 0.5, "default": 1.5, "unit": "秒", "hint": "写完后对着完成画面停留"
+    },
+    {
+      "id": "fps", "type": "select", "group": "timing", "label": "帧率", "default": "30",
+      "options": [
+        { "value": "24", "label": "24 fps" },
+        { "value": "30", "label": "30 fps" }
+      ]
+    },
+    {
+      "id": "hand", "type": "select", "group": "stroke", "label": "手部", "default": "chalk",
+      "options": [
+        { "value": "chalk", "label": "粉笔手" },
+        { "value": "none", "label": "不显示手" }
+      ]
+    },
+    {
+      "id": "handSize", "type": "number", "group": "stroke", "label": "手部大小",
+      "min": 0.6, "max": 1.4, "step": 0.1, "default": 1, "unit": "×",
+      "when": { "hand": ["chalk"] }
+    },
+    {
+      "id": "stroke", "type": "select", "group": "stroke", "label": "笔迹", "default": "skeleton",
+      "options": [
+        { "value": "skeleton", "label": "沿线条书写", "hint": "骨架追踪，笔尖跟着线走" },
+        { "value": "grid", "label": "块状扫写", "hint": "更快，适合大面积涂抹" }
+      ]
+    },
+    {
+      "id": "fill", "type": "select", "group": "stroke", "label": "上色", "default": "wipe",
+      "options": [
+        { "value": "wipe", "label": "轮廓扫色" },
+        { "value": "brush", "label": "沿笔刷色" },
+        { "value": "none", "label": "只描线" }
+      ]
+    },
+    {
+      "id": "quality", "type": "select", "group": "output", "label": "编码质量", "default": "standard",
+      "options": [
+        { "value": "high", "label": "高" },
+        { "value": "standard", "label": "标准" },
+        { "value": "draft", "label": "草稿" }
+      ]
+    }
+  ],
+  "quick": ["background", "tone", "size", "duration"],
+  "planner": {
+    "maxElements": 6,
+    "countParam": "elements",
+    "system": "你是黑板报板书设计师。用户用一句话描述一个画面，你把它拆成几个按讲述顺序依次用粉笔写到黑板上的视觉元素。每个元素是一个独立的粉笔小场景或物件簇（例如：拿着钱袋的火柴小人、带锁的房子、向上的箭头和柱状图），不是一行字。第一个元素是主视觉（hero），其余是配景（support）或短标题（accent，只写 ≤6 个字的粉笔大字）。人物只用极简粉笔小人，不要真人脸；不要流程图式的图标串、不要四分屏、不要长句抄写；物件上可带 ≤4 字的短标签。"
+  },
+  "assets": {
+    "models": ["gpt-image-2"],
+    "resolution": "2K",
+    "template": "ONE chalk drawing on a pure flat black background (#000000, no board frame, no wood, no chalk tray, no eraser). {{role}} Draw: {{draw}}. Style: hand-drawn blackboard illustration with dusty broken chalk strokes, {{palette}}. Centered, large in frame with a clear pure-black margin on all sides; everything outside the drawing is pure black.",
+    "roles": {
+      "hero": "HERO vignette: one clear focal scene, rich but readable.",
+      "support": "SUPPORT vignette: a simpler silhouette than a hero scene.",
+      "accent": "Short chalk LETTERING only, written exactly as given, with at most one rough underline; no props, no icons."
+    },
+    "avoid": ["photograph", "photorealistic", "3D render", "real human face", "classroom photo", "four-panel grid", "icon flowchart", "long sentences", "watermark", "green board", "board frame"]
+  },
+  "runtime": {
+    "type": "python",
+    "entry": "render.py",
+    "timeoutSec": 1800
+  }
+}

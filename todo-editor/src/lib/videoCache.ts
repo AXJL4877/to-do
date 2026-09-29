@@ -12,6 +12,17 @@ type Slot = {
   followFrame: number | null
   /** A cache hit paused this slot; the next live sample must align before presenting. */
   resumeSync: boolean
+  /** 本次 seek 发起时刻（performance.now） */
+  seekAt: number | null
+  /** 实测 seek 耗时（秒，平滑值）；播放中 seek 目标按它前置，否则永远追不上播放头 */
+  seekLatency: number
+}
+
+const SEEK_LEAD_MAX = 2.5
+
+function startSeek(s: Slot, t: number) {
+  s.seekAt = performance.now()
+  s.v.currentTime = t
 }
 
 const slots = new Map<string, Slot>()
@@ -54,6 +65,12 @@ export function beginVideoCompose(_priorityMediaIds: string[] = []) {}
 
 export function setVideoSeekQuiet(on: boolean) {
   composePlay = on
+  // 预取槽只服务静止时的预热；开播时还在 seek 会和节目槽抢同一文件的解码
+  if (on) {
+    for (const id of [...slots.keys()]) {
+      if (id.startsWith('prefetch:')) dropVideo(id)
+    }
+  }
   for (const s of slots.values()) {
     s.pending = null
     s.followFrame = null
@@ -76,13 +93,18 @@ export function anyVideoSeeking() {
 /** 本帧有层没拿到稳定画面（seek / 未解码），合成结果不能写入 RAM */
 let sampleUnstable = false
 let sampleCacheable = true
+/** 本帧有视频层连上一帧都没有（会画占位块） */
+let sampleMissing = false
 
 export function resetFrameSampleStability() {
   sampleUnstable = false
   sampleCacheable = true
+  sampleMissing = false
 }
 
 export function frameSampleCacheable() { return !sampleUnstable && sampleCacheable }
+
+export function frameSampleMissing() { return sampleMissing }
 
 export function frameSampleUnstable() {
   return sampleUnstable
@@ -198,12 +220,17 @@ function slotOf(clipId: string, m: MediaItem): Slot {
     s = { v: makeVideo((el) => {
       const cur = slots.get(clipId)
       if (!cur || cur.v !== el) return
+      if (cur.seekAt != null && !el.seeking) {
+        const lat = (performance.now() - cur.seekAt) / 1000
+        cur.seekLatency = Math.min(SEEK_LEAD_MAX, cur.seekLatency * 0.5 + lat * 0.5)
+        cur.seekAt = null
+      }
       if (capture(cur)) {
         cur.settled = el.currentTime
         cur.pending = null
       }
       if (clipId.startsWith('program:')) bump()
-    }), snap: null, settled: null, pending: null, followFrame: null, resumeSync: false }
+    }), snap: null, settled: null, pending: null, followFrame: null, resumeSync: false, seekAt: null, seekLatency: 0.3 }
     slots.set(clipId, s)
   }
   const src = playUrl(m)
@@ -262,15 +289,23 @@ function htmlFrame(clipId: string, m: MediaItem, t: number, step: number, opts?:
 
     if ((s.resumeSync || s.followFrame !== frame) && !v.seeking && v.readyState >= 1) {
       s.followFrame = frame
-      // 连续解码；偏离超过 ~8 帧才纠（过紧会 seek 闪烁，过松会音画漂）
-      const drift = Math.abs(v.currentTime - q)
-      if ((s.resumeSync && drift > 1e-4) || drift > step * 8 || Number.isNaN(v.currentTime)) {
-        try { v.currentTime = q } catch { /* */ }
+      // 连续解码；落后超过 ~8 帧才纠（过紧会 seek 闪烁，过松会音画漂）
+      const ahead = v.currentTime - q
+      const drifted = Number.isNaN(v.currentTime) || ahead < -step * 8 || ahead > SEEK_LEAD_MAX + step * 8
+      if (drifted || (s.resumeSync && Math.abs(ahead) > step)) {
+        // seek 期间播放头继续走：目标前置一个实测 seek 耗时，落地时正好被播放头追上
+        let target = drifted ? q + Math.min(SEEK_LEAD_MAX, s.seekLatency * rate) : q
+        if (Number.isFinite(v.duration) && v.duration > 0) target = Math.min(target, Math.max(q, v.duration - step))
+        try { startSeek(s, target) } catch { /* */ }
       }
       s.resumeSync = false
     }
 
-    if (v.paused && !v.seeking && v.readyState >= 2) {
+    // 前置 seek 落在播放头前面：停在这一帧等播放头追上，再接着解码
+    const waitForHead = !v.seeking && v.currentTime - q > step * 1.5
+    if (waitForHead) {
+      if (!v.paused) try { v.pause() } catch { /* */ }
+    } else if (v.paused && !v.seeking && v.readyState >= 2) {
       void v.play().catch(() => { /* */ })
     }
 
@@ -302,7 +337,7 @@ function htmlFrame(clipId: string, m: MediaItem, t: number, step: number, opts?:
   }
   s.pending = q
   s.followFrame = frame
-  try { v.currentTime = q } catch { s.pending = null }
+  try { startSeek(s, q) } catch { s.pending = null }
   markUnstable()
   return still(s)
 }
@@ -356,7 +391,11 @@ export function videoFrameAt(
 
   const html = htmlFrame(id, m, t, step, opts)
   if (html) return html
-  if (m.url && slots.has(id)) return still(slots.get(id)!)
+  if (m.url && slots.has(id)) {
+    const held = still(slots.get(id)!)
+    if (!held && composePlay) sampleMissing = true
+    return held
+  }
 
   if (!composePlay && m.path && m.kind === 'video' && desktop()?.decodeMediaFrame) {
     const native = nativeFrameAt(id, m, t, step)

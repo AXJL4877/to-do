@@ -3,12 +3,13 @@ import { Play, Pause, SkipBack, SkipForward, Repeat, Camera } from 'lucide-react
 import { useApp, formatTime } from '../store'
 import { resolveClipTransform, patchClipXY } from '../lib/keyframeEval'
 import {
+  autoCacheProgramFrames,
   cancelPrefetchProgramFrames,
   ensurePreviewFingerprint,
   getProgramPreviewCache,
   presentCachedProgramFrame,
-  prefetchProgramFrames,
   previewFingerprint,
+  readAheadFromDisk,
   stableCacheSize,
 } from '../lib/previewCache'
 import { getPreviewSize, hitTestMotionPathKf, hitTestProgramClips, renderProgramFrame, renderProgramOverlay, renderSourceFrame } from '../lib/monitorDraw'
@@ -273,9 +274,9 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program' 
       )
     }
 
-    // 仅真正静止时预热；播放中/刚停立刻预取会 seek 解码槽导致闪一下
+    // 静止时后台自动缓存整条序列；播放中缓存会 seek 解码槽导致闪一下
     if (!st.playing && !opts?.playing) {
-      prefetchProgramFrames({
+      autoCacheProgramFrames({
         cache: getProgramPreviewCache(),
         fromFrame: frame,
         fps,
@@ -284,7 +285,6 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program' 
         settings,
         imgCache: imgCache.current,
         maxEdge,
-        ahead: 6,
       })
     }
   }, [mode, isProgram, isEdit, drivesClock, media, settings, sourceMediaId, sourceIn, sourceOut, preview.w, preview.h, imgCache, imgVersion, selectedClipIds, autoKeyframe])
@@ -336,7 +336,8 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program' 
     const tStart = st0.playhead
     const wall0 = performance.now()
     let lastShown = -1
-    let proxiesKicked = false
+    // 叠层缺代理的素材停播后再转码：播放中起 ffmpeg 会和多路解码抢 CPU
+    const proxyWanted = new Set<string>()
     const cache = getProgramPreviewCache()
     const maxEdge = st0.prefs.previewCacheMaxEdge ?? 720
     const { w: cw0, h: ch0 } = stableCacheSize(settings, maxEdge)
@@ -392,10 +393,7 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program' 
           const track = seq.tracks.find((tr) => tr.id === c.trackId)
           return !!track && !track.hidden && track.kind !== 'audio'
         })
-        if (videoClips.length >= 1 && !proxiesKicked) {
-          proxiesKicked = true
-          st.ensureStackProxies(videoClips.map((c) => c.mediaId!).filter(Boolean))
-        }
+        for (const c of videoClips) if (c.mediaId) proxyWanted.add(c.mediaId)
         const dw = preview.w
         const dh = preview.h
 
@@ -403,6 +401,7 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program' 
           cache, frame, fps, canvas, seq, mediaNow, st.settings,
           imgCache.current, dw, dh, maxEdge, { playing: true },
         )
+        readAheadFromDisk(cache, frame, fps)
         if (isEdit) {
           renderProgramOverlay(
             canvas, seq, st.settings, t, dw, dh,
@@ -424,6 +423,7 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program' 
       setVideoSeekQuiet(false)
       cancelAnimationFrame(raf)
       void stopNativePlaySession()
+      if (proxyWanted.size) useApp.getState().ensureStackProxies([...proxyWanted])
       const current = useApp.getState().playhead
       const endT = Math.abs(current - tStart) < 1e-4 ? localPlayhead.current : current
       if (Math.abs(current - tStart) < 1e-4) {

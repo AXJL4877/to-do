@@ -4,6 +4,10 @@ const { contextBridge, ipcRenderer, webUtils } = require('electron')
 contextBridge.exposeInMainWorld('todoDesktop', {
   isDesktop: true,
   platform: process.platform,
+  systemMemoryMb: () => {
+    try { return Math.round(process.getSystemMemoryInfo().total / 1024) }
+    catch { return 0 }
+  },
   getPaths: () => ipcRenderer.invoke('desktop:get-paths'),
   getAiBaseUrl: () => ipcRenderer.sendSync('desktop:ai-base-url') || '',
   aiBaseUrl: () => ipcRenderer.sendSync('desktop:ai-base-url') || '',

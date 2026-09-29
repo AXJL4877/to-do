@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { MediaItem } from '../types'
 import type { ImageCache } from '../lib/monitorDraw'
 import { ensureVideo, setVideoCacheListener } from '../lib/videoCache'
+import { onFancyTextureLoaded } from '../lib/fancyText'
 
 /** 图片 + 视频素材缓存：首帧就绪后 bump；seek 中不靠清预览缓存防闪 */
 export function useImageCache(media: MediaItem[]) {
@@ -18,8 +19,10 @@ export function useImageCache(media: MediaItem[]) {
         setVersion((v) => v + 1)
       })
     })
+    const offTexture = onFancyTextureLoaded(() => setVersion((v) => v + 1))
     return () => {
       setVideoCacheListener(null)
+      offTexture()
       if (raf) cancelAnimationFrame(raf)
     }
   }, [])

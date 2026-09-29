@@ -16,5 +16,12 @@ function aiApi(): Plugin {
 export default defineConfig({
   plugins: [react(), tailwindcss(), aiApi()],
   base: './',
-  server: { host: '127.0.0.1', port: 5173, strictPort: true },
+  build: { rollupOptions: { input: { main: 'index.html', chalk: 'chalk-render.html' } } },
+  server: {
+    host: '127.0.0.1',
+    port: 5173,
+    strictPort: true,
+    // 工具包里的 .html 文档 / 原生构建产物变动会触发整页刷新
+    watch: { ignored: ['**/.native-tools/**', '**/native/**'] },
+  },
 })

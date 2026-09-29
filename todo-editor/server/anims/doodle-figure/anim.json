@@ -2,9 +2,9 @@
   "spec": "todo-anim-pack/2",
   "id": "builtin.doodle-figure",
   "name": "手绘小人",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "author": "TO DO",
-  "description": "手绘线条小人动作动画：一次生成 5×5 角色精灵图（25 帧），自动切格拼成序列帧动画。描述角色和动作即可，可按行写分镜。",
+  "description": "手绘线条小人动作动画：一次生成 5×5 角色精灵图（25 帧），自动切格拼成序列帧动画。描述角色和动作即可，可按行写分镜；长镜头可分最多 4 段接力，并用角色参照图保持同一人物。",
   "tags": ["手绘", "小人", "精灵图", "序列帧"],
   "outputs": ["animation"],
   "inputs": [
@@ -79,7 +79,9 @@
   },
   "sprite": {
     "grid": 5,
-    "align": "baseline"
+    "align": "baseline",
+    "segmentInput": "action",
+    "maxSegments": 4
   },
   "playback": {
     "fps": [8, 10, 12, 15, 24],

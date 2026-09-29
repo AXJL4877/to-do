@@ -44,6 +44,8 @@ struct Clip {
   std::string text_bilingual;
   double text_stroke_w = 0;
   std::string text_stroke_color = "#000000";
+  /** kind == "solid"：整画面纯色（#RRGGBB） */
+  std::string solid_color;
   double fx_blur = 0;
   double fx_sharpen = 0;
   double fx_filter = 0;

@@ -1,5 +1,6 @@
-import { useEffect } from 'react'
+import { useEffect, useSyncExternalStore } from 'react'
 import { useApp } from '../store'
+import { getPreviewCacheRev, previewCacheUsage, subscribePreviewCache } from '../lib/previewCache'
 import { isDesktopApp } from '../lib/desktop'
 import { SHORTCUTS } from '../lib/shortcuts'
 import { usePreviewSuspend } from '../hooks/usePreviewSuspend'
@@ -83,7 +84,9 @@ export function Modals() {
   const settings = useApp((s) => s.settings)
   const prefs = useApp((s) => s.prefs)
   const exportQueue = useApp((s) => s.exportQueue)
-  const cacheMb = useApp((s) => s.cacheMb)
+  useSyncExternalStore(subscribePreviewCache, getPreviewCacheRev, getPreviewCacheRev)
+  const cacheUsage = previewCacheUsage()
+  const mb = (b: number) => (b / 1024 / 1024).toFixed(0)
   const sequences = useApp((s) => s.sequences)
   const activeSeqId = useApp((s) => s.activeSeqId)
   const newProject = useApp((s) => s.newProject)
@@ -233,7 +236,9 @@ export function Modals() {
               <label className="flex items-center gap-2 text-[12px]">
                 <input type="checkbox" data-testid="set-native-preview" checked={!!settings.nativePreview} onChange={(e) => updateSettings({ nativePreview: e.target.checked })} />原生节目预览（B2 popup）
               </label>
-              <button className="btn btn-ghost" data-testid="btn-clear-cache" onClick={clearCache}>清理缓存 ({cacheMb.toFixed(1)} MB)</button>
+              <button className="btn btn-ghost" data-testid="btn-clear-cache" onClick={clearCache}>
+                清理缓存（内存 {mb(cacheUsage.ramBytes)} / {mb(cacheUsage.ramMaxBytes)} MB · 磁盘 {mb(cacheUsage.diskBytes)} MB）
+              </button>
             </>
           )}
 
@@ -260,7 +265,23 @@ export function Modals() {
                   <option value={0}>与监视器同分辨率</option>
                 </select>
                 <p className="text-[11px] mt-1" style={{ color: 'var(--text-muted)' }}>
-                  仅影响播放 RAM 缓存清晰度与可缓存时长；改后需重新播放填充绿条
+                  影响预览缓存清晰度与内存可缓存时长；改后后台自动重新缓存
+                </p>
+              </div>
+              <div className="field">
+                <label>预览磁盘缓存上限</label>
+                <select
+                  data-testid="pref-preview-disk-cache"
+                  value={prefs.previewDiskCacheGb ?? 10}
+                  onChange={(e) => updatePrefs({ previewDiskCacheGb: +e.target.value as 2 | 5 | 10 | 20 })}
+                >
+                  <option value={2}>2 GB</option>
+                  <option value={5}>5 GB</option>
+                  <option value={10}>10 GB（默认）</option>
+                  <option value={20}>20 GB</option>
+                </select>
+                <p className="text-[11px] mt-1" style={{ color: 'var(--text-muted)' }}>
+                  超出上限删最久没用的；7 天没用过的缓存启动时自动清掉
                 </p>
               </div>
               <div className="field"><label>默认时长</label><input type="number" value={prefs.defaultDuration} onChange={(e) => updatePrefs({ defaultDuration: +e.target.value })} /></div>

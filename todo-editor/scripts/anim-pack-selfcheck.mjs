@@ -6,9 +6,11 @@ import path from 'node:path'
 process.env.TODO_DATA_DIR = mkdtempSync(path.join(tmpdir(), 'todo-anim-'))
 
 const {
-  BUILTIN_ANIM_DIR, USER_ANIM_DIR, compileAnimById, listAnimPacks, spritePrompt, validateAnimPack,
+  BUILTIN_ANIM_DIR, USER_ANIM_DIR, characterPrompt, compileAnimById, listAnimPacks, spritePrompt, validateAnimPack,
 } = await import('../server/animPacks.mjs')
-const { contentBox, normalizeFrames, playOrder, resolveFfmpeg, sliceGrid, sliceSprite, writeAnimation } = await import('../server/animBuild.mjs')
+const {
+  composeContinuationRef, contentBox, normalizeFrames, playOrder, resolveFfmpeg, sliceGrid, sliceSprite, writeAnimation,
+} = await import('../server/animBuild.mjs')
 const { handleAiHttp } = await import('../server/aiHttp.mjs')
 
 function assert(cond, msg) {
@@ -73,6 +75,54 @@ throws(() => compileAnimById(DOODLE, { inputs: { ...need, prompt: 'x' } }), /没
 throws(() => compileAnimById(DOODLE, { inputs: need, alpha: 'yes' }), /布尔/, 'alpha 类型')
 throws(() => compileAnimById('nobody.none', { inputs: need }), /未找到/, '未知动画包')
 
+// 3b. 长镜头分段：每段一张精灵图，衔接帧去重；续段提示词接上一段末帧；角色设定图提示词
+{
+  const seg = compileAnimById(DOODLE, { inputs: need, segments: ['放下杯子', '挥手告别'], beats: ['伸手'] })
+  assert(seg.segments.length === 3 && seg.totalFrames === 25 + 2 * 24 && seg.meta.frames === 73 && seg.meta.sheets === 3, '3 段 = 73 帧')
+  assert(seg.segmentPrompts[1].includes('放下杯子') && !seg.segmentPrompts[1].includes('喝水') && seg.basePrompt.includes('喝水'), '每段替换动作')
+  const p0 = spritePrompt(seg, { hasRef: true, segment: 0 })
+  const p1 = spritePrompt(seg, { hasRef: true, segment: 1, continuation: true })
+  const p2 = spritePrompt(seg, { hasRef: true, segment: 2, continuation: true })
+  assert(p0.includes('row 1 (frames 1-5): 伸手') && /part 1 of 3/.test(p0), '第 1 段带分镜且标注分段')
+  assert(!p1.includes('伸手') && /left/i.test(p1) && /right/i.test(p1) && p1.includes('放下杯子'), '续段参照左角色右末帧')
+  assert(/part 3 of 3/.test(p2) && p2.includes('挥手告别'), '最后一段')
+  const chp = characterPrompt(seg)
+  assert(chp.includes('圆脑袋小人') && /white/i.test(chp), '角色设定图提示词')
+  throws(() => compileAnimById(DOODLE, { inputs: need, segments: ['a', 'b', 'c', 'd'] }), /段/, '分段超限')
+  throws(() => compileAnimById(DOODLE, { inputs: need, segments: [' '] }), /段/, '空分段')
+  throws(() => compileAnimById(DOODLE, { inputs: need, segments: 'x' }), /数组/, '分段类型')
+
+  const ch = { width: 40, height: 80, data: Buffer.alloc(40 * 80 * 4, 0) }
+  for (let i = 0; i < ch.data.length; i += 4) { ch.data[i] = 200; ch.data[i + 3] = 255 }
+  const last = { width: 100, height: 100, data: Buffer.alloc(100 * 100 * 4, 30) }
+  for (let i = 3; i < last.data.length; i += 4) last.data[i] = 255
+  const ref = composeContinuationRef(ch, last, 200)
+  assert(ref.height === 200 && ref.width > 100 + 200, `拼接参照图尺寸: ${ref.width}×${ref.height}`)
+  const px = (x, y) => ref.data[(y * ref.width + x) * 4]
+  assert(px(10, 100) === 200 && px(ref.width - 10, 100) === 30, '左角色右末帧')
+}
+
+// 3c. AI 导演：提示词含包约束；LLM 输出按白名单清洗且能通过编译
+{
+  const { buildDirectorMessages, sanitizeDirection } = await import('../server/animDirector.mjs')
+  const [sys] = buildDirectorMessages(pub, '小人跳绳')
+  assert(sys.content.includes('"character"') && sys.content.includes('1~4 段') && sys.content.includes('marker(马克笔)'), '导演提示词含输入与段数约束')
+  const d = sanitizeDirection({
+    title: '一个非常非常非常长的动画标题超过十二字', character: '戴{{帽}}子的小人'.padEnd(120, '啊'),
+    segments: ['起床伸懒腰', '刷牙', '背包出门', '关门', '第五段应被丢弃'], beats: ['a', 'b'],
+    line: 'oil', color: 'full', fps: 60, loop: 'bounce', repeat: 99, alpha: 'yes', notes: 'n',
+  }, pub)
+  const v = d.values
+  assert(d.title.length === 12 && v.inputs.character.length === 80 && !/[{}]/.test(v.inputs.character), '文本截断、去花括号')
+  assert(v.inputs.action === '起床伸懒腰' && v.segments.length === 3 && v.segments[2] === '关门', '首段进 action，其余进 segments，超出丢弃')
+  assert(v.inputs.line === 'marker' && v.inputs.color === 'full', '非法选项回落默认')
+  assert(v.fps === 12 && v.loop === 'forward' && v.repeat === 10 && v.alpha === true && v.beats.length === 5 && v.beats[2] === '', '播放参数夹紧、分镜补齐')
+  const cp2 = compileAnimById(DOODLE, { inputs: v.inputs, segments: v.segments, beats: v.beats, fps: v.fps, loop: v.loop, repeat: v.repeat, alpha: v.alpha })
+  assert(cp2.segments.length === 4, '清洗结果可直接编译')
+  throws(() => sanitizeDirection({ character: 'x', segments: [] }, pub), /动作/, '无动作')
+  throws(() => sanitizeDirection('text', pub), /对象/, '非对象')
+}
+
 // 4. 非法包
 const clone = () => JSON.parse(JSON.stringify(doodleRaw))
 for (const [mutate, pattern] of [
@@ -89,6 +139,9 @@ for (const [mutate, pattern] of [
   [(p) => { p.cutout.trim = true }, /不允许的字段 "trim"/],
   [(p) => { p.prompt.template += ' {{mood}}' }, /\{\{mood\}\}/],
   [(p) => { p.previews = ['../anim.json'] }, /包内相对路径/],
+  [(p) => { p.sprite.maxSegments = 9 }, /maxSegments/],
+  [(p) => { delete p.sprite.segmentInput }, /segmentInput/],
+  [(p) => { p.sprite.segmentInput = 'background' }, /segmentInput/],
 ]) {
   const p = clone()
   mutate(p)
@@ -181,6 +234,17 @@ const early = await roundtrip('GET', `/api/ai-jobs/${enq.job.id}/output`)
 assert(!early.ok && early.code === 409, '未完成任务拿回应返回 409')
 const bad = await roundtrip('POST', '/api/ai-jobs', { kind: 'anim', animId: DOODLE, animInputs: { character: 'x' } })
 assert(!bad.ok && /动作/.test(bad.error), '入队校验必填')
+const segEnq = await roundtrip('POST', '/api/ai-jobs', { kind: 'anim', animId: DOODLE, animInputs: need, segments: ['挥手'] })
+assert(segEnq.ok && segEnq.job.params.anim.frames === 49 && segEnq.job.params.anim.sheets === 2, `分段入队: ${segEnq.error}`)
+const badFrom = await roundtrip('POST', '/api/ai-jobs', { kind: 'anim', animId: DOODLE, animInputs: need, characterFrom: '../x' })
+assert(!badFrom.ok && /characterFrom/.test(badFrom.error), '沿用角色 id 校验')
+const { AI_OUT } = await import('../server/aiJobs.mjs')
+mkdirSync(AI_OUT, { recursive: true })
+writeFileSync(path.join(AI_OUT, `${enq.job.id}_char.png`), Buffer.from('png'))
+const reuse = await roundtrip('POST', '/api/ai-jobs', { kind: 'anim', animId: DOODLE, animInputs: need, characterFrom: enq.job.id })
+assert(reuse.ok && reuse.job.params.characterFrom === enq.job.id, `沿用角色入队: ${reuse.error}`)
+const missing = await roundtrip('POST', '/api/ai-jobs', { kind: 'anim', animId: DOODLE, animInputs: need, characterFrom: 'a_none' })
+assert(!missing.ok && /找不到/.test(missing.error), '沿用不存在的角色')
 
 console.log('anim-pack self-check ok')
 process.exit(0)
