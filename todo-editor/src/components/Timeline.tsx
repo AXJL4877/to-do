@@ -131,6 +131,8 @@ export function Timeline({
     /** 多选时点中其一未拖动 → 松手收成当前 */
     collapseOnClick?: boolean
     collapseAlt?: boolean
+    /** Shift 点下未拖动 → 松手做范围多选 */
+    rangeIds?: string[]
   } | null>(null)
 
   const pxPerSec = timelineZoom
@@ -322,19 +324,19 @@ export function Timeline({
       if (d.kind === 'trim-in' && d.clipId) {
         if ((e.buttons & 1) === 0) { drag.current = null; return }
         d.moved = true
-        st.trimClip(d.clipId, 'in', timeFromEvent(e.clientX), { record: false, free: e.altKey })
+        st.trimClip(d.clipId, 'in', timeFromEvent(e.clientX), { record: false, free: e.altKey, strong: e.shiftKey, pxPerSec })
         return
       }
       if (d.kind === 'trim-out' && d.clipId) {
         if ((e.buttons & 1) === 0) { drag.current = null; return }
         d.moved = true
-        st.trimClip(d.clipId, 'out', timeFromEvent(e.clientX), { record: false, free: e.altKey })
+        st.trimClip(d.clipId, 'out', timeFromEvent(e.clientX), { record: false, free: e.altKey, strong: e.shiftKey, pxPerSec })
         return
       }
       if ((d.kind === 'rate-in' || d.kind === 'rate-out') && d.clipId) {
         if ((e.buttons & 1) === 0) { drag.current = null; return }
         d.moved = true
-        st.rateStretchClip(d.clipId, d.kind === 'rate-in' ? 'in' : 'out', timeFromEvent(e.clientX), { record: false, free: e.altKey })
+        st.rateStretchClip(d.clipId, d.kind === 'rate-in' ? 'in' : 'out', timeFromEvent(e.clientX), { record: false, free: e.altKey, strong: e.shiftKey, pxPerSec })
         return
       }
       if (d.kind === 'move' && d.clipId) {
@@ -362,6 +364,8 @@ export function Timeline({
           shift: e.shiftKey,
           alt: e.altKey,
           primaryId: d.clipId,
+          pxPerSec,
+          trackId,
         })
         d.lastDt = appliedDt
         d.lastTrackId = trackId
@@ -477,6 +481,8 @@ export function Timeline({
             { primaryId: d.clipId, alt: true, spawn: d.spawn },
           )
           clearMovePreview(d.moveIds)
+        } else if (d.rangeIds) {
+          useApp.getState().selectClips(d.rangeIds)
         } else if (d.collapseOnClick) {
           // 多选中单击未拖 → 收成当前片段（+链接 A/V）
           const st = useApp.getState()
@@ -636,6 +642,8 @@ export function Timeline({
       window.addEventListener('pointerup', onUp)
       return
     }
+    // Shift：点一下不拖 = 范围多选（松手时生效）；按住拖 = 移动当前片段并强吸附到附近切口
+    let rangeIds: string[] | undefined
     if (e.shiftKey && lastAnchorId.current) {
       const ordered = [...seq.clips].sort(
         (a, b) => a.start - b.start || a.trackId.localeCompare(b.trackId),
@@ -644,14 +652,13 @@ export function Timeline({
       const b = ordered.findIndex((c) => c.id === clipId)
       if (a >= 0 && b >= 0) {
         const [lo, hi] = a < b ? [a, b] : [b, a]
-        ids = ordered.slice(lo, hi + 1).map((c) => c.id)
+        rangeIds = ordered.slice(lo, hi + 1).map((c) => c.id)
       } else {
-        ids = [...new Set([...selectedClipIds, clipId])]
+        rangeIds = [...new Set([...selectedClipIds, clipId])]
       }
-      selectClips(ids)
-      return
+    } else {
+      lastAnchorId.current = clipId
     }
-    lastAnchorId.current = clipId
     // 普通单击：只选当前（+链接 A/V）。多选后点其中之一再拖才整组移动；
     // 若点下未拖动，松手时收成当前（见 onUp），避免「永远拖全体」。
     const keepMulti = selectedClipIds.includes(clipId) && selectedClipIds.length > 1
@@ -686,6 +693,7 @@ export function Timeline({
       // 多选时单击未拖：松手收成当前
       collapseOnClick: keepMulti,
       collapseAlt: e.altKey,
+      rangeIds,
     }
     ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
   }

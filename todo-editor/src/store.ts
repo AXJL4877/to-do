@@ -862,20 +862,20 @@ export type AppStore = {
   setLayout: (p: Partial<AppStore['layout']>) => void
   setMonitorView: (v: AppStore['monitorView']) => void
   setTimelineZoom: (z: number) => void
-  trimClip: (id: string, edge: 'in' | 'out', t: number, opts?: { record?: boolean; free?: boolean }) => void
+  trimClip: (id: string, edge: 'in' | 'out', t: number, opts?: { record?: boolean; free?: boolean; strong?: boolean; pxPerSec?: number }) => void
   /** 选中片段头对齐（都挪到最早的开头）或尾对齐（都挪到最晚的结尾）；书写 + 定格按一个元素整体挪 */
   alignSelectedClips: (edge: 'start' | 'end') => void
   snapGuide: number | null
   setSnapGuide: (at: number | null) => void
   /** 比率拉伸（R）：音视频改速度；图片 / 文字 / 纯色没有速度，退化成普通裁剪 */
-  rateStretchClip: (id: string, edge: 'in' | 'out', t: number, opts?: { record?: boolean; free?: boolean }) => void
+  rateStretchClip: (id: string, edge: 'in' | 'out', t: number, opts?: { record?: boolean; free?: boolean; strong?: boolean; pxPerSec?: number }) => void
   /** 在时间轴上拖出入场/出场时长（转场、文字动画、淡化、透明度关键帧） */
   resizeEdgeAnim: (id: string, edge: 'in' | 'out', sec: number, opts?: { record?: boolean }) => void
   snapTime: (t: number) => number
   trackAtY: (contentY: number) => string | null
   dragMoveClips: (ids: string[], origins: Record<string, number>, dt: number, trackId?: string, opts?: { shift?: boolean; alt?: boolean; primaryId?: string; spawn?: 'before' | 'after' }) => void
   /** 仅计算吸附后的 dt，不写 store（供时间线拖拽预览） */
-  previewDragDt: (ids: string[], origins: Record<string, number>, dt: number, opts?: { shift?: boolean; alt?: boolean; primaryId?: string }) => number
+  previewDragDt: (ids: string[], origins: Record<string, number>, dt: number, opts?: DragSnapOpts) => number
   nudgeSelectedTransform: (dx: number, dy: number) => void
   pasteAttributes: () => void
   copyAttributes: () => void
@@ -966,7 +966,21 @@ function ensureClipSelected(
 }
 
 
-/** 吸附到片段边缘 / 播放头 / 标记 / 0；阈值约 4 帧 */
+export type SnapOpts = {
+  /** 时间轴当前缩放：吸附范围按屏幕像素算，缩放多少都一样好吸 */
+  pxPerSec?: number
+  /** Shift：强吸附，范围更大、不看吸附开关 */
+  strong?: boolean
+  /** 拖动片段所在轨：离得近的轨上的切口优先 */
+  trackId?: string
+}
+
+const SNAP_PX = 8
+const SNAP_PX_STRONG = 20
+/** 每隔一条轨，距离按多几像素算：同样近时优先贴相邻轨的切口 */
+const SNAP_TRACK_PX = 3
+
+/** 吸附到片段切口（头 / 尾）、播放头、标记、0 */
 function snapClipEdge(
   t: number,
   duration: number,
@@ -974,21 +988,31 @@ function snapClipEdge(
   seq: Sequence,
   playhead: number,
   fps: number,
+  opts: SnapOpts = {},
 ) {
-  const thresh = Math.max(0.12, 8 / fps)
-  const targets: number[] = [0, playhead, ...seq.markers.map((m) => m.t)]
+  const pps = opts.pxPerSec && opts.pxPerSec > 0 ? opts.pxPerSec : null
+  const radiusPx = opts.strong ? SNAP_PX_STRONG : SNAP_PX
+  // 老调用方没给缩放时退回按时间（约 4 帧）
+  const toPx = (sec: number) => (pps ? sec * pps : sec / Math.max(0.12, 8 / fps) * radiusPx)
+  const rowOf = (id?: string) => seq.tracks.findIndex((tr) => tr.id === id)
+  const row = rowOf(opts.trackId)
+  const targets: { t: number; row: number }[] = [0, playhead, ...seq.markers.map((m) => m.t)].map((x) => ({ t: x, row: -1 }))
   for (const c of seq.clips) {
     if (exclude.has(c.id)) continue
-    targets.push(c.start, c.start + c.duration)
+    const r = rowOf(c.trackId)
+    targets.push({ t: c.start, row: r }, { t: c.start + c.duration, row: r })
   }
   let best = t
-  let bestDist = thresh
+  let bestScore = Infinity
   let at: number | null = null
   for (const target of targets) {
-    const dStart = Math.abs(t - target)
-    if (dStart < bestDist) { bestDist = dStart; best = target; at = target }
-    const dEnd = Math.abs(t + duration - target)
-    if (dEnd < bestDist) { bestDist = dEnd; best = target - duration; at = target }
+    const lane = row >= 0 && target.row >= 0 ? Math.abs(target.row - row) * SNAP_TRACK_PX : 0
+    for (const [edge, shift] of [[t, 0], [t + duration, duration]] as const) {
+      const dist = toPx(Math.abs(edge - target.t))
+      if (dist > radiusPx) continue
+      const score = dist + lane
+      if (score < bestScore) { bestScore = score; best = target.t - shift; at = target.t }
+    }
   }
   return { t: Math.max(0, best), at }
 }
@@ -1101,12 +1125,14 @@ function pushHistoryCoalesced(get: () => AppStore, set: (p: Partial<AppStore> | 
   })
 }
 
+type DragSnapOpts = { shift?: boolean; alt?: boolean; primaryId?: string; pxPerSec?: number; trackId?: string }
+
 function resolveDragDt(
   get: () => AppStore,
   ids: string[],
   origins: Record<string, number>,
   dt: number,
-  opts?: { shift?: boolean; alt?: boolean; primaryId?: string },
+  opts?: DragSnapOpts,
 ) {
   const setIds = new Set(ids)
   const st = get()
@@ -1116,7 +1142,9 @@ function resolveDragDt(
   const origin0 = origins[primaryId] ?? primary?.start ?? 0
   if (!wantSnap || !primary) { setSnapGuide(null); return dt }
   const raw = Math.max(0, origin0 + dt)
-  const snapped = snapClipEdge(raw, primary.duration, setIds, st.seq(), st.playhead, st.settings.fps)
+  const snapped = snapClipEdge(raw, primary.duration, setIds, st.seq(), st.playhead, st.settings.fps, {
+    pxPerSec: opts?.pxPerSec, strong: opts?.shift, trackId: opts?.trackId ?? primary.trackId,
+  })
   setSnapGuide(snapped.at)
   return snapped.t - origin0
 }
@@ -1133,10 +1161,12 @@ function trimTargets(s: Sequence, id: string) {
   return targets
 }
 
-/** 裁剪边缘吸附到其他片段头尾 / 播放头 / 标记；Alt 拖动不吸附 */
-function snapTrimEdge(st: AppStore, t: number, exclude: Set<string>, free?: boolean) {
-  if (free || !st.settings.snap) { setSnapGuide(null); return t }
-  const r = snapClipEdge(t, 0, exclude, st.seq(), st.playhead, st.settings.fps)
+type TrimSnapOpts = SnapOpts & { free?: boolean }
+
+/** 裁剪边缘吸附到其他片段头尾 / 播放头 / 标记；Alt 不吸附，Shift 强吸附 */
+function snapTrimEdge(st: AppStore, t: number, exclude: Set<string>, opts: TrimSnapOpts = {}) {
+  if (opts.free || !(opts.strong || st.settings.snap)) { setSnapGuide(null); return t }
+  const r = snapClipEdge(t, 0, exclude, st.seq(), st.playhead, st.settings.fps, opts)
   setSnapGuide(r.at)
   return r.t
 }
@@ -2206,7 +2236,7 @@ export const useApp = create<AppStore>((set, get) => {
     trimClip(id, edge, t, opts) {
       if (opts?.record !== false) get().pushHistory()
       const targets = trimTargets(get().seq(), id)
-      const snapped = get().snapTime(snapTrimEdge(get(), t, targets, opts?.free))
+      const snapped = get().snapTime(snapTrimEdge(get(), t, targets, { ...opts, trackId: get().seq().clips.find((c) => c.id === id)?.trackId }))
       patchSeq((s) => {
         return enforceNoOverlap({
           ...s,
@@ -2221,7 +2251,7 @@ export const useApp = create<AppStore>((set, get) => {
     rateStretchClip(id, edge, t, opts) {
       if (opts?.record !== false) get().pushHistory()
       const targets = trimTargets(get().seq(), id)
-      const snapped = get().snapTime(snapTrimEdge(get(), t, targets, opts?.free))
+      const snapped = get().snapTime(snapTrimEdge(get(), t, targets, { ...opts, trackId: get().seq().clips.find((c) => c.id === id)?.trackId }))
       const media = get().media
       // 媒体可能已从库里删掉（离线），查不到类型时仍按音视频变速
       const timed = (c: Clip) => {
