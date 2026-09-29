@@ -7,8 +7,8 @@ import type { Clip, MediaItem } from '../types'
 /** 服务端读得到文件的素材：AI 生成的（按 url 找）或带本机路径的；浏览器里拖进来的 blob 素材读不到 */
 function asrMedia(m: MediaItem | undefined): SubtitleSourceMedia | null {
   if (!m) return null
-  if (/\/ai-generated\/[^/?#]+/.test(m.url)) return { url: m.url, name: m.name }
   if (m.path) return { url: m.url, path: m.path, name: m.name }
+  if (/\/ai-generated\/[^/?#]+/.test(m.url)) return { url: m.url, name: m.name }
   return null
 }
 

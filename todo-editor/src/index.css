@@ -410,6 +410,73 @@ img, video, svg { -webkit-user-drag: none; }
   border-radius: 14px; overflow: hidden; display: flex; flex-direction: column;
   animation: modal-in 240ms var(--spring-ui);
 }
+/* 口播备忘录（~ 切换） */
+.script-memo {
+  position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column;
+  background: var(--surface-0);
+  animation: fade-in 140ms var(--ease-out-expo);
+}
+.script-memo-head {
+  display: flex; align-items: center; gap: 8px; padding: 10px 16px; min-width: 0;
+  border-bottom: 1px solid var(--border); background: var(--surface-1);
+}
+.script-memo-key {
+  flex-shrink: 0; font-size: 11px; padding: 2px 8px; border-radius: 6px;
+  border: 1px solid var(--border); color: var(--text-secondary); background: var(--surface-0);
+}
+.script-memo-text {
+  flex: 1; min-height: 0; width: 100%; max-width: 860px; margin: 0 auto; padding: 32px 28px 48px;
+  resize: none; border: 0; outline: none; background: transparent; color: var(--text-primary, inherit);
+  font-size: 18px; line-height: 1.9; letter-spacing: 0.02em;
+}
+.script-memo-text::placeholder { color: var(--text-muted); }
+
+/* 起始页 / 新建项目 */
+.start-screen {
+  position: fixed; inset: 0; display: grid; place-items: center; padding: 24px;
+  background:
+    radial-gradient(1200px 600px at 15% -10%, hsl(18 76% 46% / 0.08), transparent 60%),
+    var(--surface-0);
+}
+.start-screen .toast { bottom: 24px; }
+.start-card {
+  width: min(920px, 100%); height: min(560px, 100%);
+  display: grid; grid-template-columns: 260px minmax(0, 1fr);
+  background: var(--surface-1); border: 1px solid var(--border); border-radius: 16px; overflow: hidden;
+  box-shadow: 0 24px 60px hsl(220 20% 8% / 0.08);
+  animation: modal-in 280ms var(--spring-ui);
+}
+.start-side { display: flex; flex-direction: column; padding: 24px; background: var(--surface-0); border-right: 1px solid var(--border); }
+.start-main { padding: 24px; overflow-y: auto; min-height: 0; }
+.start-empty { margin-top: 48px; text-align: center; font-size: 12px; color: var(--text-muted); }
+.start-item {
+  display: flex; align-items: center; gap: 8px; padding: 0 8px 0 0;
+  border: 1px solid transparent; border-radius: 10px;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.start-item:hover { background: var(--surface-0); border-color: var(--border); }
+.start-item-main {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  padding: 8px 10px; text-align: left; background: transparent; border: 0; cursor: pointer; color: inherit;
+}
+div.start-item-main { cursor: default; }
+.start-item-main:disabled { cursor: default; opacity: 0.55; }
+.start-item-main b { font-size: 13px; font-weight: 600; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.start-item-main small { font-size: 11px; color: var(--text-muted); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.newproj-presets { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 6px; }
+.newproj-preset {
+  display: flex; align-items: center; gap: 10px; padding: 8px 10px; text-align: left;
+  border: 1px solid var(--border); border-radius: 10px; background: transparent; cursor: pointer; color: inherit;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.newproj-preset:hover { border-color: var(--accent); }
+.newproj-preset.active { border-color: var(--accent); background: var(--accent-dim); }
+.newproj-preset b { display: block; font-size: 12px; font-weight: 600; }
+.newproj-preset small { display: block; font-size: 10px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.newproj-shape-box { flex-shrink: 0; width: 24px; height: 24px; display: grid; place-items: center; }
+.newproj-shape { display: block; border: 1.5px solid currentColor; border-radius: 3px; opacity: 0.6; }
+.newproj-preset.active .newproj-shape { color: var(--accent); opacity: 1; }
+
 .toast {
   position: fixed; bottom: calc(var(--timeline-h) + var(--kf-h, 0px) + 16px); left: 50%; transform: translateX(-50%);
   z-index: 60; padding: 8px 16px; border-radius: 999px;

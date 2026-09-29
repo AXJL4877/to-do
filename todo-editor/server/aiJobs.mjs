@@ -278,8 +278,9 @@ function mediaSource(m) {
   const name = (typeof m.name === 'string' ? m.name : '').replace(/[\r\n]/g, ' ').trim().slice(0, 80)
   let file = null
   const ai = /\/ai-generated\/([^/?#]+)(?:[?#].*)?$/.exec(url)
-  if (ai) file = path.join(AI_OUT, path.basename(decodeURIComponent(ai[1])))
-  else if (typeof m.path === 'string' && path.isAbsolute(m.path)) file = path.resolve(m.path)
+  // 本机路径优先（AI 产物复制进项目文件夹后 url 是 file:// 也带 ai-generated）
+  if (typeof m.path === 'string' && path.isAbsolute(m.path)) file = path.resolve(m.path)
+  else if (ai) file = path.join(AI_OUT, path.basename(decodeURIComponent(ai[1])))
   if (!file) throw new Error('这段素材没有本地文件（浏览器里导入的素材读不到，请在桌面版里烧录）')
   if (!ASR_MEDIA_EXT.has(path.extname(file).toLowerCase())) throw new Error(`不支持的音视频格式：${path.extname(file) || '无扩展名'}`)
   if (!existsSync(file) || !statSync(file).isFile()) throw new Error(`找不到素材文件：${path.basename(file)}`)

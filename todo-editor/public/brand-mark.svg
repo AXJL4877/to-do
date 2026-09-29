@@ -1,51 +1,20 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none">
-  <defs>
-    <clipPath id="bolt-cut">
-      <!-- ?????????? evenodd ?????? -->
-      <path fill-rule="evenodd" d="
-        M0 0H128V128H0Z
-        M62 10 L52 42 H60 L48 78 L78 42 H68 L76 10 Z
-      "/>
-    </clipPath>
-  </defs>
-  <g clip-path="url(#bolt-cut)">
-    <!-- ???? -->
-    <path fill="#2F6BFF" d="
-      M64 6
-      L38 54
-      L20 82
-      L46 92
-      L54 70
-      L50 48
-      L64 22
-      Z"/>
-    <!-- ???? -->
-    <path fill="#0B1424" d="
-      M64 6
-      L78 22
-      L74 48
-      L70 70
-      L78 92
-      L104 82
-      L86 54
-      Z"/>
-  </g>
-  <!-- ???? -->
-  <path fill="#2F6BFF" d="M54 86 L54 110 L76 98 Z"/>
-  <!-- ??? -->
-  <path fill="#0B1424" d="M14 90 L42 97 L39 112 L10 105 Z"/>
-  <g fill="#F7F4EE">
-    <rect x="16" y="95" width="3.5" height="5.5" rx="0.6" transform="rotate(-14 16 95)"/>
-    <rect x="23" y="96.5" width="3.5" height="5.5" rx="0.6" transform="rotate(-14 23 96.5)"/>
-    <rect x="30" y="98" width="3.5" height="5.5" rx="0.6" transform="rotate(-14 30 98)"/>
-    <rect x="37" y="99.5" width="3.5" height="5.5" rx="0.6" transform="rotate(-14 37 99.5)"/>
-  </g>
-  <!-- ??? -->
-  <path fill="#0B1424" d="M82 97 L110 90 L114 105 L85 112 Z"/>
-  <g fill="#F7F4EE">
-    <rect x="88" y="95" width="3.5" height="5.5" rx="0.6" transform="rotate(14 88 95)"/>
-    <rect x="95" y="96.5" width="3.5" height="5.5" rx="0.6" transform="rotate(14 95 96.5)"/>
-    <rect x="102" y="98" width="3.5" height="5.5" rx="0.6" transform="rotate(14 102 98)"/>
-    <rect x="109" y="99.5" width="3.5" height="5.5" rx="0.6" transform="rotate(14 109 99.5)"/>
+  <g transform="translate(-24.4 -22.6) scale(0.1705)">
+    <path fill="#0A84D6" d="M513 250 L402 384 L386 377 L250 553 L455 655 L455 562 L500 430 Z"/>
+    <path fill="#0B1E36" d="M513 250 L624 384 L641 377 L776 553 L620 640 L463 552 L500 430 Z"/>
+    <path fill="#F7F4EE" d="M514 256 L570 504 L502 428 L349 558 L388 380 L424 406 Z"/>
+    <path fill="#0A84D6" d="M478 590 L610 665 L478 760 Z"/>
+    <path fill="#0B1E36" d="M193 553 L456 688 L456 762 L193 625 Z"/>
+    <path fill="#0B1E36" d="M633 655 L834 553 L834 624 L633 732 Z"/>
+    <g fill="#F7F4EE">
+      <rect x="209" y="585" width="22" height="30" rx="5"/>
+      <rect x="257" y="611" width="22" height="30" rx="5"/>
+      <rect x="305" y="637" width="22" height="30" rx="5"/>
+      <rect x="353" y="663" width="22" height="30" rx="5"/>
+      <rect x="653" y="665" width="22" height="30" rx="5"/>
+      <rect x="700" y="640" width="22" height="30" rx="5"/>
+      <rect x="747" y="615" width="22" height="30" rx="5"/>
+      <rect x="794" y="590" width="22" height="30" rx="5"/>
+    </g>
   </g>
 </svg>

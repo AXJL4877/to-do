@@ -3,7 +3,7 @@ import { Blocks, ChevronDown, ChevronLeft, ChevronRight, Loader2, Plus, RotateCc
 import clsx from 'clsx'
 import { useApp } from '../store'
 import { aiFetch, aiUrl } from '../lib/aiFetch'
-import { importAiJob, shouldImport } from '../lib/aiJobImport'
+import { importAiJob, isSameAiMedia, shouldImport } from '../lib/aiJobImport'
 import {
   CHALK_SKILL_ID, defaultSkillParams, enqueueSkill, fetchSkills, optionLabel, paramVisible, phasePercent, phaseText,
   type SkillJob, type SkillPack, type SkillParams, type SkillPlan,
@@ -26,7 +26,7 @@ function SkillJobCard({ j, onRetry, onRemove }: { j: SkillJob; onRetry: () => vo
   const addClipFromMedia = useApp((s) => s.addClipFromMedia)
   const out = j.params.output
   const pct = j.status === 'running' ? phasePercent(j.phase) : null
-  const mediaId = j.resultUrl ? media.find((m) => m.url === aiUrl(j.resultUrl!))?.id : undefined
+  const mediaId = j.resultUrl ? media.find((m) => isSameAiMedia(m, aiUrl(j.resultUrl!)))?.id : undefined
   const alpha = out?.alpha ?? j.params.skill?.alpha
   const finished = j.status === 'done' || j.status === 'imported'
 

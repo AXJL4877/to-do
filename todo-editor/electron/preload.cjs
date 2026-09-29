@@ -15,6 +15,11 @@ contextBridge.exposeInMainWorld('todoDesktop', {
   openProjectFile: (filePath) => ipcRenderer.invoke('desktop:open-project', { filePath }),
   recentProjects: () => ipcRenderer.invoke('desktop:recent-projects'),
   removeRecentProject: (filePath) => ipcRenderer.invoke('desktop:remove-recent-project', filePath),
+  createProjectFolder: (parentDir, name) => ipcRenderer.invoke('desktop:create-project', { parentDir, name }),
+  pickDirectory: (opts) => ipcRenderer.invoke('desktop:pick-directory', opts || {}),
+  setProject: (filePath) => ipcRenderer.invoke('desktop:set-project', filePath ?? null),
+  collectAiFile: (name) => ipcRenderer.invoke('desktop:collect-ai-file', { name }),
+  revealProject: () => ipcRenderer.invoke('desktop:reveal-project'),
   onRequestClose: (cb) => {
     const handler = () => cb()
     ipcRenderer.on('desktop:request-close', handler)

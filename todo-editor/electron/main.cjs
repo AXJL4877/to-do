@@ -8,7 +8,7 @@ const { exportSequence } = require('./exportSequence.cjs')
 const { createNativePlayer, rgb24ToBmpDataUrl } = require('./nativePlayer.cjs')
 const { makeProxy } = require('./makeProxy.cjs')
 const { createPreviewEngine } = require('./previewEngine.cjs')
-const { createRecentProjects, writeProjectFile, readProjectFile } = require('./projectFile.cjs')
+const { createRecentProjects, writeProjectFile, readProjectFile, createProjectFolder, PROJECT_SUBDIRS } = require('./projectFile.cjs')
 
 const isDev = !app.isPackaged
 
@@ -304,15 +304,20 @@ function closeAiWindow() {
   return { ok: true, alreadyClosed: true }
 }
 
+/** 当前打开的项目文件夹（工程文件所在目录）；没开项目时导出 / 代理回落到 userData */
+let currentProjectDir = null
+
 function userDataPaths() {
   const root = app.getPath('userData')
   const projects = path.join(root, 'projects')
-  const cache = path.join(root, 'cache')
-  const exportsDir = path.join(root, 'exports')
+  const cache = currentProjectDir ? path.join(currentProjectDir, PROJECT_SUBDIRS.cache) : path.join(root, 'cache')
+  const exportsDir = currentProjectDir ? path.join(currentProjectDir, PROJECT_SUBDIRS.exports) : path.join(root, 'exports')
   for (const d of [projects, cache, exportsDir]) {
     fs.mkdirSync(d, { recursive: true })
   }
-  return { root, projects, cache, exports: exportsDir }
+  let projectsRoot = path.join(root, 'projects')
+  try { projectsRoot = path.join(app.getPath('documents'), 'TO DO 项目') } catch { /* */ }
+  return { root, projects, cache, exports: exportsDir, projectsRoot, projectDir: currentProjectDir }
 }
 
 const recentProjects = createRecentProjects(() => path.join(app.getPath('userData'), 'recent-projects.json'))
@@ -593,7 +598,7 @@ app.whenReady().then(async () => {
       const { projects } = userDataPaths()
       const r = await dialog.showSaveDialog(mainWindow ?? undefined, {
         title: '保存工程',
-        defaultPath: path.join(projects, defaultName || 'project.todo.json'),
+        defaultPath: path.join(currentProjectDir || projects, defaultName || 'project.todo.json'),
         filters: [{ name: 'TO DO 工程', extensions: ['todo.json', 'json'] }],
       })
       if (r.canceled || !r.filePath) return { ok: false, canceled: true }
@@ -611,10 +616,10 @@ app.whenReady().then(async () => {
   ipcMain.handle('desktop:open-project', async (_e, opts) => {
     let filePath = typeof opts?.filePath === 'string' ? opts.filePath : ''
     if (!filePath) {
-      const { projects } = userDataPaths()
+      const { projectsRoot } = userDataPaths()
       const r = await dialog.showOpenDialog(mainWindow ?? undefined, {
-        title: '打开工程',
-        defaultPath: projects,
+        title: '打开项目',
+        defaultPath: fs.existsSync(projectsRoot) ? projectsRoot : undefined,
         properties: ['openFile'],
         filters: [{ name: 'TO DO 工程', extensions: ['todo.json', 'json'] }],
       })
@@ -637,6 +642,57 @@ app.whenReady().then(async () => {
   ipcMain.handle('desktop:recent-projects', () => recentProjects.list()
     .map((p) => ({ path: p, exists: fs.existsSync(p) })))
   ipcMain.handle('desktop:remove-recent-project', (_e, filePath) => recentProjects.remove(String(filePath || '')))
+
+  ipcMain.handle('desktop:create-project', (_e, { parentDir, name } = {}) => {
+    try {
+      const { dir, filePath } = createProjectFolder(parentDir, name)
+      return { ok: true, dir, path: filePath }
+    } catch (e) {
+      return { ok: false, error: e.message }
+    }
+  })
+
+  ipcMain.handle('desktop:pick-directory', async (_e, { title, defaultPath } = {}) => {
+    const r = await dialog.showOpenDialog(mainWindow ?? undefined, {
+      title: title || '选择文件夹',
+      defaultPath: typeof defaultPath === 'string' && defaultPath ? defaultPath : undefined,
+      properties: ['openDirectory', 'createDirectory'],
+    })
+    if (r.canceled || !r.filePaths[0]) return { ok: false, canceled: true }
+    return { ok: true, path: r.filePaths[0] }
+  })
+
+  /** 渲染端打开 / 新建 / 关闭项目时告知工程文件路径；null = 回到起始页 */
+  ipcMain.handle('desktop:set-project', (_e, filePath) => {
+    currentProjectDir = typeof filePath === 'string' && path.isAbsolute(filePath) ? path.dirname(filePath) : null
+    return { ok: true, dir: currentProjectDir }
+  })
+
+  /** AI 服务产物（userData/data/ai-generated/<name>）复制进当前项目的 ai-generated/，项目搬家时素材跟着走 */
+  ipcMain.handle('desktop:collect-ai-file', (_e, { name } = {}) => {
+    if (!currentProjectDir) return { ok: false, error: '没有打开的项目' }
+    const base = path.basename(String(name || ''))
+    if (!base || base !== String(name)) return { ok: false, error: 'invalid name' }
+    const src = path.join(app.getPath('userData'), 'data', 'ai-generated', base)
+    const destDir = path.join(currentProjectDir, PROJECT_SUBDIRS.ai)
+    const dest = path.join(destDir, base)
+    try {
+      if (!fs.existsSync(dest)) {
+        if (!fs.existsSync(src)) return { ok: false, error: `找不到 AI 文件：${base}` }
+        fs.mkdirSync(destDir, { recursive: true })
+        fs.copyFileSync(src, dest)
+      }
+      return { ok: true, path: dest, url: pathToFileURL(dest).href }
+    } catch (e) {
+      return { ok: false, error: e.message }
+    }
+  })
+
+  ipcMain.handle('desktop:reveal-project', () => {
+    if (!currentProjectDir) return { ok: false }
+    void shell.openPath(currentProjectDir)
+    return { ok: true }
+  })
 
   ipcMain.on('desktop:close-ready', () => {
     allowMainClose = true

@@ -34,8 +34,13 @@ export function shouldImport(j: ImportableAiJob & { status: string }) {
 
 type ImportItem = Parameters<ReturnType<typeof useApp.getState>['importMedia']>[0][number]
 
+/** 同一个 AI 产物：地址相同，或它已被复制进项目（aiUrl 记着原路径） */
+export function isSameAiMedia(m: { url: string; aiUrl?: string }, url: string) {
+  return m.url === url || (!!m.aiUrl && url.endsWith(m.aiUrl))
+}
+
 function addToAiFolder(item: ImportItem) {
-  const hit = useApp.getState().media.find((m) => m.url === item.url)
+  const hit = useApp.getState().media.find((m) => isSameAiMedia(m, item.url))
   if (hit) return hit.id
   useApp.getState().importMedia([item])
   const st = useApp.getState()
@@ -90,7 +95,7 @@ export function placeSubtitles(j: ImportableAiJob): 'aligned' | 'playhead' | nul
   const st = useApp.getState()
   const audioUrl = aiUrl(out.source.audio)
   const sourceJob = out.source.jobId
-  const mediaIds = new Set(st.media.filter((m) => m.url === audioUrl || narrationJobIdOfUrl(m.url) === sourceJob).map((m) => m.id))
+  const mediaIds = new Set(st.media.filter((m) => isSameAiMedia(m, audioUrl) || narrationJobIdOfUrl(m.url) === sourceJob).map((m) => m.id))
   const seq = st.seq()
   // 只对齐音频轨上的片段（成片的视频片段和它的音频片段同源，取音频那段）
   const voiceClips = seq.clips.filter((c) => c.mediaId && mediaIds.has(c.mediaId)

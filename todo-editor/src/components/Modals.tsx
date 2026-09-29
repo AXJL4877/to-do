@@ -1,7 +1,7 @@
 import { useEffect, useSyncExternalStore } from 'react'
 import { useApp } from '../store'
 import { getPreviewCacheRev, previewCacheUsage, subscribePreviewCache } from '../lib/previewCache'
-import { isDesktopApp } from '../lib/desktop'
+import { desktop, isDesktopApp } from '../lib/desktop'
 import { SHORTCUTS } from '../lib/shortcuts'
 import { usePreviewSuspend } from '../hooks/usePreviewSuspend'
 
@@ -13,11 +13,12 @@ function MoreActions() {
     {
       title: '文件',
       items: [
-        { id: 'openfile', label: '打开工程…', run: () => { void useApp.getState().openProjectFromFile(); setModal(null) } },
+        { id: 'newproject', label: '新建项目…', run: () => { setModal(null); useApp.getState().setNewProjectDialog({}) } },
+        { id: 'openfile', label: '打开项目…', run: () => { void useApp.getState().openProjectFromFile(); setModal(null) } },
         { id: 'saveas', label: '工程另存为…', run: () => { void useApp.getState().saveProjectToFile({ saveAs: true }); setModal(null) } },
+        { id: 'closeproject', label: '关闭项目', run: () => { void useApp.getState().closeProject() } },
         { id: 'pickmedia', label: '导入媒体…', run: () => { void useApp.getState().pickDesktopMedia(); setModal(null) } },
         { id: 'frame', label: '导出当前帧', run: () => { void useApp.getState().exportProgramFrame(); setModal(null) } },
-        { id: 'localsave', label: '仅本地草稿', run: () => { useApp.getState().saveProject(); setModal(null) } },
       ],
     },
     {
@@ -89,7 +90,8 @@ export function Modals() {
   const mb = (b: number) => (b / 1024 / 1024).toFixed(0)
   const sequences = useApp((s) => s.sequences)
   const activeSeqId = useApp((s) => s.activeSeqId)
-  const newProject = useApp((s) => s.newProject)
+  const setNewProjectDialog = useApp((s) => s.setNewProjectDialog)
+  const closeProject = useApp((s) => s.closeProject)
   const openDraft = useApp((s) => s.openDraft)
   const saveAs = useApp((s) => s.saveAs)
   const renameDraft = useApp((s) => s.renameDraft)
@@ -121,7 +123,7 @@ export function Modals() {
       <div className="modal" style={modal === 'more' ? { width: 'min(360px, 100%)' } : undefined} onClick={(e) => e.stopPropagation()}>
         <div className="px-4 py-3 border-b flex justify-between items-center" style={{ borderColor: 'var(--border)' }}>
           <span className="font-medium" style={{ fontFamily: 'var(--font-display)' }}>
-            {modal === 'drafts' ? '草稿管理' : modal === 'settings' ? '工程设置' : modal === 'prefs' ? '偏好设置' : modal === 'shortcuts' ? '快捷键' : modal === 'more' ? '更多' : '导出'}
+            {modal === 'drafts' ? '项目' : modal === 'settings' ? '工程设置' : modal === 'prefs' ? '偏好设置' : modal === 'shortcuts' ? '快捷键' : modal === 'more' ? '更多' : '导出'}
           </span>
           <button className="icon-btn" onClick={() => setModal(null)}>×</button>
         </div>
@@ -135,13 +137,13 @@ export function Modals() {
                   {dirty ? <span style={{ color: 'var(--accent)' }}> · 未保存</span> : null}
                 </div>
                 <div className="truncate" style={{ color: 'var(--text-muted)' }} title={projectPath ?? ''}>
-                  {projectPath ?? (isDesktop ? '尚未保存为工程文件（仅本地草稿），按 Ctrl+S 保存' : '浏览器版：保存在本地草稿')}
+                  {projectPath ?? (isDesktop ? '尚未保存为工程文件，按 Ctrl+S 保存' : '浏览器版：保存在本机浏览器里')}
                 </div>
               </div>
               <div className="flex gap-2 flex-wrap">
-                <button className="btn btn-primary" data-testid="btn-new-project" onClick={() => newProject()}>新建项目</button>
+                <button className="btn btn-primary" data-testid="btn-new-project" onClick={() => { setModal(null); setNewProjectDialog({}) }}>新建项目</button>
                 {isDesktop && (
-                  <button className="btn btn-ghost" data-testid="btn-open-project" onClick={() => { void openProjectFromFile() }}>打开工程…</button>
+                  <button className="btn btn-ghost" data-testid="btn-open-project" onClick={() => { void openProjectFromFile() }}>打开项目…</button>
                 )}
                 <button
                   className="btn btn-ghost"
@@ -152,6 +154,10 @@ export function Modals() {
                 >
                   另存为
                 </button>
+                {isDesktop && projectPath && (
+                  <button className="btn btn-ghost" data-testid="btn-reveal-project" onClick={() => { void desktop()?.revealProject?.() }}>打开项目文件夹</button>
+                )}
+                <button className="btn btn-ghost" data-testid="btn-close-project" onClick={() => { void closeProject() }}>关闭项目</button>
               </div>
               {isDesktop && recentProjects.length > 0 && (
                 <div className="field" data-testid="recent-projects">
@@ -174,8 +180,8 @@ export function Modals() {
                   </div>
                 </div>
               )}
-              <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>本地草稿</div>
-              {drafts.map((d) => (
+              {!isDesktop && <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>本地项目</div>}
+              {!isDesktop && drafts.map((d) => (
                 <div key={d.id} className="flex items-center gap-2 p-2 rounded-lg border" style={{ borderColor: 'var(--border)' }} data-testid={`draft-${d.id}`}>
                   <button className="btn btn-ghost flex-1 justify-start" title={d.path ?? '仅本地草稿'} onClick={() => openDraft(d.id)}>
                     {d.name}{d.path ? <span style={{ color: 'var(--text-muted)' }}> · 文件</span> : null}

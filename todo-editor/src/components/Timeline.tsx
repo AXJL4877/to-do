@@ -785,7 +785,7 @@ export function Timeline({
       onDrop={onDrop}
     >
       <div className="flex items-center gap-1 px-2 py-1 border-b shrink-0 relative overflow-x-auto" style={{ borderColor: 'var(--border)' }}>
-        <button className="icon-btn" data-testid="btn-drafts" onClick={() => setModal('drafts')} title="草稿"><FolderOpen size={12} /></button>
+        <button className="icon-btn" data-testid="btn-drafts" onClick={() => setModal('drafts')} title="项目"><FolderOpen size={12} /></button>
         <button className="icon-btn" data-testid="btn-save" onClick={() => { void saveProjectToFile() }} title="保存 Ctrl+S"><Save size={12} /></button>
         <button className="icon-btn" data-testid="btn-undo" onClick={undo} disabled={!canUndo} title="撤销 Ctrl+Z" style={{ opacity: canUndo ? 1 : 0.35 }}><Undo2 size={12} /></button>
         <button className="icon-btn" data-testid="btn-redo" onClick={redo} disabled={!canRedo} title="重做 Ctrl+Shift+Z" style={{ opacity: canRedo ? 1 : 0.35 }}><Redo2 size={12} /></button>

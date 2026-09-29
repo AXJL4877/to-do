@@ -465,6 +465,13 @@ function defaultSettings(): ProjectSettings {
   }
 }
 
+function defaultFolders() {
+  return [
+    { id: 'f_all', name: '全部' }, { id: 'f_broll', name: 'B-roll' },
+    { id: 'f_audio', name: '音频' }, { id: 'f_sticker', name: '贴纸' },
+  ]
+}
+
 type Snap = { sequences: Sequence[]; activeSeqId: string }
 let clipboard: Clip[] = []
 let attrClipboard: Pick<Clip, 'transform' | 'color' | 'audio'> | null = null
@@ -474,18 +481,42 @@ export type DraftEntry = { id: string; name: string; updatedAt: number; path?: s
 /** 工程文件 JSON 版本；v2 起素材带 relPath、文件带 savedAt */
 const PROJECT_FILE_VERSION = 2
 /** 工程内容相关字段：任一变化即视为未保存 */
-const DIRTY_KEYS = ['sequences', 'activeSeqId', 'media', 'folders', 'settings', 'presets', 'fonts', 'monitorCompose'] as const
+const DIRTY_KEYS = ['sequences', 'activeSeqId', 'media', 'folders', 'settings', 'presets', 'fonts', 'monitorCompose', 'script'] as const
 /** >0 时的 set 不标脏（加载/保存本身引起的字段变化） */
 let dirtyMute = 0
 let fileSaving: Promise<boolean> | null = null
+/** 正在复制进项目的 AI 素材 id，防止并发重复收集 */
+const collecting = new Set<string>()
+/** 复制失败过的「项目|地址」，不再反复重试和提示 */
+const collectFailed = new Set<string>()
 
-function projectNameFromPath(p: string) {
+export function projectNameFromPath(p: string) {
   const base = p.split(/[\\/]/).pop() || p
   return base.replace(/\.todo\.json$/i, '').replace(/\.json$/i, '') || base
 }
 
+/** AI 服务地址上的产物（http://…/ai-generated/<name>）→ 文件名；已收集进项目的本机文件返回 null */
+function aiServiceFileName(url: string): string | null {
+  const m = /^(?:https?:\/\/[^/]+)?\/ai-generated\/([^/?#]+)(?:[?#].*)?$/i.exec(url)
+  if (!m) return null
+  try { return decodeURIComponent(m[1]) } catch { return null }
+}
+
+export type NewProjectOptions = {
+  name: string
+  /** 项目文件夹建在它下面（桌面版） */
+  parentDir: string
+  settings: Partial<ProjectSettings>
+  /** 旧的本地草稿转存为项目 */
+  fromDraftId?: string
+}
+
 export type AppStore = {
   drafts: DraftEntry[]
+  /** 有打开的项目；桌面版启动时为 false，先显示起始页 */
+  started: boolean
+  /** 新建项目弹窗；fromDraftId = 把旧草稿转存为项目 */
+  newProjectDialog: { fromDraftId?: string } | null
   projectId: string
   projectName: string
   /** 桌面版：当前工程文件路径；null = 尚未存成文件（仅本地草稿） */
@@ -564,6 +595,9 @@ export type AppStore = {
   monitorView: 'program' | 'edit' | 'dual' | 'source'
   /** 节目监视器合成模式：2D Canvas 或 3D WebGL */
   monitorCompose: '2d' | '3d'
+  /** 口播稿（随工程文件保存）；scriptOpen = 当前显示口播备忘录 */
+  script: string
+  scriptOpen: boolean
   /** K帧模式：拖位置自动在播放头打点，并显示运动路径 */
   autoKeyframe: boolean
   timelineZoom: number
@@ -574,6 +608,13 @@ export type AppStore = {
   undo: () => void
   redo: () => void
   newProject: (name?: string) => void
+  setNewProjectDialog: (v: AppStore['newProjectDialog']) => void
+  /** 桌面版：建项目文件夹并写入工程文件；浏览器版：新建本地项目 */
+  createProject: (opts: NewProjectOptions) => Promise<boolean>
+  /** 落盘后回到起始页 */
+  closeProject: () => Promise<void>
+  /** 把 AI 服务上的产物复制进当前项目文件夹，素材改指向项目里的文件 */
+  collectAiMedia: (ids?: string[]) => Promise<void>
   /** 草稿绑定了工程文件时（桌面版）优先从文件打开；localOnly 强制读本地草稿 */
   openDraft: (id: string, opts?: { localOnly?: boolean }) => void
   saveProject: (opts?: { silent?: boolean }) => void
@@ -593,6 +634,8 @@ export type AppStore = {
   updateSettings: (p: Partial<ProjectSettings>) => void
   updatePrefs: (p: Partial<AppStore['prefs']>) => void
   setMonitorCompose: (m: '2d' | '3d') => void
+  setScript: (text: string) => void
+  toggleScript: (open?: boolean) => void
   setAutoKeyframe: (on: boolean) => void
   toggleAutoKeyframe: () => void
   updateScene3d: (p: Partial<Sequence['scene3d']>) => void
@@ -1047,7 +1090,7 @@ export const useApp = create<AppStore>((set, get) => {
     projectName: s.projectName,
     settings: s.settings, media: s.media, folders: s.folders, sequences: s.sequences,
     activeSeqId: s.activeSeqId, prefs: s.prefs, presets: s.presets, fonts: s.fonts,
-    monitorCompose: s.monitorCompose, playhead: s.playhead,
+    monitorCompose: s.monitorCompose, playhead: s.playhead, script: s.script,
   })
 
   const drafts0 = loadDraftsIndex()
@@ -1056,9 +1099,11 @@ export const useApp = create<AppStore>((set, get) => {
 
   return {
     drafts: drafts0,
+    started: !desktop(),
+    newProjectDialog: null,
     projectId: draftStart?.id ?? 'draft_demo',
     projectName: draftStart?.name ?? '演示草稿',
-    projectPath: draftStart?.path ?? null,
+    projectPath: desktop() ? null : draftStart?.path ?? null,
     dirty: false,
     recentProjects: [],
     settings: defaultSettings(),
@@ -1069,10 +1114,7 @@ export const useApp = create<AppStore>((set, get) => {
       shortcuts: { split: 'Ctrl+B', import: 'Ctrl+I', snap: 'S', select: 'V', razor: 'C', undo: 'Ctrl+Z', play: 'Space' },
     },
     media: [],
-    folders: [
-      { id: 'f_all', name: '全部' }, { id: 'f_broll', name: 'B-roll' },
-      { id: 'f_audio', name: '音频' }, { id: 'f_sticker', name: '贴纸' },
-    ],
+    folders: defaultFolders(),
     sequences: [first],
     activeSeqId: first.id,
     selectedClipIds: [],
@@ -1119,6 +1161,8 @@ export const useApp = create<AppStore>((set, get) => {
     timelineZoom: 80,
     monitorView: loadMonitorView(),
     monitorCompose: '2d',
+    script: '',
+    scriptOpen: false,
     autoKeyframe: false,
     transformGesture: null,
 
@@ -1182,10 +1226,88 @@ export const useApp = create<AppStore>((set, get) => {
       setClean({
         projectId: id, projectName: name, projectPath: null, settings: defaultSettings(), media: [],
         sequences: [s], activeSeqId: s.id, selectedClipIds: [], playhead: 0,
-        drafts,
+        drafts, script: '', scriptOpen: false,
         history: [], future: [], modal: null,
       })
       notify('已新建项目')
+    },
+
+    setNewProjectDialog: (v) => set({ newProjectDialog: v }),
+
+    async createProject({ name, parentDir, settings, fromDraftId }) {
+      const api = desktop()
+      const title = name.trim() || '未命名项目'
+      const applySettings = () => setClean({ settings: { ...get().settings, ...settings } })
+      if (!api?.createProjectFolder) {
+        if (fromDraftId) get().openDraft(fromDraftId, { localOnly: true })
+        else get().newProject(title)
+        applySettings()
+        set({ started: true, newProjectDialog: null })
+        get().saveProject({ silent: true })
+        return true
+      }
+      const r = await api.createProjectFolder(parentDir, title)
+      if (!r.ok || !r.path) {
+        notify(r.error ?? '新建项目失败')
+        return false
+      }
+      if (get().started) await get().flushProject()
+      if (fromDraftId) {
+        get().openDraft(fromDraftId, { localOnly: true })
+      } else {
+        const s = makeSeq()
+        setClean({
+          projectId: uid('draft'), media: [], folders: defaultFolders(), sequences: [s], activeSeqId: s.id,
+          selectedClipIds: [], selectedMediaId: null, sourceMediaId: null, playhead: 0, playing: false,
+          history: [], future: [], monitorCompose: '2d', settings: defaultSettings(), script: '', scriptOpen: false,
+        })
+      }
+      applySettings()
+      const filePath = r.path
+      setClean({ started: true, newProjectDialog: null, modal: null, projectName: projectNameFromPath(filePath), projectPath: filePath })
+      await api.setProject?.(filePath)
+      const ok = await get().saveProjectToFile({ silent: true })
+      if (!ok) return false
+      if (fromDraftId) {
+        const drafts = get().drafts.map((d) => (d.id === fromDraftId ? { ...d, path: filePath } : d))
+        persistDraftsIndex(drafts)
+        set({ drafts })
+        await get().collectAiMedia()
+      }
+      notify(`已新建项目「${get().projectName}」`)
+      return true
+    },
+
+    async closeProject() {
+      if (!get().started) return
+      await get().flushProject()
+      const s = makeSeq()
+      setClean({
+        started: false, projectPath: null, media: [], sequences: [s], activeSeqId: s.id,
+        selectedClipIds: [], selectedMediaId: null, sourceMediaId: null, playhead: 0, playing: false,
+        history: [], future: [], modal: null, script: '', scriptOpen: false,
+      })
+      await desktop()?.setProject?.(null)
+      void get().refreshRecentProjects()
+    },
+
+    async collectAiMedia(ids) {
+      const api = desktop()
+      if (!api?.collectAiFile || !get().started || !get().projectPath) return
+      const dir = get().projectPath
+      const targets = get().media.filter((m) => (!ids || ids.includes(m.id)) && !m.path && !collecting.has(m.id)
+        && !collectFailed.has(`${dir}|${m.url}`) && aiServiceFileName(m.url))
+      let failed = 0
+      for (const m of targets) {
+        const name = aiServiceFileName(m.url)!
+        collecting.add(m.id)
+        const r = await api.collectAiFile(name).finally(() => collecting.delete(m.id))
+        if (get().projectPath !== dir) return
+        if (!r.ok || !r.path || !r.url) { failed++; collectFailed.add(`${dir}|${m.url}`); continue }
+        const { path: filePath, url } = r
+        set({ media: get().media.map((x) => (x.id === m.id ? { ...x, url, path: filePath, aiUrl: `/ai-generated/${name}` } : x)) })
+      }
+      if (failed) notify(`${failed} 个 AI 素材没能复制进项目文件夹，仍从 AI 服务读取`)
     },
 
     openDraft(id, opts) {
@@ -1221,6 +1343,7 @@ export const useApp = create<AppStore>((set, get) => {
             playhead: typeof data.playhead === 'number' ? data.playhead : 0,
             history: [], future: [], modal: null,
             monitorCompose: data.monitorCompose === '3d' ? '3d' : '2d',
+            script: typeof data.script === 'string' ? data.script : '', scriptOpen: false,
           })
           notify(offlineN
             ? `已打开「${d.name}」· ${offlineN} 个素材需重新导入（旧 blob 链接已失效）`
@@ -1232,19 +1355,23 @@ export const useApp = create<AppStore>((set, get) => {
       setClean({
         projectId: id, projectName: d.name, projectPath: d.path ?? null,
         sequences: [s], activeSeqId: s.id, media: [], history: [], future: [], modal: null,
+        script: '', scriptOpen: false,
       })
     },
 
     saveProject(opts) {
       const s = get()
+      if (!s.started) return
       const sequences = s.sequences.map((q) => enforceNoOverlap(q))
       dirtyMute++
       try { set({ sequences }) } finally { dirtyMute-- }
+      // 桌面版项目以工程文件为准（自动保存 + .bak），不再往 localStorage 堆快照
+      if (desktop() && s.projectPath) return
       try {
         localStorage.setItem(`todo-draft-${s.projectId}`, JSON.stringify({
           settings: s.settings, media: s.media, folders: s.folders, sequences,
           activeSeqId: s.activeSeqId, prefs: s.prefs, presets: s.presets, fonts: s.fonts,
-          monitorCompose: s.monitorCompose,
+          monitorCompose: s.monitorCompose, script: s.script,
           selectedClipIds: s.selectedClipIds,
           playhead: s.playhead,
         }))
@@ -1264,6 +1391,7 @@ export const useApp = create<AppStore>((set, get) => {
 
     async saveProjectToFile(opts) {
       const api = desktop()
+      if (!get().started) return false
       get().saveProject({ silent: true })
       if (!api) {
         if (!opts?.silent) notify('项目已保存')
@@ -1297,6 +1425,7 @@ export const useApp = create<AppStore>((set, get) => {
       persistDraftsIndex(drafts)
       if (target) set({ projectPath: savedPath, projectName: name, drafts })
       else setClean({ projectPath: savedPath, projectName: name, drafts })
+      if (!target) await api.setProject?.(savedPath)
       void get().refreshRecentProjects()
       if (!opts?.silent) notify(target ? '已保存' : `已保存为「${name}」`)
       return true
@@ -1322,7 +1451,7 @@ export const useApp = create<AppStore>((set, get) => {
         notify('该工程已打开（有未保存改动，未重新载入）')
         return true
       }
-      if (!sameFile) await get().flushProject()
+      if (!sameFile && cur.started) await get().flushProject()
       const data = r.json as Record<string, unknown>
       const existing = get().drafts.find((d) => d.path && d.path.toLowerCase() === openedPath.toLowerCase())
       const id = existing?.id ?? uid('draft')
@@ -1343,12 +1472,14 @@ export const useApp = create<AppStore>((set, get) => {
         presets: (data.presets as EffectPreset[]) ?? get().presets,
         fonts: (data.fonts as AppStore['fonts']) ?? get().fonts,
         monitorCompose: data.monitorCompose === '3d' ? '3d' : '2d',
+        script: typeof data.script === 'string' ? data.script : '', scriptOpen: false,
         selectedClipIds: [], playhead: typeof data.playhead === 'number' ? data.playhead : 0,
-        history: [], future: [], modal: null,
-        drafts,
+        history: [], future: [], modal: null, newProjectDialog: null,
+        drafts, started: true,
       })
-      get().saveProject({ silent: true })
+      await api.setProject?.(openedPath)
       void get().refreshRecentProjects()
+      void get().collectAiMedia()
       const extra = [
         r.relinked ? `${r.relinked} 个素材已按相对路径找回` : '',
         r.missing ? `${r.missing} 个素材缺失，需重新链接` : '',
@@ -1359,6 +1490,7 @@ export const useApp = create<AppStore>((set, get) => {
 
     async flushProject() {
       const s = get()
+      if (!s.started) return
       if (s.dirty && s.projectPath && desktop()) {
         await s.saveProjectToFile({ silent: true })
         return
@@ -1951,6 +2083,13 @@ export const useApp = create<AppStore>((set, get) => {
     setMonitorView(v) {
       set({ monitorView: v })
       try { localStorage.setItem('todo-monitor-view', v) } catch { /* ignore */ }
+    },
+    setScript(text) {
+      set({ script: text })
+    },
+    toggleScript(open) {
+      const next = open ?? !get().scriptOpen
+      set(next ? { scriptOpen: true, playing: false } : { scriptOpen: false })
     },
     setMonitorCompose(m) {
       set({ monitorCompose: m })

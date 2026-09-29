@@ -84,4 +84,31 @@ function readProjectFile(filePath) {
   return { data, relinked, missing }
 }
 
-module.exports = { createRecentProjects, writeProjectFile, readProjectFile }
+/** 项目文件夹里的子目录；AI 生成物目录名须含 ai-generated（编辑器按它从文件名认出配音任务） */
+const PROJECT_SUBDIRS = { ai: 'ai-generated', exports: 'exports', cache: 'cache' }
+
+// Windows 文件名禁用字符与保留名
+const BAD_NAME = /[<>:"/\\|?*\u0000-\u001f]/
+const RESERVED = /^(con|prn|aux|nul|com\d|lpt\d)$/i
+
+/**
+ * 新建项目：<parentDir>/<name>/ 下建子目录，返回工程文件路径 <name>.todo.json（由渲染端写入内容）。
+ * 同名文件夹已存在且非空时拒绝，避免覆盖别的项目。
+ */
+function createProjectFolder(parentDir, rawName) {
+  const name = String(rawName || '').trim().replace(/[. ]+$/, '')
+  if (!name) throw new Error('请填写项目名称')
+  if (name.length > 80) throw new Error('项目名称太长（最多 80 字）')
+  if (BAD_NAME.test(name) || RESERVED.test(name)) throw new Error('项目名称不能包含 < > : " / \\ | ? * 等字符')
+  if (typeof parentDir !== 'string' || !path.isAbsolute(parentDir)) throw new Error('请选择保存位置')
+  const dir = path.join(parentDir, name)
+  if (fs.existsSync(dir)) {
+    if (!fs.statSync(dir).isDirectory()) throw new Error(`已存在同名文件：${dir}`)
+    if (fs.readdirSync(dir).length) throw new Error(`文件夹已存在且不为空：${dir}`)
+  }
+  fs.mkdirSync(dir, { recursive: true })
+  for (const sub of Object.values(PROJECT_SUBDIRS)) fs.mkdirSync(path.join(dir, sub), { recursive: true })
+  return { dir, filePath: path.join(dir, `${name}.todo.json`) }
+}
+
+module.exports = { createRecentProjects, writeProjectFile, readProjectFile, createProjectFolder, PROJECT_SUBDIRS }

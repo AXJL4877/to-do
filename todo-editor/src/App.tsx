@@ -7,6 +7,8 @@ import { TimelinePopoutShell } from './components/TimelinePopoutShell'
 import { AiFloatWindow } from './components/AiFloat'
 import { AiPanel } from './components/AiPanel'
 import { Modals } from './components/Modals'
+import { NewProjectDialog, StartScreen } from './components/ProjectStart'
+import { ScriptMemo } from './components/ScriptMemo'
 import { Monitor } from './components/Monitor'
 import { PropWheel } from './components/PropWheel'
 import { TransformGesture } from './components/TransformGesture'
@@ -72,12 +74,11 @@ export default function App() {
     setLayout(layout)
     const s = useApp.getState()
     const raw = localStorage.getItem(`todo-draft-${s.projectId}`)
-    let restored = false
+    // 桌面版像 PR 一样先出起始页（started=false），由用户新建或打开项目
+    let restored = !!desktop()
     void s.refreshRecentProjects()
-    if (desktop() && s.drafts.find((d) => d.id === s.projectId)?.path) {
-      useApp.setState({ dirty: false })
-      s.openDraft(s.projectId)
-      restored = true
+    if (restored) {
+      void desktop()?.setProject?.(null)
     } else if (raw) {
       try {
         const data = JSON.parse(raw)
@@ -100,7 +101,7 @@ export default function App() {
     })
     const autosave = window.setInterval(() => {
       const st = useApp.getState()
-      if (!st.dirty) return
+      if (!st.dirty || !st.started) return
       if (st.projectPath && desktop()) void st.saveProjectToFile({ silent: true })
       else if (st.sequences.some((q) => q.clips.length) || st.media.length) st.saveProject({ silent: true })
     }, 30000)
@@ -117,11 +118,21 @@ export default function App() {
   const projectName = useApp((s) => s.projectName)
   const projectPath = useApp((s) => s.projectPath)
   const dirty = useApp((s) => s.dirty)
+  const started = useApp((s) => s.started)
+  const scriptOpen = useApp((s) => s.scriptOpen)
+  const media = useApp((s) => s.media)
+  // AI 产物（本窗或 AI 独立窗入库的）复制进项目文件夹；只由主窗做
+  useEffect(() => {
+    if (POPOUT || !started || !projectPath) return
+    const t = window.setTimeout(() => void useApp.getState().collectAiMedia(), 300)
+    return () => window.clearTimeout(t)
+  }, [media, started, projectPath])
   useEffect(() => {
     if (POPOUT) return
+    if (!started) { document.title = 'TO DO'; return }
     const noFile = desktop() && !projectPath ? '（未存为工程文件）' : ''
     document.title = `${dirty ? '● ' : ''}${projectName}${noFile} — TO DO`
-  }, [projectName, projectPath, dirty])
+  }, [projectName, projectPath, dirty, started])
 
   useEffect(() => {
     if (POPOUT) return
@@ -167,6 +178,19 @@ export default function App() {
       const s = useApp.getState()
       const mod = e.ctrlKey || e.metaKey
       if (s.transformGesture) return
+      if (!POPOUT && (!s.started || s.newProjectDialog)) {
+        if (!s.started && mod && e.code === 'KeyO') { e.preventDefault(); void s.openProjectFromFile() }
+        return
+      }
+
+      if (!POPOUT && e.code === 'Backquote' && !mod && !e.altKey && !e.isComposing) {
+        const inMemo = e.target instanceof HTMLElement && e.target.hasAttribute('data-script-memo')
+        if (inMemo || !isPlainTextField(e.target)) {
+          e.preventDefault()
+          s.toggleScript()
+          return
+        }
+      }
 
       if (mod && e.code === 'KeyZ') {
         if (isPlainTextField(e.target)) return
@@ -194,7 +218,7 @@ export default function App() {
         return
       }
 
-      if (isPlainTextField(e.target)) return
+      if (s.scriptOpen || isPlainTextField(e.target)) return
 
       if (e.code === 'Space') {
         e.preventDefault()
@@ -353,6 +377,8 @@ export default function App() {
     )
   }
 
+  if (!started) return <StartScreen />
+
   if (fullscreen) {
     return (
       <>
@@ -433,6 +459,8 @@ export default function App() {
         import('./lib/importFiles').then(({ parseMediaFiles }) => parseMediaFiles([...files]).then(useApp.getState().importMedia))
       }} />
       <Modals />
+      <NewProjectDialog />
+      {scriptOpen && <ScriptMemo />}
       {toast && <div className="toast" data-testid="toast">{toast}</div>}
     </div>
   )

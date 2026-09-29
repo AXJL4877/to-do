@@ -4,7 +4,13 @@ export type DesktopApi = {
   platform: string
   /** 本机物理内存（MB），用于定预览 RAM 缓存预算 */
   systemMemoryMb?: () => number
-  getPaths: () => Promise<{ root: string; projects: string; cache: string; exports: string }>
+  getPaths: () => Promise<{
+    root: string; projects: string; cache: string; exports: string
+    /** 新建项目的默认保存位置（文档/TO DO 项目） */
+    projectsRoot?: string
+    /** 当前项目文件夹；没开项目时为 null */
+    projectDir?: string | null
+  }>
   /** 独立 AI HTTP 服务根地址，如 http://127.0.0.1:PORT */
   getAiBaseUrl: () => string
   aiBaseUrl: () => string
@@ -25,6 +31,14 @@ export type DesktopApi = {
   }>
   recentProjects?: () => Promise<{ path: string; exists: boolean }[]>
   removeRecentProject?: (filePath: string) => Promise<string[]>
+  /** 在 parentDir 下建 <name>/ 项目文件夹（含 ai-generated / exports / cache），返回工程文件路径 */
+  createProjectFolder?: (parentDir: string, name: string) => Promise<{ ok: boolean; dir?: string; path?: string; error?: string }>
+  pickDirectory?: (opts?: { title?: string; defaultPath?: string }) => Promise<{ ok: boolean; canceled?: boolean; path?: string }>
+  /** 告知主进程当前工程文件（导出 / 代理 / AI 收集按它的文件夹）；null = 没开项目 */
+  setProject?: (filePath: string | null) => Promise<{ ok: boolean; dir: string | null }>
+  /** AI 服务产物复制进当前项目的 ai-generated/ */
+  collectAiFile?: (name: string) => Promise<{ ok: boolean; path?: string; url?: string; error?: string }>
+  revealProject?: () => Promise<{ ok: boolean }>
   /** 主窗关闭前：渲染层落盘后须调用 closeReady */
   onRequestClose?: (cb: () => void) => () => void
   closeReady?: () => void

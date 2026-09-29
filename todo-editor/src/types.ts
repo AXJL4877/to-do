@@ -97,6 +97,8 @@ export interface MediaItem {
   proxyPath?: string
   /** 探测结果：是否含音轨（视频入轨时自动带 A 轨） */
   hasAudio?: boolean
+  /** 已复制进项目文件夹的 AI 产物：原来在 AI 服务上的路径 /ai-generated/<name>（去重、找任务用） */
+  aiUrl?: string
 }
 
 export interface MediaFolder { id: string; name: string }
