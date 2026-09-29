@@ -1,6 +1,6 @@
 export type MediaKind = 'video' | 'audio' | 'image' | 'font' | 'sticker'
 export type TrackKind = 'video' | 'audio' | 'subtitle' | 'effect' | 'adjustment'
-export type Tool = 'select' | 'razor' | 'trim' | 'roll' | 'slip' | 'slide' | 'hand'
+export type Tool = 'select' | 'razor' | 'trim' | 'roll' | 'slip' | 'slide' | 'hand' | 'rate'
 export type Ease = 'linear' | 'easeIn' | 'easeOut' | 'easeInOut' | 'hold' | 'bezier'
 export type BlendMode = 'normal' | 'multiply' | 'screen' | 'overlay' | 'soft-light' | 'add'
 export type FitMode = 'contain' | 'cover' | 'stretch' | 'manual'
@@ -97,6 +97,8 @@ export interface MediaItem {
   proxyPath?: string
   /** 探测结果：是否含音轨（视频入轨时自动带 A 轨） */
   hasAudio?: boolean
+  /** 带透明通道的视频（VP9 alpha WebM）：不生成 H.264 代理、不走原生单层解码、不当作不透明遮挡层 */
+  alpha?: boolean
   /** 已复制进项目文件夹的 AI 产物：原来在 AI 服务上的路径 /ai-generated/<name>（去重、找任务用） */
   aiUrl?: string
 }
@@ -145,6 +147,15 @@ export interface Scene3D {
 }
 
 /** 时间线元素元数据（绝对时间轴为唯一基准，随工程 JSON 持久化） */
+export interface ChalkStroke {
+  /** 笔尖轨迹 [素材秒, u, v]，u/v 为片段画面内 0~1 坐标 */
+  tip: number[][]
+  /** 生成时的画幅（手的尺寸按它换算到工程画面） */
+  frame: { width: number; height: number }
+  /** 粉笔手图：尺寸为生成画幅下的像素，tipX/tipY 为笔尖在图里的位置 0~1 */
+  hand: { url: string; width: number; height: number; tipX: number; tipY: number }
+}
+
 export interface ClipMeta {
   /** 绝对时间轴起点（头秒）= clip.start */
   absIn: number
@@ -171,6 +182,15 @@ export interface ClipMeta {
     type: 'ai' | 'import' | 'manual'
     jobId?: string
     kind?: string
+    /** 同一任务的分层：同层片段共用轨道，层号小的在上 */
+    lane?: number
+    /** 任务内产物的唯一键：同一产物只入轨一次 */
+    key?: string
+    /** 粉笔元素的书写片段：可套「粉笔手书写」入场动画 */
+    chalk?: ChalkStroke
+    /** 粉笔手片段：跟随的元素片段 id */
+    handFor?: string
+    handScale?: number
   }
   updatedAt?: number
 }

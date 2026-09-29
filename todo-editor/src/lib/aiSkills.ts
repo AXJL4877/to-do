@@ -23,8 +23,8 @@ export type SkillPack = {
   params: SkillParam[]
   /** 侧栏快捷露出的参数 id；null 时取前几个可见参数 */
   quick: string[] | null
-  /** elements = 规划 → 元素生图 → 渲染；tts = 文案配音；subtitle = 按一条配音的时间戳出字幕 */
-  pipeline: 'elements' | 'tts' | 'subtitle'
+  /** elements = 规划 → 元素生图 → 渲染；tts = 文案配音；subtitle = 按一条配音的时间戳出字幕；narrated = 口播 → 配音 → 分板对时书写 */
+  pipeline: 'elements' | 'tts' | 'subtitle' | 'narrated'
   planner: { maxElements: number; countParam: string | null } | null
 }
 

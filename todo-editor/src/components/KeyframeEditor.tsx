@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { useApp } from '../store'
+import { stepZoom } from '../lib/timelineZoom'
 import { setLivePlayhead } from '../lib/livePlayhead'
 import { broadcastPlayheadSeek } from '../lib/storeSync'
 import { PrKeyframeRow, livePropValue } from './PrKeyframeRow'
@@ -148,6 +149,26 @@ export function KeyframeEditor({ scrollRef }: Props) {
       kf.removeEventListener('scroll', fromKf)
     }
   }, [scrollRef, clip?.id, activeProp, pxPerSec, timelineDuration, visible])
+
+  // 同时间线：Alt+滚轮缩放，Ctrl / Shift+滚轮左右移动（非被动监听才拦得住页面缩放）
+  const zoomRef = useRef(timelineZoom)
+  zoomRef.current = timelineZoom
+  useEffect(() => {
+    const kf = kfScrollRef.current
+    if (!kf) return
+    const onWheel = (e: WheelEvent) => {
+      if (e.altKey) {
+        e.preventDefault()
+        setTimelineZoom(stepZoom(zoomRef.current, e.deltaY < 0 ? 1 : -1, 1.15))
+      } else if (e.ctrlKey || e.shiftKey) {
+        e.preventDefault()
+        const tl = scrollRef.current
+        if (tl) tl.scrollLeft += e.deltaY || e.deltaX
+      }
+    }
+    kf.addEventListener('wheel', onWheel, { passive: false })
+    return () => kf.removeEventListener('wheel', onWheel)
+  }, [scrollRef, setTimelineZoom, clip?.id, visible])
 
   /** 合并时刻：以 x 为主，缺 x 用 y 占位（须在 early return 前，避免删光关键帧后 hooks 数量变化白屏） */
   const xyGraphClip = useMemo((): Clip | null => {
@@ -437,15 +458,6 @@ export function KeyframeEditor({ scrollRef }: Props) {
           className="flex-1 overflow-x-auto overflow-y-hidden min-w-0"
           data-testid="kf-timeline-scroll"
           onPointerDown={(e) => { startPan(e) }}
-          onWheel={(e) => {
-            if (e.altKey) {
-              e.preventDefault()
-              setTimelineZoom(timelineZoom + (e.deltaY < 0 ? 8 : -8))
-            } else if (e.shiftKey) {
-              e.preventDefault()
-              scrollRef.current && (scrollRef.current.scrollLeft += e.deltaY)
-            }
-          }}
         >
           <div className="relative h-full" style={{ width: laneW, minHeight: 48 }} data-testid="kf-timeline-lane">
             <PrKeyframeRow

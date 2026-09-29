@@ -368,6 +368,12 @@ export const MOTION_PRESETS: MotionPreset[] = [
 
   // ----- 强调 -----
   {
+    // 不改片段自身的变换：由 chalkHand 在上层生成一段跟着笔尖走的手（只对黑板手绘的粉笔元素有效）
+    id: 'chalkHand', name: '粉笔手书写', desc: '粉笔手跟着笔尖把元素画出来（黑板手绘的元素）', group: 'in',
+    params: [{ key: 'size', label: '手大小', type: 'range', min: 0.5, max: 1.5, step: 0.05, default: 1, unit: '×' }],
+    build: () => [],
+  },
+  {
     id: 'pop', name: '放大强调', desc: '快速放大再回弹', group: 'emph',
     params: [P.dist(25, 80, '放大'), P.dur(0.5)],
     build: (v) => {
@@ -444,7 +450,8 @@ export function resolveValues(preset: MotionPreset, values?: ParamValues): Param
 /** 一次性动作（入场 / 出场 / 强调）的时长 */
 export function presetDuration(preset: MotionPreset, values?: ParamValues): number | null {
   if (preset.group === 'loop') return null
-  return num(resolveValues(preset, values), 'dur')
+  const d = num(resolveValues(preset, values), 'dur')
+  return Number.isFinite(d) ? d : 1
 }
 
 // ---------- 生成关键帧 ----------

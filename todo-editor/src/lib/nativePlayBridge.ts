@@ -6,6 +6,7 @@
  */
 import type { Clip, MediaItem, Sequence } from '../types'
 import { desktop } from './desktop'
+import { mayHaveAlpha } from './mediaAlpha'
 
 const frames = new Map<string, { t: number; canvas: HTMLCanvasElement }>()
 
@@ -72,6 +73,8 @@ export function topNativePlayTarget(
   if (videos.length === 0) return null
   // 多视频叠层走 Canvas 合成；单层 + path 才用 play-session
   if (videos.length > 1) return null
+  // 原生解码出的帧没有透明通道，透明视频下面的图层 / 底色会被盖成黑
+  if (mayHaveAlpha(videos[0].media)) return null
   // 单层也按轨道上位优先（与预览一致）
   videos.sort((a, b) => {
     const ia = seq.tracks.findIndex((tr) => tr.id === a.clip.trackId)

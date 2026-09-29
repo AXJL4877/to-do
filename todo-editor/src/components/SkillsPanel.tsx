@@ -8,12 +8,13 @@ import {
   CHALK_SKILL_ID, defaultSkillParams, enqueueSkill, fetchSkills, optionLabel, paramVisible, phasePercent, phaseText,
   type SkillJob, type SkillPack, type SkillParams, type SkillPlan,
 } from '../lib/aiSkills'
+import { isNarratedJob, narratedStage, type NarratedJob } from '../lib/narratedTimeline'
 import { SkillParamControl, SkillStudio } from './SkillStudio'
 
 const QUICK_FALLBACK = 4
 
-/** 配音 / 字幕两类 skill 由配音面板和字幕烧录弹窗接管，这里只放「描述 → 出视频」的 elements 管线 */
-const isVideoSkill = (p: SkillPack) => p.pipeline === 'elements'
+/** 配音 / 字幕两类 skill 由配音面板和字幕烧录弹窗接管，这里只放出视频的 elements / narrated 管线 */
+const isVideoSkill = (p: SkillPack) => p.pipeline === 'elements' || p.pipeline === 'narrated'
 const isVideoSkillJob = (j: SkillJob) =>
   j.kind === 'skill' && !['tts', 'subtitle', 'voice'].includes(j.params.skill?.pipeline ?? 'elements')
 /** 早期任务没记 skill id，都是黑板手绘 */
@@ -29,11 +30,21 @@ function SkillJobCard({ j, onRetry, onRemove }: { j: SkillJob; onRetry: () => vo
   const mediaId = j.resultUrl ? media.find((m) => isSameAiMedia(m, aiUrl(j.resultUrl!)))?.id : undefined
   const alpha = out?.alpha ?? j.params.skill?.alpha
   const finished = j.status === 'done' || j.status === 'imported'
+  const stage = isNarratedJob(j) ? narratedStage(j as unknown as NarratedJob) : null
+  const lastScene = stage?.scenes?.[stage.scenes.length - 1]
+  const still = lastScene?.elements[lastScene.elements.length - 1]?.hold
+  const sceneCount = stage?.total ? `${stage.scenes?.length ?? 0}/${stage.total.scenes} 块黑板${j.params.autoTimeline ? '已入轨' : '已生成'}` : null
 
   return (
     <div className={clsx('skill-job', j.status === 'error' && 'is-error')} data-testid={`skill-job-${j.id}`}>
       <div className={clsx('skill-job-media', alpha && 'is-alpha')}>
-        {finished && out ? (
+        {stage ? (
+          still ? <img src={aiUrl(still)} alt="" /> : (
+            <div className="skill-job-placeholder">
+              {j.status === 'error' ? '失败' : j.status === 'queued' ? '排队中' : <Loader2 size={16} className="animate-spin" />}
+            </div>
+          )
+        ) : finished && out ? (
           <video
             src={aiUrl(out.video)}
             poster={aiUrl(out.still)}
@@ -49,7 +60,7 @@ function SkillJobCard({ j, onRetry, onRemove }: { j: SkillJob; onRetry: () => vo
             {j.status === 'error' ? '失败' : j.status === 'queued' ? '排队中' : <Loader2 size={16} className="animate-spin" />}
           </div>
         )}
-        {finished && mediaId && (
+        {finished && mediaId && !stage && (
           <button
             type="button"
             className="skill-job-add icon-btn"
@@ -66,13 +77,13 @@ function SkillJobCard({ j, onRetry, onRemove }: { j: SkillJob; onRetry: () => vo
         {j.status === 'running' ? (
           <>
             <div className="ai-progress"><div className={pct == null ? 'ai-progress-bar' : 'ai-progress-fill'} style={pct == null ? undefined : { width: `${pct}%` }} /></div>
-            <span className="text-[10px] truncate" style={{ color: 'var(--text-muted)' }}>{pct != null ? `${pct}%` : phaseText(j.phase) || '进行中'}</span>
+            <span className="text-[10px] truncate" style={{ color: 'var(--text-muted)' }}>{[pct != null ? `${pct}%` : phaseText(j.phase) || '进行中', sceneCount].filter(Boolean).join(' · ')}</span>
           </>
         ) : j.status === 'error' ? (
           <span className="text-[10px] line-clamp-2" style={{ color: 'var(--error)' }} title={j.error || ''}>{j.error}</span>
         ) : (
           <span className="text-[10px] truncate" style={{ color: 'var(--text-muted)' }}>
-            {j.status === 'queued' ? '排队中' : out ? `${out.duration.toFixed(1)}s${out.alpha ? ' · 透明' : ''}` : '完成'}
+            {j.status === 'queued' ? '排队中' : out ? `${out.duration.toFixed(1)}s${out.alpha ? ' · 透明' : ''}${sceneCount ? ` · ${sceneCount}` : ''}` : '完成'}
           </span>
         )}
       </div>
@@ -240,7 +251,7 @@ export function SkillsPanel() {
       <div className="field">
         <label>{pack.input.label}</label>
         <textarea
-          rows={3}
+          rows={pack.pipeline === 'narrated' ? 6 : 3}
           data-testid="skill-prompt"
           maxLength={pack.input.maxLength}
           placeholder={pack.input.placeholder ?? `${pack.input.label}…`}

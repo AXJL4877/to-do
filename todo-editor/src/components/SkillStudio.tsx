@@ -120,6 +120,7 @@ export function SkillStudio(props: Props) {
   const [error, setError] = useState<string | null>(null)
   const [plannedFor, setPlannedFor] = useState<string | null>(plan ? prompt : null)
 
+  const narrated = pack.pipeline === 'narrated'
   const max = pack.planner?.maxElements ?? 1
   const countParam = pack.planner?.countParam
   const countParamDef = pack.params.find((p) => p.id === countParam)
@@ -203,12 +204,19 @@ export function SkillStudio(props: Props) {
   }
 
   const elementCount = plan?.elements.length ?? (countParam && Number(params[countParam]) > 0 ? Number(params[countParam]) : null)
-  const summary = [
-    optionLabel(pack, 'size', params),
-    `${duration}s`,
-    alpha ? '透明通道' : optionLabel(pack, 'background', params),
-    elementCount ? `${elementCount} 个元素` : '',
-  ].filter(Boolean).join(' · ')
+  const summary = narrated
+    ? [
+      optionLabel(pack, 'size', params),
+      alpha ? '透明通道' : optionLabel(pack, 'background', params),
+      `书写 ${params.drawSpeed ?? 1}×`,
+      '时长跟随配音',
+    ].join(' · ')
+    : [
+      optionLabel(pack, 'size', params),
+      `${duration}s`,
+      alpha ? '透明通道' : optionLabel(pack, 'background', params),
+      elementCount ? `${elementCount} 个元素` : '',
+    ].filter(Boolean).join(' · ')
 
   return createPortal(
     <div className="modal-backdrop" data-testid="skill-studio" onClick={onClose}>
@@ -230,7 +238,7 @@ export function SkillStudio(props: Props) {
             <section className="flex flex-col gap-2">
               <span className="eyebrow">{pack.input.label}</span>
               <textarea
-                rows={3}
+                rows={narrated ? 12 : 3}
                 className="skill-textarea"
                 data-testid="skill-studio-prompt"
                 maxLength={pack.input.maxLength}
@@ -239,7 +247,12 @@ export function SkillStudio(props: Props) {
                 onChange={(e) => setPrompt(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) void submit() }}
               />
-              <div>
+              {narrated ? (
+                <p className="m-0 text-[11px] leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+                  生成时先配音拿到逐字时间，再由 AI 按语句换板、给每块黑板拆元素，讲到哪个词就在那一刻起笔。
+                  {prompt.trim() ? ` 共 ${prompt.trim().length} 字。` : ''}
+                </p>
+              ) : <div>
                 <button
                   type="button"
                   className={clsx('btn btn-ghost', plan && plannedFor !== null && plannedFor !== prompt && 'is-stale')}
@@ -250,10 +263,10 @@ export function SkillStudio(props: Props) {
                   {planning ? <Loader2 size={13} className="animate-spin" /> : <Wand2 size={13} />}
                   {plan ? '重新拆解' : 'AI 拆解'}
                 </button>
-              </div>
+              </div>}
             </section>
 
-            <section className="flex flex-col gap-2" data-testid="skill-elements">
+            {!narrated && <section className="flex flex-col gap-2" data-testid="skill-elements">
               <div className="flex items-center justify-between">
                 <span className="eyebrow">元素 · {plan?.elements.length ?? 0}/{max}</span>
                 {plan && (
@@ -315,7 +328,7 @@ export function SkillStudio(props: Props) {
                 </button>
               )}
               {plan && <SkillTimingBar plan={plan} duration={duration} hold={hold} />}
-            </section>
+            </section>}
           </div>
 
           <div className="md:w-[320px] shrink-0 md:min-h-0 md:overflow-y-auto p-4 flex flex-col gap-4 border-t md:border-t-0 md:border-l" style={{ borderColor: 'var(--border)', background: 'var(--surface-0)' }}>

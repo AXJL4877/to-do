@@ -178,6 +178,7 @@ export const TimelineClip = memo(function TimelineClip({
       ? 'hsl(158 45% 40% / 0.25)'
       : 'hsl(200 55% 48% / 0.25)'
 
+  const rate = tool === 'rate'
   const w = Math.max(24, width)
   const hints = useMemo(() => edgeHints(clip, w), [clip, w])
   const pxPerSec = w / Math.max(0.05, clip.duration)
@@ -228,17 +229,19 @@ export const TimelineClip = memo(function TimelineClip({
         useApp.getState().openPropWheelOnMonitor()
       }}
       onContextMenu={onContextMenu}
-      title="S缩放 · R旋转 · 1 静态 · 2 K帧模式 · 3 转场；K帧下 T透明"
+      title={rate
+        ? '比率拉伸：拖左右边缘，缩短 = 加速，拉长 = 减速（0.25×~4×）'
+        : 'S缩放 · R旋转（鼠标在时间轴上时 R 为比率拉伸）· 1 静态 · 2 K帧模式 · 3 转场；K帧下 T透明'}
     >
       <div
-        className="absolute left-0 top-0 bottom-0 w-1.5 cursor-ew-resize opacity-0 group-hover:opacity-100 z-20"
-        style={{ background: 'var(--accent)' }}
+        className={clsx('absolute left-0 top-0 bottom-0 cursor-ew-resize z-20', rate ? 'w-2.5 opacity-70 hover:opacity-100' : 'w-1.5 opacity-0 group-hover:opacity-100')}
+        style={{ background: rate ? 'var(--warning, #f59e0b)' : 'var(--accent)' }}
         data-testid={`clip-trim-in-${clip.id}`}
         onPointerDown={onTrimIn}
       />
       <div
-        className="absolute right-0 top-0 bottom-0 w-1.5 cursor-ew-resize opacity-0 group-hover:opacity-100 z-20"
-        style={{ background: 'var(--accent)' }}
+        className={clsx('absolute right-0 top-0 bottom-0 cursor-ew-resize z-20', rate ? 'w-2.5 opacity-70 hover:opacity-100' : 'w-1.5 opacity-0 group-hover:opacity-100')}
+        style={{ background: rate ? 'var(--warning, #f59e0b)' : 'var(--accent)' }}
         data-testid={`clip-trim-out-${clip.id}`}
         onPointerDown={onTrimOut}
       />
@@ -302,6 +305,11 @@ export const TimelineClip = memo(function TimelineClip({
         style={{ userSelect: 'none', WebkitUserSelect: 'none' }}
         draggable={false}
       >
+        {Math.abs((clip.speed || 1) - 1) > 1e-3 && (
+          <span className="mr-1 px-1 rounded-sm font-semibold" style={{ background: 'hsl(38 92% 50% / 0.9)', color: '#1b1f1d' }} data-testid={`clip-speed-${clip.id}`}>
+            {(clip.speed || 1).toFixed(2)}×
+          </span>
+        )}
         {clip.name}
       </span>
     </div>

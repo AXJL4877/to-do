@@ -3,9 +3,10 @@
  * 技能包标准指令（走 AI HTTP 服务；每条命令 stdout 输出一行 JSON）。协议见 server/skills/<id>/PROTOCOL.md。
  *
  *   node scripts/skill-job.mjs list
- *   node scripts/skill-job.mjs plan  --skill builtin.chalk-hand --prompt "……" [--set key=value ...]
- *   node scripts/skill-job.mjs start --skill builtin.chalk-hand --prompt "……" \
- *        [--set background=transparent --set duration=10 ...] [--plan plan.json] \
+ *   node scripts/skill-job.mjs start --skill builtin.chalk-hand --prompt "整段口播" [--set drawSpeed=1.5 --set background=transparent ...]
+ *   node scripts/skill-job.mjs plan  --skill <elements 包> --prompt "……" [--set key=value ...]
+ *   node scripts/skill-job.mjs start --skill <elements 包> --prompt "……" \
+ *        [--set duration=10 ...] [--plan plan.json] \
  *        [--image 1=元素1.png --image 2=元素2.png]（上传元素图须同时给 --plan）
  *   node scripts/skill-job.mjs start --skill builtin.tts-voice --prompt "口播文案"
  *   node scripts/skill-job.mjs start --skill builtin.voice-subtitle --source <配音 jobId> [--set font=kaiti --set fontPx=64 --set bottomPct=16 ...]

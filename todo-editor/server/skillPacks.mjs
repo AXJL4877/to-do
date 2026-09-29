@@ -4,6 +4,7 @@
  *   elements（默认）：规划器 + 素材模板，宿主按 规划 → 元素生图 → 渲染 执行（server/skills/chalk-hand/PROTOCOL.md）
  *   tts：输入即口播文案，宿主只调 TTS_timeline 出 wav + 逐字时间戳，无渲染端（server/skills/tts-voice/PROTOCOL.md）
  *   subtitle：输入是一条已完成的 tts 配音，渲染端按它的逐字时间戳切条对时并烧录（server/skills/voice-subtitle/PROTOCOL.md）
+ *   narrated：输入是口播，宿主 配音 → 按短语时间戳分板拆元素 → 元素生图 → 渲染端逐板对时书写并混入配音（server/skills/chalk-hand/PROTOCOL.md §5）
  *
  * 目录：server/skills/<name>/skill.json（内置）、$TODO_DATA_DIR/skills/<name>/skill.json（用户，同 id 覆盖内置）
  */
@@ -29,8 +30,12 @@ export const BUILTIN_SKILL_DIR = path.join(ROOT, 'server', 'skills')
 export const USER_SKILL_DIR = path.join(DATA_DIR, 'skills')
 
 export const PARAM_GROUPS = ['scene', 'voice', 'text', 'timing', 'stroke', 'output']
-export const PIPELINES = ['elements', 'tts', 'subtitle']
-const INPUT_MAX = { elements: 1000, tts: 5000, subtitle: 5000 }
+export const PIPELINES = ['elements', 'tts', 'subtitle', 'narrated']
+const INPUT_MAX = { elements: 1000, tts: 5000, subtitle: 5000, narrated: 3600 }
+/** narrated：整条口播最多拆几块黑板、总共画几个元素（每个元素一次生图） */
+/** 10 分钟口播约 40~75 块黑板 */
+export const NARRATED_MAX_SCENES = 80
+export const NARRATED_MAX_ELEMENTS = 200
 export const ROLES = ['hero', 'support', 'accent']
 const PARAM_ID_RE = /^[a-z][a-zA-Z0-9]{0,31}$/
 const OPTION_RE = /^[a-zA-Z0-9_.:-]{1,32}$/
@@ -150,8 +155,9 @@ export function validateSkillPack(raw, packDir) {
     }
   }
 
-  if (pipeline === 'elements') {
+  if (pipeline === 'elements' || pipeline === 'narrated') {
     validateElementsPipeline(raw)
+    if (pipeline === 'narrated' && raw.planner.countParam != null) fail('planner.countParam', 'narrated 管线按口播自动定元素数')
   } else {
     if (raw.planner != null) fail('planner', `${pipeline} 管线不使用规划器`)
     if (raw.assets != null) fail('assets', `${pipeline} 管线不生成素材`)
@@ -391,21 +397,152 @@ export function buildPlannerMessages(pack, prompt, params) {
   return [{ role: 'system', content: system }, { role: 'user', content: String(prompt).slice(0, pack.input.maxLength) }]
 }
 
-export async function planSkill(config, entry, prompt, params) {
-  if (!entry.pack.planner) throw new Error(`技能「${entry.pack.name}」不需要规划`)
+async function chatPlanner(config, messages) {
   if (!config?.apiKey) throw new Error('请先配置 API Key')
   const res = await fetch(`${normalizeBaseUrl(config.baseUrl)}/v1/chat/completions`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${config.apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: SKILL_PLANNER_MODEL, messages: buildPlannerMessages(entry.pack, prompt, params), temperature: 0.6 }),
-    signal: AbortSignal.timeout(90_000),
+    body: JSON.stringify({ model: SKILL_PLANNER_MODEL, messages, temperature: 0.6 }),
+    // 长口播的分板 JSON 可能上万 token
+    signal: AbortSignal.timeout(300_000),
   })
   const text = await res.text()
   let payload = {}
   try { payload = JSON.parse(text) } catch { payload = { error: text.slice(0, 300) } }
   if (!res.ok) throw new Error(String(payload?.error?.message || payload?.error || `AI 规划请求失败 (${res.status})`))
+  return extractJson(payload?.choices?.[0]?.message?.content)
+}
+
+export async function planSkill(config, entry, prompt, params) {
+  if (!entry.pack.planner) throw new Error(`技能「${entry.pack.name}」不需要规划`)
+  if (entry.pack.pipeline === 'narrated') throw new Error(`技能「${entry.pack.name}」按配音时间自动拆分，不支持预先规划`)
+  const raw = await chatPlanner(config, buildPlannerMessages(entry.pack, prompt, params))
   const count = entry.pack.planner.countParam ? params[entry.pack.planner.countParam] : 0
-  return sanitizePlan(extractJson(payload?.choices?.[0]?.message?.content), entry.pack, { count })
+  return sanitizePlan(raw, entry.pack, { count })
+}
+
+// ── narrated：口播 → 配音短语 → 分板 + 元素 ─────────────────────────
+
+/**
+ * TTS_timeline 的 timing.json → 扁平短语表（句内按逗号切开的最小时间单元）。
+ * @returns {{ i: number, sentence: number, text: string, start: number, end: number }[]} 秒
+ */
+export function timingPhrases(timing) {
+  const out = []
+  for (const [si, s] of (timing?.sentences ?? []).entries()) {
+    const list = s.phrases?.length ? s.phrases : [s]
+    for (const p of list) {
+      const text = String(p.text ?? '').trim()
+      if (!text || !Number.isFinite(p.start) || !Number.isFinite(p.end)) continue
+      out.push({ i: out.length, sentence: si, text, start: p.start, end: Math.max(p.start, p.end) })
+    }
+  }
+  return out
+}
+
+export function buildNarrationPlannerMessages(pack, phrases, params) {
+  const perScene = pack.planner.maxElements
+  const maxScenes = Number(params.scenes) || 0
+  const total = phrases.at(-1)?.end ?? 0
+  const system = [
+    pack.planner.system,
+    '',
+    '输入是一条口播的短语表，每行「[编号] 开始秒数 | 短语」，空行分隔句子。短语编号就是时间锚点。',
+    '只输出一个 JSON 对象，不要解释：',
+    '{',
+    '  "title": "不超过 12 字的中文标题",',
+    '  "scenes": [ 按时间先后排列的黑板，每块：',
+    '    { "start": 这块黑板从哪个短语编号开始（第一块必须是 0）,',
+    `      "elements": [ 1~${perScene} 个，按出现先后排列，每个：`,
+    `        { "at": 说到哪个短语时开始画（编号，须落在本块黑板的短语范围内）, "label": "不超过 ${LABEL_MAX} 字的中文名", "draw": "英文画面描述，具体到物件、人物动作和短标签文字，不超过 ${DRAW_MAX} 字符", "role": "hero | support | accent" } ] }`,
+    '  ],',
+    '  "notes": "一句话说明怎么拆的"',
+    '}',
+    '拆分规则：',
+    '1. 按意思换板：一块黑板讲一件事，话题转折、进入下一个要点时才换板；换板点只能落在句子开头。',
+    maxScenes
+      ? `2. 恰好 ${maxScenes} 块黑板（短语不够时可以更少）。`
+      : `2. 黑板数按内容定，大约每 8~15 秒一块（本条口播约 ${Math.round(total)} 秒），最多 ${NARRATED_MAX_SCENES} 块。`,
+    `3. 元素要在讲到它的那一刻出现：at 选第一次提到这个东西的短语；同一块黑板里 at 递增，相邻元素最好隔开一两个短语，给书写留时间；全篇元素合计不超过 ${NARRATED_MAX_ELEMENTS} 个。`,
+    '4. 每块黑板第一个元素 role=hero；关键数字、结论可以用 accent 写成 ≤6 字的粉笔大字。',
+    '5. 只画口播里说到的东西，不要发明数字和概念。',
+  ].join('\n')
+  const lines = []
+  for (const [k, p] of phrases.entries()) {
+    if (k > 0 && p.sentence !== phrases[k - 1].sentence) lines.push('')
+    lines.push(`[${p.i}] ${p.start.toFixed(1)}s | ${p.text}`)
+  }
+  return [{ role: 'system', content: system }, { role: 'user', content: lines.join('\n') }]
+}
+
+/**
+ * LLM 输出 → 合法分板：换板点对齐句首、递增、首块从 0 开始；元素锚点夹进本块范围并递增；空板并入前一块。
+ * @returns {{ title: string, notes: string, scenes: { start: number, elements: { at: number, label: string, draw: string, role: string, weight: number }[] }[] }}
+ */
+export function sanitizeNarrationPlan(raw, pack, phrases, { maxScenes = 0 } = {}) {
+  const r = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : null
+  if (!r) throw new Error('规划不是对象')
+  const n = phrases.length
+  if (!n) throw new Error('配音没有短语时间戳')
+  const perScene = pack.planner.maxElements
+  const sceneCap = Math.min(NARRATED_MAX_SCENES, maxScenes || NARRATED_MAX_SCENES)
+  const sentenceHead = (i) => {
+    let k = Math.min(n - 1, Math.max(0, Math.round(Number(i) || 0)))
+    while (k > 0 && phrases[k - 1].sentence === phrases[k].sentence) k--
+    return k
+  }
+  const list = (Array.isArray(r.scenes) ? r.scenes : [])
+    .map((s) => ({ start: sentenceHead(s?.start), elements: (Array.isArray(s?.elements) ? s.elements : []).filter((e) => cleanText(e?.draw)) }))
+    .filter((s) => s.elements.length)
+    .sort((a, b) => a.start - b.start)
+  const scenes = []
+  for (const s of list) {
+    const last = scenes.at(-1)
+    if (last && last.start === s.start) last.elements.push(...s.elements)
+    else scenes.push({ start: scenes.length ? s.start : 0, elements: [...s.elements] })
+  }
+  while (scenes.length > sceneCap) {
+    const tail = scenes.pop()
+    scenes.at(-1).elements.push(...tail.elements)
+  }
+  let total = 0
+  const out = []
+  for (const [k, s] of scenes.entries()) {
+    const end = k + 1 < scenes.length ? scenes[k + 1].start : n
+    const els = []
+    for (const e of s.elements) {
+      if (els.length >= perScene || total >= NARRATED_MAX_ELEMENTS) break
+      const draw = cleanText(e?.draw).slice(0, DRAW_MAX)
+      if (!draw) continue
+      const at = Math.min(end - 1, Math.max(s.start, Math.round(Number(e?.at) || s.start)))
+      const role = ROLES.includes(e?.role) ? e.role : els.length === 0 ? 'hero' : 'support'
+      els.push({ at, label: cleanText(e?.label).slice(0, LABEL_MAX) || `元素 ${total + 1}`, draw, role, weight: role === 'hero' ? 1.5 : 1 })
+      total++
+    }
+    els.sort((a, b) => a.at - b.at)
+    // 只会因总元素数用完而为空：后面的内容留在上一块黑板上
+    if (els.length) out.push({ start: out.length ? s.start : 0, elements: els })
+  }
+  if (!out.length) throw new Error('规划里没有可用的元素')
+  return { title: cleanText(r.title).slice(0, 12) || out[0].elements[0].label, notes: cleanText(r.notes).slice(0, 120), scenes: out }
+}
+
+export async function planNarration(config, entry, phrases, params) {
+  const raw = await chatPlanner(config, buildNarrationPlannerMessages(entry.pack, phrases, params))
+  return sanitizeNarrationPlan(raw, entry.pack, phrases, { maxScenes: Number(params.scenes) || 0 })
+}
+
+/** 规划器不可用时：每句一块黑板（超出上限时相邻句合并），整句当主视觉 */
+export function fallbackNarrationPlan(pack, phrases) {
+  const heads = phrases.filter((p, k) => k === 0 || p.sentence !== phrases[k - 1].sentence)
+  const step = Math.ceil(heads.length / NARRATED_MAX_SCENES) || 1
+  const scenes = []
+  for (let k = 0; k < heads.length; k += step) {
+    const group = phrases.filter((p) => p.sentence >= heads[k].sentence && p.sentence < (heads[k + step]?.sentence ?? Infinity))
+    const text = group.map((p) => p.text).join('')
+    scenes.push({ start: heads[k].i, elements: [{ at: heads[k].i, label: text.slice(0, LABEL_MAX), draw: text, role: 'hero' }] })
+  }
+  return sanitizeNarrationPlan({ title: phrases.map((p) => p.text).join('').slice(0, 12), scenes }, pack, phrases)
 }
 
 /** 规划器不可用时的兜底：整句当成一个主视觉元素 */

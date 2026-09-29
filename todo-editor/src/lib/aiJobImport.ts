@@ -1,6 +1,8 @@
 import { useApp } from '../store'
 import { aiFetch, aiUrl } from './aiFetch'
 import { subtitleClipStyle, type SkillOutput, type SkillParams, type TtsOutput } from './aiSkills'
+import { isNarratedJob, syncNarratedJob, type NarratedJob } from './narratedTimeline'
+import { isStoreAuthority } from './storeSync'
 
 export type ImportableAiJob = {
   id: string
@@ -13,7 +15,7 @@ export type ImportableAiJob = {
     width?: number | null
     height?: number | null
     purpose?: 'texture'
-    skill?: { name: string } | null
+    skill?: { name: string; pipeline?: string } | null
     request?: { params: SkillParams } | null
     output?: object | null
   }
@@ -139,12 +141,21 @@ export function placeSubtitles(j: ImportableAiJob): 'aligned' | 'playhead' | nul
  * @returns 新媒体 id；已被其它窗口入库时返回 null
  */
 export async function importAiJob(j: ImportableAiJob): Promise<string | null> {
+  // 口播类的片段早已边生成边入轨，只由主窗收尾
+  const narrated = isNarratedJob(j)
+  if (narrated && !isStoreAuthority()) return null
   claimed.add(j.id)
   try {
     const ack = await aiFetch(`/api/ai-jobs/${j.id}/ack`, { method: 'POST' })
     const ackData = await ack.json()
     if (!ackData.ok) return null
     const label = j.params.skill?.name ?? KIND_LABEL[j.kind]
+
+    if (narrated) {
+      syncNarratedJob(j as unknown as NarratedJob)
+      useApp.getState().setToast(`${label ?? '黑板手绘'}已全部生成${j.params.autoTimeline ? '并入轨' : '，素材在媒体库'}`)
+      return useApp.getState().media.find((m) => isSameAiMedia(m, aiUrl(j.resultUrl!)))?.id ?? null
+    }
 
     const tts = ttsOutput(j)
     if (tts) {
@@ -164,6 +175,7 @@ export async function importAiJob(j: ImportableAiJob): Promise<string | null> {
       duration: kind === 'video' ? (j.duration || j.params.duration || 5) : st0.settings.stillDuration,
       width: j.params.width || w || st0.settings.width,
       height: j.params.height || h || st0.settings.height,
+      ...(kind === 'video' ? { alpha: !!(j.params.output as { alpha?: boolean } | null | undefined)?.alpha } : {}),
     })
     if (!addedId) return null
     if (subtitleOutput(j)) {

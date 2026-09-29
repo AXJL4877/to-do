@@ -17,6 +17,9 @@ import { initStoreSync, isAiPopout, isTimelinePopout, isLocalPlayheadScrubbing }
 import { setLivePlayhead } from './lib/livePlayhead'
 import { desktop } from './lib/desktop'
 import { bindNativePreviewLifecycle } from './lib/nativePreviewBridge'
+import { startNarratedTimelineSync } from './lib/narratedTimeline'
+import { startChalkHandFollow } from './lib/chalkHand'
+import { stepZoom } from './lib/timelineZoom'
 import { PanelBottomClose } from 'lucide-react'
 
 const TIMELINE_POPOUT = isTimelinePopout()
@@ -44,6 +47,13 @@ export default function App() {
   useEffect(() => {
     if (POPOUT) return
     return bindNativePreviewLifecycle()
+  }, [])
+
+  useEffect(() => {
+    if (POPOUT) return
+    const stopSync = startNarratedTimelineSync()
+    const stopHands = startChalkHandFollow()
+    return () => { stopSync(); stopHands() }
   }, [])
 
   useEffect(() => {
@@ -243,6 +253,11 @@ export default function App() {
         }
         s.setSnap(!s.settings.snap)
       }
+      if (!mod && (e.key === 'r' || e.key === 'R') && document.querySelector('.nle-timeline:hover')) {
+        e.preventDefault()
+        s.setTool(s.tool === 'rate' ? 'select' : 'rate')
+        return
+      }
       if (!mod && (e.key === 'r' || e.key === 'R') && (hasSelection || s.autoKeyframe)) {
         e.preventDefault()
         s.closePropWheel()
@@ -323,8 +338,8 @@ export default function App() {
         }
         if (e.key === 'Delete') s.deleteSelected(e.shiftKey)
       }
-      if (e.key === '=' || e.key === '+') s.setTimelineZoom(s.timelineZoom + 10)
-      if (e.key === '-') s.setTimelineZoom(s.timelineZoom - 10)
+      if (e.key === '=' || e.key === '+') s.setTimelineZoom(stepZoom(s.timelineZoom, 1))
+      if (e.key === '-') s.setTimelineZoom(stepZoom(s.timelineZoom, -1))
       if (e.key === 'm' || e.key === 'M') s.addMarker()
       if (e.key === '?' || (e.shiftKey && e.key === '/')) { e.preventDefault(); s.setModal('shortcuts') }
     }

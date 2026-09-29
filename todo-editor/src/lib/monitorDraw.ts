@@ -5,6 +5,7 @@ import type { SnapGuide } from './monitorSnap'
 import { pauseUnusedVideoSlots, resetFrameSampleStability, videoFrameAt } from './videoCache'
 import { mediaTimeAt, pictureClipsAt } from './programPlayer'
 import { drawFancyText, fontStack } from './fancyText'
+import { mayHaveAlpha } from './mediaAlpha'
 
 export type ImageCache = Map<string, HTMLImageElement>
 export type { SnapGuide } from './monitorSnap'
@@ -58,7 +59,7 @@ function isOpaqueFullscreenCover(clip: Clip, playhead: number, media: MediaItem[
   if (clip.blend && clip.blend !== 'normal') return false
   if (tr.cropL !== 0 || tr.cropR !== 0 || tr.cropT !== 0 || tr.cropB !== 0) return false
   const m = media.find(item => item.id === clip.mediaId)
-  if (!m?.width || !m.height) return false
+  if (!m?.width || !m.height || mayHaveAlpha(m)) return false
   const fit = Math.min(settings.width / m.width, settings.height / m.height)
   return m.width * fit * Math.abs(tr.scaleX) >= settings.width * (1 + Math.abs(tr.x))
     && m.height * fit * Math.abs(tr.scaleY) >= settings.height * (1 + Math.abs(tr.y))
@@ -457,14 +458,17 @@ function drawClip(
       const ih = img?.naturalHeight || m.height || h
       if (img?.complete && img.naturalWidth > 0) {
         drawContainCenter(ctx, img, w, h, iw, ih)
-      } else {
+      } else if (!mayHaveAlpha(m)) {
         drawMediaPlaceholder(ctx, clip.name, w, h, sy)
       }
     } else if (m && m.kind === 'video') {
       const speed = Math.max(0.05, clip.speed || 1)
-      const mediaT = mediaTimeAt(clip, playhead, fps)
-      // 勿把源时间 clamp 到片尾：超出素材时长应空，否则像「过了还有画面」
       const srcDur = m.duration > 0 ? m.duration : Infinity
+      // 勿把源时间 clamp 到片尾：超出素材时长应空，否则像「过了还有画面」；
+      // 只有按帧取整进位到片尾的那一帧（片段最后半帧）取最后一帧，否则和下一段之间会漏一帧
+      const rawT = mediaTimeAt(clip, playhead, fps)
+      const step = 1 / Math.max(1, fps)
+      const mediaT = rawT >= srcDur - 1e-3 && rawT < srcDur + step / 2 ? Math.max(0, srcDur - step) : rawT
       const inSrc = mediaT >= 0 && mediaT < srcDur - 1e-3
         && mediaT <= clip.outPoint + 1e-4
       const vol = !audible || trackMuted || clip.audio.mute
@@ -488,7 +492,8 @@ function drawClip(
           || m.height
           || h
         drawContainCenter(ctx, frame, w, h, iw, ih)
-      } else {
+      } else if (!mayHaveAlpha(m)) {
+        // 透明叠层还没解出帧时留空：占位块会盖住下层，播放时就是一闪的坏帧
         drawMediaPlaceholder(ctx, clip.name, w, h, sy)
       }
     } else {

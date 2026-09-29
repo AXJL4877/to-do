@@ -1,0 +1,216 @@
+/**
+ * 口播类技能（narrated 管线）的流式入轨：任务跑着的时候就按阶段产物往时间轴上放。
+ *   配音一出来 → 放到播放头处的音频轨（之后所有片段都链接它、按它的时间戳换算位置）
+ *   每块黑板渲好 → 每个元素一份裁到自身框的透明素材：书写视频（起笔 → 写完）+ 定格图（写完 → 换板），
+ *   放回默认排版位置，同一元素位同一条轨；技能参数要手时再套「粉笔手书写」入场动画
+ * 同一产物只入轨一次：放过的记在片段上和本机，重启 / 刷新也不会重复放，用户删掉的也不会被放回来。
+ * 以后的扩展按同一个约定出阶段产物（params.partial）就能直接复用。
+ */
+import { useApp } from '../store'
+import type { MediaItem } from '../types'
+import { aiFetch, aiUrl } from './aiFetch'
+import { importAiJob, isSameAiMedia, shouldImport } from './aiJobImport'
+import { applyChalkHand, elementTransform } from './chalkHand'
+import { isStoreAuthority } from './storeSync'
+
+export type NarratedClipElement = {
+  id: string
+  label: string
+  role: string
+  box: number[]
+  crop?: number[]
+  startMs: number
+  durationMs: number
+  frames: number
+  video: string
+  hold: string
+  tip?: number[][]
+}
+
+export type NarratedScene = {
+  id: string
+  index: number
+  startMs: number
+  endMs: number
+  fps: number
+  elements: NarratedClipElement[]
+}
+
+export type NarratedHand = { url: string; width: number; height: number; tipX: number; tipY: number }
+
+export type NarratedStage = {
+  voice?: { audio: string; timing: string; duration: number; text: string } | null
+  tail?: number
+  hand?: NarratedHand | null
+  total?: { scenes: number; elements: number } | null
+  scenes?: NarratedScene[]
+}
+
+export type NarratedJob = {
+  id: string
+  status: string
+  params: {
+    autoTimeline?: boolean
+    size?: string
+    skill?: { name?: string; pipeline?: string } | null
+    request?: { params?: Record<string, unknown> } | null
+    partial?: NarratedStage | null
+    output?: (NarratedStage & { narration?: NarratedStage['voice']; plan?: { title?: string } }) | null
+  }
+}
+
+const VOICE_LANE = 0
+
+export const isNarratedJob = (j: { kind?: string; params?: { skill?: { pipeline?: string } | null } }) =>
+  j.kind === 'skill' && j.params?.skill?.pipeline === 'narrated'
+
+/** 运行中读 partial，完成后读清单；两者字段一致 */
+export function narratedStage(j: NarratedJob): NarratedStage | null {
+  const out = j.params.output
+  if (out?.scenes) return { voice: out.narration ?? null, tail: out.tail, hand: out.hand ?? null, total: out.total ?? null, scenes: out.scenes }
+  return j.params.partial ?? null
+}
+
+const PLACED_KEY = (jobId: string) => `todo-narrated-placed:${jobId}`
+
+function loadPlaced(jobId: string) {
+  try {
+    const list = JSON.parse(localStorage.getItem(PLACED_KEY(jobId)) ?? '[]')
+    return new Set<string>(Array.isArray(list) ? list : [])
+  } catch { return new Set<string>() }
+}
+
+type JobState = { t0: number; placed: Set<string> }
+const firstSeen = new Map<string, number>()
+
+/** 每次现读：本机记录 + 工程里已有的片段（比如换机器打开工程） */
+function stateOf(jobId: string): JobState {
+  if (!firstSeen.has(jobId)) firstSeen.set(jobId, useApp.getState().playhead)
+  const placed = loadPlaced(jobId)
+  for (const c of useApp.getState().seq().clips) {
+    const src = c.meta?.source
+    // 片段键形如 voice、s1/s1e1/draw，入轨按首段（配音 / 某块黑板）记
+    if (src?.jobId === jobId && src.key) placed.add(src.key.split('/')[0])
+  }
+  return { t0: firstSeen.get(jobId)!, placed }
+}
+
+function markPlaced(jobId: string, s: JobState, key: string) {
+  s.placed.add(key)
+  try { localStorage.setItem(PLACED_KEY(jobId), JSON.stringify([...s.placed])) } catch { /* */ }
+}
+
+function folderFor(j: NarratedJob) {
+  const id = `f_ai_${j.id}`
+  const st = useApp.getState()
+  if (!st.folders.some((f) => f.id === id)) {
+    const title = j.params.output?.plan?.title
+    useApp.setState({ folders: [...st.folders, { id, name: `${j.params.skill?.name ?? 'AI'} ${title || j.id.slice(-4)}` }] })
+  }
+  return id
+}
+
+function ensureMedia(item: { name: string; url: string; kind: MediaItem['kind']; duration: number; width?: number; height?: number; alpha?: boolean }, folderId: string) {
+  const hit = useApp.getState().media.find((m) => isSameAiMedia(m, item.url))
+  if (hit) return hit.id
+  return useApp.getState().importMedia([{ ...item, hasAudio: item.kind === 'audio', folderId }], { silent: true })[0] ?? null
+}
+
+/**
+ * 把任务目前的阶段产物补到时间轴上（幂等）。不自动入轨的任务只把素材收进媒体库。
+ */
+export function syncNarratedJob(j: NarratedJob) {
+  if (!isStoreAuthority() || !useApp.getState().started) return
+  const stage = narratedStage(j)
+  if (!stage?.voice) return
+  const place = !!j.params.autoTimeline
+  const s = stateOf(j.id)
+  const [fw, fh] = String(j.params.size || '1280x720').split('x').map(Number)
+  const frame = { width: fw || 1280, height: fh || 720 }
+  const folderId = folderFor(j)
+  const label = j.params.skill?.name ?? '黑板手绘'
+  const opts = { jobId: j.id, kind: 'skill' }
+  const wantHand = j.params.request?.params?.hand !== 'none'
+
+  const voiceUrl = aiUrl(stage.voice.audio)
+  const voiceMedia = ensureMedia({ name: `${label}_${j.id}_配音.wav`, url: voiceUrl, kind: 'audio', duration: stage.voice.duration }, folderId)
+  const findVoice = () => useApp.getState().seq().clips.find((c) => c.meta?.source?.jobId === j.id
+    && (c.meta.source.key === 'voice' || (c.mediaId === voiceMedia && c.meta.source.lane === VOICE_LANE)))
+  if (!s.placed.has('voice')) {
+    markPlaced(j.id, s, 'voice')
+    if (voiceMedia && place && !findVoice()) {
+      useApp.getState().addAiLayerClips([{ mediaId: voiceMedia, start: s.t0, duration: stage.voice.duration, lane: VOICE_LANE, source: { key: 'voice' } }], opts)
+      useApp.getState().setToast(`${label}：配音已入轨，画面边生成边放上来`)
+    }
+  }
+
+  // 配音被挪动 / 裁掉开头时，片段按它现在的位置换算；配音被删了就按当初放的位置
+  const voice = findVoice()
+  const at = (sec: number) => (voice ? voice.start + (sec - voice.inPoint) / (voice.speed || 1) : s.t0 + sec)
+  const proj = { width: useApp.getState().settings.width, height: useApp.getState().settings.height }
+
+  for (const scene of stage.scenes ?? []) {
+    if (s.placed.has(scene.id)) continue
+    markPlaced(j.id, s, scene.id)
+    const fps = scene.fps || 30
+    const projFps = Math.max(1, useApp.getState().settings.fps || fps)
+    const snap = (t: number) => Math.round(t * projFps) / projFps
+    const items: Parameters<ReturnType<typeof useApp.getState>['addAiLayerClips']>[0] = []
+    scene.elements.forEach((e, k) => {
+      // 书写片段不用最后一帧（渲染多留了 200ms 写完的画面），交界对齐到帧，定格图从同一时刻接上，不留缝
+      const t0 = snap(at(e.startMs / 1000))
+      const t1 = Math.max(t0 + 1 / projFps, snap(t0 + Math.max(1, e.frames - 1) / fps))
+      const t2 = snap(at(scene.endMs / 1000))
+      const drawSec = t1 - t0
+      const holdSec = Math.max(0, t2 - t1)
+      const size = e.crop ? { width: e.crop[2], height: e.crop[3] } : frame
+      const name = e.label || e.id
+      const video = ensureMedia({ name: `${scene.id}_${name}_书写.webm`, url: aiUrl(e.video), kind: 'video', duration: e.frames / fps, ...size, alpha: true }, folderId)
+      const still = ensureMedia({ name: `${scene.id}_${name}.png`, url: aiUrl(e.hold), kind: 'image', duration: holdSec || 1, ...size }, folderId)
+      if (!place) return
+      const transform = e.crop ? elementTransform(e.crop, frame, proj) : undefined
+      const key = `${scene.id}/${e.id}`
+      const chalk = stage.hand && e.tip?.length
+        ? { tip: e.tip, frame, hand: { ...stage.hand, url: aiUrl(stage.hand.url) } }
+        : undefined
+      if (video) items.push({ mediaId: video, start: t0, duration: drawSec, lane: k + 1, name: `${name} · 书写`, transform, source: { key: `${key}/draw`, chalk } })
+      if (still && holdSec > 0.02) items.push({ mediaId: still, start: t1, duration: holdSec, lane: k + 1, name, transform, source: { key: `${key}/hold` } })
+    })
+    if (!items.length) continue
+    const ids = useApp.getState().addAiLayerClips(items, opts)
+    if (wantHand) {
+      const draws = ids.filter((id, i): id is string => !!id && !!items[i].source?.chalk)
+      if (draws.length) applyChalkHand(draws, { history: false })
+    }
+  }
+}
+
+const TIMER_KEY = '__todoNarratedSync'
+type TimerHost = { [TIMER_KEY]?: number }
+
+/** 主窗常驻：面板关着也照样流式入轨。计时器挂在 window 上，热更新换模块时旧的会被停掉，不会两份同时放 */
+export function startNarratedTimelineSync() {
+  if (!isStoreAuthority()) return () => {}
+  const host = window as unknown as TimerHost
+  if (host[TIMER_KEY] != null) window.clearInterval(host[TIMER_KEY])
+  const tick = async () => {
+    if (!useApp.getState().started) return
+    try {
+      const r = await aiFetch('/api/ai-jobs?limit=40')
+      const data = await r.json()
+      if (!data.ok) return
+      for (const j of data.items as (NarratedJob & { kind: string })[]) {
+        if (!isNarratedJob(j)) continue
+        if (j.status === 'running') syncNarratedJob(j)
+        else if (shouldImport(j as never)) void importAiJob(j as never)
+      }
+    } catch { /* 下一轮再查 */ }
+  }
+  const timer = window.setInterval(() => void tick(), 2000)
+  host[TIMER_KEY] = timer
+  void tick()
+  return () => {
+    window.clearInterval(timer)
+    if (host[TIMER_KEY] === timer) delete host[TIMER_KEY]
+  }
+}

@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import {
   Upload, Type, Star, Camera, Sparkles, MoreHorizontal, Film,
-  Music, Blend, Wand2, Aperture, Zap, CaseSensitive, History, Trash2, Square, Blocks, Mic,
+  Music, Blend, Wand2, Aperture, Zap, CaseSensitive, History, Trash2, Square, Blocks, Mic, Image as ImageIcon,
 } from 'lucide-react'
 import { useApp } from '../store'
 import { parseMediaFiles, filesFromDataTransfer } from '../lib/importFiles'
@@ -34,7 +34,99 @@ const ICONS: Record<LibTab, LucideIcon> = {
 
 const SOLID_SWATCHES = ['#000000', '#FFFFFF', '#1F2937', '#F5F2EC', '#E11D48', '#F59E0B', '#10B981', '#2563EB', '#7C3AED', '#00FF00']
 
-/** 纯色底：选色 → 添加到播放头；选中纯色片段时可直接改色 */
+/** 背景：纯色 / 本地图片 → 添加到播放头最底层视频轨；选中对应片段时直接改色 / 换图 */
+function BackgroundRow() {
+  const [mode, setMode] = useState<'color' | 'image'>('color')
+  return (
+    <div className="rounded-lg border p-2 mb-2 flex flex-col gap-1.5" style={{ borderColor: 'var(--border)' }} data-testid="background-row">
+      <div className="flex items-center gap-2">
+        <span className="text-[11px] font-semibold">背景</span>
+        <div className="tab-row ml-auto" style={{ gap: 2 }}>
+          {(['color', 'image'] as const).map((k) => (
+            <button
+              key={k}
+              type="button"
+              className={clsx('tab', mode === k && 'active')}
+              style={{ height: 20, padding: '0 8px', fontSize: 11 }}
+              data-testid={`bg-mode-${k}`}
+              onClick={() => setMode(k)}
+            >
+              {k === 'color' ? '纯色' : '图片'}
+            </button>
+          ))}
+        </div>
+      </div>
+      {mode === 'color' ? <SolidColorRow /> : <BackgroundImageRow />}
+    </div>
+  )
+}
+
+function BackgroundImageRow() {
+  const media = useApp((s) => s.media)
+  const importMedia = useApp((s) => s.importMedia)
+  const addBackgroundImage = useApp((s) => s.addBackgroundImage)
+  const setSelectedBackgroundImage = useApp((s) => s.setSelectedBackgroundImage)
+  const selectedImageId = useApp((s) => {
+    const ids = new Set(s.selectedClipIds)
+    for (const c of s.seq().clips) {
+      if (!ids.has(c.id) || !c.mediaId) continue
+      const kind = s.media.find((m) => m.id === c.mediaId)?.kind
+      if (kind === 'image' || kind === 'sticker') return c.mediaId
+    }
+    return null
+  })
+  const fileRef = useRef<HTMLInputElement>(null)
+  const images = media.filter((m) => (m.kind === 'image' || m.kind === 'sticker') && !m.offline)
+  const use = (id: string) => {
+    if (selectedImageId) setSelectedBackgroundImage(id)
+    else addBackgroundImage(id)
+  }
+  async function onPick(files: FileList | null) {
+    if (!files?.length) return
+    const parsed = (await parseMediaFiles([...files])).filter((p) => p.kind === 'image' || p.kind === 'sticker')
+    const [id] = importMedia(parsed, { silent: true })
+    if (id) use(id)
+    if (fileRef.current) fileRef.current.value = ''
+  }
+  return (
+    <>
+      <span className="text-[10px] truncate" style={{ color: 'var(--text-muted)' }}>
+        {selectedImageId ? '已选中图片片段 · 点图直接替换' : '铺满画布，放在最底层视频轨，延到序列末尾'}
+      </span>
+      <div className="flex items-center gap-1 flex-wrap" data-testid="bg-image-list">
+        {images.slice(-8).map((m) => (
+          <button
+            key={m.id}
+            type="button"
+            title={m.name}
+            aria-label={`背景图 ${m.name}`}
+            data-testid={`bg-image-${m.id}`}
+            onClick={() => use(m.id)}
+            style={{
+              width: 40, height: 24, borderRadius: 4, padding: 0, overflow: 'hidden',
+              border: '1px solid var(--border)',
+              outline: selectedImageId === m.id ? '2px solid var(--accent)' : 'none',
+              outlineOffset: 1,
+            }}
+          >
+            <img src={m.url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} draggable={false} />
+          </button>
+        ))}
+        <button
+          type="button"
+          className="btn btn-ghost ml-auto"
+          style={{ height: 24, padding: '0 8px', fontSize: 11 }}
+          data-testid="bg-image-pick"
+          onClick={() => fileRef.current?.click()}
+        >
+          <ImageIcon size={11} />本地图片
+        </button>
+        <input ref={fileRef} type="file" accept="image/*" className="hidden" data-testid="bg-image-input" onChange={(e) => onPick(e.target.files)} />
+      </div>
+    </>
+  )
+}
+
 function SolidColorRow() {
   const addSolidClip = useApp((s) => s.addSolidClip)
   const setSelectedSolidColor = useApp((s) => s.setSelectedSolidColor)
@@ -48,13 +140,10 @@ function SolidColorRow() {
     if (selectedSolid) setSelectedSolidColor(c)
   }
   return (
-    <div className="rounded-lg border p-2 mb-2 flex flex-col gap-1.5" style={{ borderColor: 'var(--border)' }} data-testid="solid-row">
-      <div className="flex items-center gap-2">
-        <span className="text-[11px] font-semibold">纯色底</span>
-        <span className="text-[10px] truncate" style={{ color: 'var(--text-muted)' }}>
-          {selectedSolid ? '已选中纯色片段 · 点色块直接改色' : '铺满画布，放在最底层视频轨'}
-        </span>
-      </div>
+    <>
+      <span className="text-[10px] truncate" style={{ color: 'var(--text-muted)' }} data-testid="solid-row">
+        {selectedSolid ? '已选中纯色片段 · 点色块直接改色' : '铺满画布，放在最底层视频轨'}
+      </span>
       <div className="flex items-center gap-1 flex-wrap">
         {SOLID_SWATCHES.map((c) => (
           <button
@@ -90,7 +179,7 @@ function SolidColorRow() {
           <Square size={11} fill={selectedSolid ?? color} />添加
         </button>
       </div>
-    </div>
+    </>
   )
 }
 
@@ -328,7 +417,7 @@ export function MediaLibrary() {
             <button className="btn btn-ghost w-full" data-testid="btn-import-font" onClick={() => importFont('Custom')}>导入字体</button>
           </>
         )}
-        {libraryTab === 'media' && <SolidColorRow />}
+        {libraryTab === 'media' && <BackgroundRow />}
         {(['media', 'audio', 'recent'].includes(libraryTab) || (libraryTab === 'ai' && panelDock.ai !== 'tab')) && (
           list.length === 0 ? (
             <div className="h-full min-h-[120px] grid place-items-center text-[12px] text-center px-2" style={{ color: 'var(--text-muted)' }} data-testid="media-empty">

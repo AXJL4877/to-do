@@ -2,6 +2,7 @@ import type { MediaItem } from '../types'
 import { desktop } from './desktop'
 import { clearNativePlayBridge } from './nativePlayBridge'
 import { pathToFileUrl } from './importFiles'
+import { mayHaveAlpha } from './mediaAlpha'
 
 type Slot = {
   v: HTMLVideoElement
@@ -52,6 +53,8 @@ export type VideoFrameOpts = {
 }
 
 function playUrl(m: MediaItem): string | undefined {
+  // 代理是 H.264，没有透明通道
+  if (mayHaveAlpha(m)) return m.url
   if (m.proxyUrl) return m.proxyUrl
   if (m.proxyPath) return pathToFileUrl(m.proxyPath)
   return m.url

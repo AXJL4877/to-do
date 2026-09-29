@@ -2,25 +2,37 @@
   "spec": "todo-skill-pack/1",
   "id": "builtin.chalk-hand",
   "name": "黑板手绘",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "author": "TO DO",
-  "description": "一句话描述画面，AI 拆成 1~6 个粉笔元素分别生图，按蒙版逐个用粉笔手写出来，输出 WebM（可透明底，直接叠在视频上）。渲染核心来自黑板报管线。",
-  "tags": ["黑板报", "粉笔", "手绘书写", "WebM"],
+  "description": "粘贴口播：配音先进时间轴，AI 按语句换板、给每块黑板拆 1~4 个粉笔元素；每块渲好就把每个元素单独的透明素材按口播时间戳放上轨道并链接配音，可随意拖动缩放重新排版。粉笔手是可选的入场动画。书写速度可调。",
+  "tags": ["黑板报", "口播", "配音", "粉笔", "WebM"],
   "previews": ["previews/01-board.png", "previews/02-alpha.png"],
+  "pipeline": "narrated",
   "input": {
-    "label": "画面描述",
-    "maxLength": 400,
-    "placeholder": "例如：一个小人把工资分成三份，一份存银行，一份买基金，一份留作生活费"
+    "label": "口播文案",
+    "maxLength": 3600,
+    "placeholder": "粘贴整段口播，AI 会按语句拆成几块黑板，边讲边画"
   },
   "output": {
     "mime": "video/webm",
     "codec": "vp9",
-    "alphaWhen": { "background": ["transparent"] }
+    "alphaWhen": {}
   },
   "params": [
     {
-      "id": "elements", "type": "number", "group": "scene", "label": "元素数",
-      "min": 0, "max": 6, "step": 1, "default": 0, "hint": "0 = AI 按描述决定（通常 2~4 个）"
+      "id": "voice", "type": "select", "group": "voice", "label": "音色", "default": "mizai",
+      "options": [
+        { "value": "mizai", "label": "咪仔" },
+        { "value": "clone", "label": "克隆音", "hint": "火山声音复刻 2.0 的音色 ID" }
+      ]
+    },
+    {
+      "id": "cloneId", "type": "text", "group": "voice", "label": "克隆音 ID", "when": { "voice": ["clone"] },
+      "default": "", "maxLength": 64, "pattern": "^S_[A-Za-z0-9_-]{2,60}$", "placeholder": "S_xxxxxxxx"
+    },
+    {
+      "id": "scenes", "type": "number", "group": "scene", "label": "黑板数",
+      "min": 0, "max": 80, "step": 1, "default": 0, "hint": "0 = AI 按话题换板（约每 8~15 秒一块）"
     },
     {
       "id": "layout", "type": "select", "group": "scene", "label": "版式", "default": "auto",
@@ -45,16 +57,7 @@
       ]
     },
     {
-      "id": "background", "type": "select", "group": "scene", "label": "背景", "default": "board",
-      "options": [
-        { "value": "board", "label": "黑板底", "hint": "黑砂黑板纹理" },
-        { "value": "transparent", "label": "透明底", "hint": "只留粉笔和手，可叠加" },
-        { "value": "black", "label": "纯黑底" }
-      ]
-    },
-    {
       "id": "tone", "type": "select", "group": "scene", "label": "笔色", "default": "chalk",
-      "when": { "background": ["transparent"] },
       "options": [
         { "value": "chalk", "label": "白粉笔", "hint": "适合叠在深色画面" },
         { "value": "ink", "label": "深色墨线", "hint": "适合叠在浅色画面" }
@@ -68,12 +71,13 @@
       ]
     },
     {
-      "id": "duration", "type": "number", "group": "timing", "label": "总时长",
-      "min": 3, "max": 30, "step": 0.5, "default": 8, "unit": "秒"
+      "id": "drawSpeed", "type": "number", "group": "timing", "label": "书写速度",
+      "min": 0.5, "max": 3, "step": 0.25, "default": 1, "unit": "×",
+      "hint": "越大画得越快、画完停着听；最慢也会在下个元素前画完"
     },
     {
-      "id": "hold", "type": "number", "group": "timing", "label": "尾部停留",
-      "min": 0, "max": 5, "step": 0.5, "default": 1.5, "unit": "秒", "hint": "写完后对着完成画面停留"
+      "id": "tail", "type": "number", "group": "timing", "label": "结尾停留",
+      "min": 0, "max": 3, "step": 0.5, "default": 1, "unit": "秒", "hint": "配音结束后停在最后一块黑板"
     },
     {
       "id": "fps", "type": "select", "group": "timing", "label": "帧率", "default": "30",
@@ -83,10 +87,10 @@
       ]
     },
     {
-      "id": "hand", "type": "select", "group": "stroke", "label": "手部", "default": "chalk",
+      "id": "hand", "type": "select", "group": "stroke", "label": "粉笔手", "default": "chalk",
       "options": [
-        { "value": "chalk", "label": "粉笔手" },
-        { "value": "none", "label": "不显示手" }
+        { "value": "chalk", "label": "自动加", "hint": "每个元素入轨时自动套「粉笔手书写」入场动画，之后可在动效里删掉或重加" },
+        { "value": "none", "label": "不加", "hint": "只有笔画生长；需要时再在动效里给元素加" }
       ]
     },
     {
@@ -118,11 +122,10 @@
       ]
     }
   ],
-  "quick": ["background", "tone", "size", "duration"],
+  "quick": ["voice", "size", "tone", "drawSpeed"],
   "planner": {
-    "maxElements": 6,
-    "countParam": "elements",
-    "system": "你是黑板报板书设计师。用户用一句话描述一个画面，你把它拆成几个按讲述顺序依次用粉笔写到黑板上的视觉元素。每个元素是一个独立的粉笔小场景或物件簇（例如：拿着钱袋的火柴小人、带锁的房子、向上的箭头和柱状图），不是一行字。第一个元素是主视觉（hero），其余是配景（support）或短标题（accent，只写 ≤6 个字的粉笔大字）。人物只用极简粉笔小人，不要真人脸；不要流程图式的图标串、不要四分屏、不要长句抄写；物件上可带 ≤4 字的短标签。"
+    "maxElements": 4,
+    "system": "你是黑板报口播的分镜师。一段口播会边讲边在黑板上用粉笔画出来：你先按意思把口播切成几块黑板（一块黑板讲清一个要点），再给每块黑板挑 1~4 个要画的视觉元素，并指定每个元素在讲到哪个短语时开始画。每个元素是一个独立的粉笔小场景或物件簇（例如：拿着钱袋的火柴小人、带锁的房子、向上的箭头和柱状图），不是一行字；也可以是短标题（accent，只写 ≤6 个字的粉笔大字）。人物只用极简粉笔小人，不要真人脸；不要流程图式的图标串、不要四分屏、不要长句抄写；物件上可带 ≤4 字的短标签。"
   },
   "assets": {
     "models": ["gpt-image-2"],
@@ -138,6 +141,6 @@
   "runtime": {
     "type": "python",
     "entry": "render.py",
-    "timeoutSec": 1800
+    "timeoutSec": 3600
   }
 }

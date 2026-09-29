@@ -1,9 +1,10 @@
 import { useMemo, useRef, useEffect, useCallback, useState, useSyncExternalStore } from 'react'
 import {
   Lock, VolumeX, EyeOff, Magnet, Scissors, Trash2, ZoomIn, ZoomOut,
-  MousePointer2, Hand, Undo2, Redo2, Save, FolderOpen, Download, MoreHorizontal,
+  MousePointer2, Hand, Gauge, Undo2, Redo2, Save, FolderOpen, Download, MoreHorizontal,
 } from 'lucide-react'
 import { useApp, formatTime } from '../store'
+import { fmtRulerTime, rulerStep, stepZoom } from '../lib/timelineZoom'
 import { parseMediaFiles, filesFromDataTransfer } from '../lib/importFiles'
 import { acceptMediaDrop, readMediaDrag } from '../lib/mediaDrag'
 import { desktop } from '../lib/desktop'
@@ -24,7 +25,7 @@ import { TimelineFloatLaunch } from './TimelineFloat'
 import clsx from 'clsx'
 import type { RefObject } from 'react'
 
-type DragKind = 'move' | 'trim-in' | 'trim-out' | 'playhead' | 'pan' | 'slip' | 'marquee'
+type DragKind = 'move' | 'trim-in' | 'trim-out' | 'rate-in' | 'rate-out' | 'playhead' | 'pan' | 'slip' | 'marquee'
 
 export function Timeline({
   scrollRef: scrollRefProp,
@@ -172,6 +173,8 @@ export function Timeline({
   const lanePx = Math.max(Math.ceil(duration * pxPerSec), bodyW)
   const layoutDur = lanePx / Math.max(1, pxPerSec)
   const needHScroll = bodyW > 0 && lanePx > bodyW + 1
+
+  const ruler = rulerStep(pxPerSec)
 
   const xAt = useCallback((t: number) => t * pxPerSec, [pxPerSec])
 
@@ -324,6 +327,12 @@ export function Timeline({
         if ((e.buttons & 1) === 0) { drag.current = null; return }
         d.moved = true
         st.trimClip(d.clipId, 'out', timeFromEvent(e.clientX), { record: false })
+        return
+      }
+      if ((d.kind === 'rate-in' || d.kind === 'rate-out') && d.clipId) {
+        if ((e.buttons & 1) === 0) { drag.current = null; return }
+        d.moved = true
+        st.rateStretchClip(d.clipId, d.kind === 'rate-in' ? 'in' : 'out', timeFromEvent(e.clientX), { record: false })
         return
       }
       if (d.kind === 'move' && d.clipId) {
@@ -681,7 +690,7 @@ export function Timeline({
     e.stopPropagation()
     pushHistory()
     drag.current = {
-      kind: edge === 'in' ? 'trim-in' : 'trim-out',
+      kind: tool === 'rate' ? (edge === 'in' ? 'rate-in' : 'rate-out') : (edge === 'in' ? 'trim-in' : 'trim-out'),
       clipId, startX: e.clientX, startScrollLeft: 0, originStarts: {}, moved: false,
     }
     ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
@@ -762,15 +771,24 @@ export function Timeline({
     try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId) } catch { /* */ }
   }
 
-  function onWheel(e: React.WheelEvent) {
-    // 用 Alt+滚轮缩放时间线，不拦截 Ctrl+滚轮（留给浏览器页面缩放）
-    if (e.altKey) {
-      e.preventDefault()
-      setTimelineZoom(timelineZoom + (e.deltaY < 0 ? 8 : -8))
-    } else if (tool === 'hand' || e.shiftKey) {
-      scrollRef.current!.scrollLeft += e.deltaY
+  // Alt+滚轮缩放；Ctrl / Shift+滚轮（或手型工具）左右移动。须用非被动的原生监听才拦得住页面缩放
+  const wheelRef = useRef({ tool, zoom: timelineZoom })
+  wheelRef.current = { tool, zoom: timelineZoom }
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const onWheel = (e: WheelEvent) => {
+      if (e.altKey) {
+        e.preventDefault()
+        setTimelineZoom(stepZoom(wheelRef.current.zoom, e.deltaY < 0 ? 1 : -1, 1.15))
+      } else if (e.ctrlKey || e.shiftKey || wheelRef.current.tool === 'hand') {
+        e.preventDefault()
+        el.scrollLeft += e.deltaY || e.deltaX
+      }
     }
-  }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [setTimelineZoom])
 
   return (
     <section
@@ -802,6 +820,7 @@ export function Timeline({
           {([
             ['select', MousePointer2, '选择 (V)'],
             ['razor', Scissors, '剃刀剪切 (C)'],
+            ['rate', Gauge, '比率拉伸 (R，鼠标在时间轴上时)：拖片段边缘，缩短加速、拉长减速'],
             ['hand', Hand, '手型 (H)'],
           ] as const).map(([id, Icon, tip]) => (
             <button key={id} className={clsx('icon-btn', tool === id && 'active')} style={{ width: 26, height: 26 }} data-testid={`tool-${id}`} onClick={() => setTool(id)} title={tip}>
@@ -813,9 +832,9 @@ export function Timeline({
         <button className="icon-btn" data-testid="tl-split" onClick={razorAtPlayhead} title="分割"><Scissors size={12} /></button>
         <button className="icon-btn" data-testid="tl-delete" onClick={() => deleteSelected(true)} title="删除"><Trash2 size={12} /></button>
         <div className="w-px h-4 shrink-0" style={{ background: 'var(--border)' }} />
-        <button className="icon-btn" data-testid="tl-zoom-out" onClick={() => setTimelineZoom(timelineZoom - 10)} title="缩小"><ZoomOut size={12} /></button>
+        <button className="icon-btn" data-testid="tl-zoom-out" onClick={() => setTimelineZoom(stepZoom(timelineZoom, -1))} title="缩小"><ZoomOut size={12} /></button>
         <span className="text-[10px] tabular-nums w-7 text-center" style={{ color: 'var(--text-muted)' }}>{timelineZoom}</span>
-        <button className="icon-btn" data-testid="tl-zoom-in" onClick={() => setTimelineZoom(timelineZoom + 10)} title="放大"><ZoomIn size={12} /></button>
+        <button className="icon-btn" data-testid="tl-zoom-in" onClick={() => setTimelineZoom(stepZoom(timelineZoom, 1))} title="放大"><ZoomIn size={12} /></button>
         <span className="text-[11px] tabular-nums ml-1 truncate max-w-[10ch]" style={{ color: 'var(--text-muted)' }}>{seq.name}</span>
         <div className="flex-1" />
         <TimelineFloatLaunch />
@@ -897,7 +916,6 @@ export function Timeline({
           ref={scrollRef}
           className={clsx('flex-1 min-w-0 relative overflow-y-auto', needHScroll ? 'overflow-x-auto' : 'overflow-x-hidden')}
           data-testid="timeline-body"
-          onWheel={onWheel}
           onScroll={(e) => {
             const headers = headersRef.current
             if (!headers || syncingScroll.current) return
@@ -913,8 +931,8 @@ export function Timeline({
             onPointerDown={onRulerPointerDown}
             data-testid="timeline-ruler"
           >
-            {Array.from({ length: Math.ceil(layoutDur) + 1 }, (_, i) => (
-              <span key={i} className="absolute text-[9px] tabular-nums" style={{ left: xAt(i) + 2, top: 3, color: 'var(--text-muted)' }}>{i}s</span>
+            {Array.from({ length: Math.floor(layoutDur / ruler) + 1 }, (_, i) => (
+              <span key={i} className="absolute text-[9px] tabular-nums" style={{ left: xAt(i * ruler) + 2, top: 3, color: 'var(--text-muted)' }}>{fmtRulerTime(i * ruler, ruler)}</span>
             ))}
             {seq.markers.map((m) => (
               <div key={m.id} className="absolute top-0 bottom-0 w-0.5" style={{ left: xAt(m.t), background: m.color }} title={m.label} />

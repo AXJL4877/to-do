@@ -80,6 +80,10 @@ function isStillImage(c) {
  * @param {{ nativeBin?: string, onProgress?: (p: number) => void, preferJs?: boolean }} [opts]
  */
 async function exportSequence(seq, outPath, opts = {}) {
+  try {
+    const { prepareAlphaVideos } = require('./alphaVideoExport.cjs')
+    seq = await prepareAlphaVideos(seq, { ffmpeg: resolveFfmpeg(opts.nativeBin), onProgress: opts.onProgress })
+  } catch (e) { return { ok: false, error: e.message || '透明视频预处理失败' } }
   if (!seq.audioOnly && (seq.clips || []).some(c => c.enabled !== false && c.text?.fancy)) {
     let prepared
     try {
@@ -261,14 +265,14 @@ function exportViaFfmpegCli(seq, outPath, opts = {}) {
         if (still) {
           filters.push(
             `[${idx}:v]setpts=PTS-STARTPTS,` +
-            `scale=${w}:${h}:force_original_aspect_ratio=decrease,` +
-            `pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=${fps},trim=duration=${dur},setpts=PTS-STARTPTS[${lab}]`,
+            `scale=${w}:${h}:force_original_aspect_ratio=decrease,format=rgba,` +
+            `pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2:color=black@0,setsar=1,fps=${fps},trim=duration=${dur},setpts=PTS-STARTPTS[${lab}]`,
           )
         } else {
           filters.push(
             `[${idx}:v]trim=start=${inPoint}:duration=${dur},setpts=PTS-STARTPTS,` +
-            `scale=${w}:${h}:force_original_aspect_ratio=decrease,` +
-            `pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=${fps}[${lab}]`,
+            `scale=${w}:${h}:force_original_aspect_ratio=decrease,format=rgba,` +
+            `pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2:color=black@0,setsar=1,fps=${fps}[${lab}]`,
           )
         }
         filters.push(`[${lab}]tpad=start_duration=${start}[${delayed}]`)

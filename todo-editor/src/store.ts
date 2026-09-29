@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import {
   type Camera3D, type Clip, type ClipMeta, type Keyframe, type EffectPreset, type ExportJob, type MediaItem, type ProjectSettings, type Sequence,
-  type Tool, type Track, type TrackKind, type Transform3D, type TransitionType,
+  type Tool, type Track, type TrackKind, type Transform2D, type Transform3D, type TransitionType,
   defaultAudio, defaultColor, defaultScene3d, defaultText, defaultTransform, defaultTransform3d, uid,
 } from './types'
 import { applyPresetKeyframes, findMotionPreset, presetDuration, type ParamValues } from './lib/motionPresets'
@@ -10,6 +10,8 @@ import { clearAllPreviewCaches, clearPreviewCache, getProgramPreviewCache, notif
 import { setDiskCacheLimitGb } from './lib/previewDiskCache'
 import { ensureScene3d } from './lib/scene3d'
 import { desktop } from './lib/desktop'
+import { mayHaveAlpha } from './lib/mediaAlpha'
+import { clampZoom } from './lib/timelineZoom'
 import { aiFetch } from './lib/aiFetch'
 import { setLivePlayhead } from './lib/livePlayhead'
 import { reviveMediaList, parseDesktopMedia, pathToFileUrl } from './lib/importFiles'
@@ -236,7 +238,12 @@ function enforceNoOverlap(seq: Sequence): Sequence {
 }
 
 /** 裁剪时钳制到同轨邻居，禁止越过交叉 */
+function clipSpeed(c: Clip) {
+  return Math.max(0.05, c.speed <= 0 ? 1 : (c.speed || 1))
+}
+
 function clampTrimNoOverlap(seq: Sequence, clip: Clip, edge: 'in' | 'out', t: number): Clip {
+  const speed = clipSpeed(clip)
   const others = seq.clips.filter((c) => c.trackId === clip.trackId && c.id !== clip.id)
   if (edge === 'in') {
     const prevEnd = others
@@ -246,20 +253,70 @@ function clampTrimNoOverlap(seq: Sequence, clip: Clip, edge: 'in' | 'out', t: nu
     const snapped = Math.max(prevEnd, Math.min(t, maxEnd - 0.1))
     const delta = snapped - clip.start
     const duration = Math.max(0.1, clip.duration - delta)
-    return {
-      ...clip,
-      start: snapped,
-      duration,
-      inPoint: clip.inPoint + delta,
-      outPoint: clip.inPoint + delta + duration,
-    }
+    const inPoint = clip.inPoint + delta * speed
+    return { ...clip, start: snapped, duration, inPoint, outPoint: inPoint + duration * speed }
   }
   const nextStart = others
     .filter((c) => c.start > clip.start + 1e-6)
     .reduce((m, c) => Math.min(m, c.start), Number.POSITIVE_INFINITY)
   const maxOut = Number.isFinite(nextStart) ? nextStart : Number.POSITIVE_INFINITY
   const duration = Math.max(0.1, Math.min(t, maxOut) - clip.start)
-  return { ...clip, duration, outPoint: clip.inPoint + duration }
+  return { ...clip, duration, outPoint: clip.inPoint + duration * speed }
+}
+
+export const RATE_MIN = 0.25
+export const RATE_MAX = 4
+
+/**
+ * 比率拉伸：素材跨度不变，拖边缘改时间线长度，speed = 跨度 / 长度（缩短即加速、拉长即减速）。
+ * 静态片段（图片/文字/纯色）无源时长：speed 保持 1，改时长并按比例缩放关键帧与转场。
+ */
+function rateStretchNoOverlap(seq: Sequence, clip: Clip, edge: 'in' | 'out', t: number, timed = true): Clip {
+  const speed = clipSpeed(clip)
+  const span = clip.outPoint > clip.inPoint ? clip.outPoint - clip.inPoint : clip.duration * speed
+  const others = seq.clips.filter((c) => c.trackId === clip.trackId && c.id !== clip.id)
+  const end = clip.start + clip.duration
+  let want: number
+  if (edge === 'in') {
+    const prevEnd = others
+      .filter((c) => c.start < clip.start + 1e-6)
+      .reduce((m, c) => Math.max(m, c.start + c.duration), 0)
+    want = end - Math.max(prevEnd, t)
+  } else {
+    const nextStart = others
+      .filter((c) => c.start > clip.start + 1e-6)
+      .reduce((m, c) => Math.min(m, c.start), Number.POSITIVE_INFINITY)
+    want = Math.min(t, nextStart) - clip.start
+  }
+  const scaleBy = (k: number) => (list: Keyframe[]) => list.map((kf) => ({ ...kf, t: kf.t * k }))
+  if (!timed) {
+    const duration = Math.max(0.1, want)
+    const k = duration / Math.max(1e-6, clip.duration)
+    const scale = scaleBy(k)
+    const tr = (x?: Clip['transitionIn']) => (x ? { ...x, duration: x.duration * k } : x)
+    return {
+      ...clip,
+      start: edge === 'in' ? end - duration : clip.start,
+      duration,
+      outPoint: clip.inPoint + duration,
+      keyframes: Object.fromEntries(Object.entries(clip.keyframes ?? {}).map(([p, list]) => [p, scale(list)])),
+      speedKeyframes: scale(clip.speedKeyframes ?? []),
+      transitionIn: tr(clip.transitionIn),
+      transitionOut: tr(clip.transitionOut),
+    }
+  }
+  const nextSpeed = Math.min(RATE_MAX, Math.max(RATE_MIN, span / Math.max(0.1, want)))
+  const duration = span / nextSpeed
+  const scale = scaleBy(duration / Math.max(1e-6, clip.duration))
+  return {
+    ...clip,
+    start: edge === 'in' ? end - duration : clip.start,
+    duration,
+    speed: Math.round(nextSpeed * 1000) / 1000,
+    outPoint: clip.inPoint + span,
+    speedKeyframes: scale(clip.speedKeyframes ?? []),
+    keyframes: Object.fromEntries(Object.entries(clip.keyframes ?? {}).map(([p, list]) => [p, scale(list)])),
+  }
 }
 
 /**
@@ -329,7 +386,7 @@ function withLinkedAudioClips(seq: Sequence, mediaList: MediaItem[]): Sequence {
   clips = clips.map((c) => {
     const track = seq.tracks.find((t) => t.id === c.trackId)
     const m = c.mediaId ? byId.get(c.mediaId) : undefined
-    if (!m || m.kind !== 'video' || track?.kind !== 'video') return c
+    if (!m || m.kind !== 'video' || m.hasAudio === false || track?.kind !== 'video') return c
     const linked =
       (c.linkedId ? clips.find((x) => x.id === c.linkedId) : undefined)
       ?? clips.find((x) =>
@@ -445,12 +502,18 @@ function migrateSequence(q: Sequence): Sequence {
     if (t.kind !== 'effect' && t.kind !== 'adjustment') return true
     return q.clips.some((c) => c.trackId === t.id)
   })
+  const trackKind = new Map(q.tracks.map((t) => [t.id, t.kind]))
+  const clipTrack = new Map(q.clips.map((c) => [c.id, c.trackId]))
+  // 扩展模块的画面片段不再链接配音（旧工程里每段都挂在配音上，点一个会选中全部）
+  const aiVisualLinkedToAudio = (c: Clip) => !!c.linkedId && c.meta?.source?.type === 'ai' && !c.text
+    && trackKind.get(c.trackId) !== 'audio' && trackKind.get(clipTrack.get(c.linkedId) ?? '') === 'audio'
   return enforceNoOverlap({
     ...q,
     tracks,
     scene3d: ensureScene3d(q.scene3d),
     clips: q.clips.map((c) => ({
       ...c,
+      ...(aiVisualLinkedToAudio(c) ? { linkedId: undefined } : {}),
       transform3d: c.transform3d ?? (c.threeD ? defaultTransform3d() : undefined),
     })),
   })
@@ -644,7 +707,7 @@ export type AppStore = {
   setClipThreeD: (enabled: boolean) => void
   updateSelectedTransform3d: (p: Partial<Transform3D>, opts?: { record?: boolean }) => void
   exportProgramFrame: () => Promise<void>
-  importMedia: (files: { name: string; url: string; path?: string; kind: MediaItem['kind']; duration: number; width?: number; height?: number; hasAudio?: boolean }[]) => string[]
+  importMedia: (files: { name: string; url: string; path?: string; kind: MediaItem['kind']; duration: number; width?: number; height?: number; hasAudio?: boolean; alpha?: boolean; folderId?: string }[], opts?: { silent?: boolean }) => string[]
   addFolder: (name: string) => void
   toggleFavorite: (id: string) => void
   removeMedia: (id: string) => void
@@ -724,8 +787,25 @@ export type AppStore = {
     transform?: Partial<Clip['transform']>
     source?: NonNullable<Clip['meta']>['source']
   }) => void
+  /**
+   * AI 任务流式产出的分层片段（时间为时间线绝对秒）：同一任务同 lane 的片段共用轨道，lane 小的在上层；
+   * 给了 linkTo 就链接到该片段（配音）。不改选中，方便边生成边剪。返回新片段 id（顺序同 items，跳过的为 null）。
+   */
+  addAiLayerClips: (
+    items: {
+      mediaId: string; start: number; duration: number; lane: number; name?: string
+      transform?: Partial<Transform2D>; keyframes?: Clip['keyframes']; source?: Partial<NonNullable<ClipMeta['source']>>
+    }[],
+    opts: { jobId: string; kind: string; linkTo?: string; history?: boolean },
+  ) => (string | null)[]
+  /** 改 / 删当前序列里的片段（null = 删除），不记撤销：给跟随其它片段自动更新的派生片段用 */
+  patchClipsQuiet: (patches: Record<string, Partial<Clip> | null>) => void
   /** 在播放头新建纯色底（最底层视频轨，铺满画布） */
   addSolidClip: (color: string) => void
+  /** 在播放头新建背景图（最底层视频轨，铺满画布，默认延到序列末尾） */
+  addBackgroundImage: (mediaId: string) => void
+  /** 把选中的图片片段换成另一张背景图；返回改了几个 */
+  setSelectedBackgroundImage: (mediaId: string) => number
   /** 改选中纯色底的颜色；返回改了几个 */
   setSelectedSolidColor: (color: string) => number
   addTransition: (type: TransitionType) => void
@@ -783,6 +863,8 @@ export type AppStore = {
   setMonitorView: (v: AppStore['monitorView']) => void
   setTimelineZoom: (z: number) => void
   trimClip: (id: string, edge: 'in' | 'out', t: number, opts?: { record?: boolean }) => void
+  /** 比率拉伸（R）：音视频改速度；图片 / 文字 / 纯色没有速度，退化成普通裁剪 */
+  rateStretchClip: (id: string, edge: 'in' | 'out', t: number, opts?: { record?: boolean }) => void
   /** 在时间轴上拖出入场/出场时长（转场、文字动画、淡化、透明度关键帧） */
   resizeEdgeAnim: (id: string, edge: 'in' | 'out', sec: number, opts?: { record?: boolean }) => void
   snapTime: (t: number) => number
@@ -832,6 +914,28 @@ function loadMonitorView(): AppStore['monitorView'] {
 }
 
 /** 保证有可编辑的选中片段；失效选中时自动选中播放头下最上层片段 */
+/** 背景层：从最底下的视频轨往上找 [start, start+duration) 空位，都占了就在视频段最底部新建一条 */
+function backgroundTrack(get: () => AppStore, set: (p: Partial<AppStore>) => void, start: number, duration: number): Track {
+  let seq = get().seq()
+  const free = [...seq.tracks].reverse().find((t) => t.kind === 'video' && !t.locked
+    && !seq.clips.some((c) => c.trackId === t.id && rangeOverlap(start, duration, c.start, c.duration)))
+  if (free) return free
+  const fresh = newTrackOfKind(seq, 'video')
+  seq = { ...seq, tracks: renameKindTracks(insertTrack(seq.tracks, fresh, 'after')) }
+  set({ sequences: get().sequences.map((s) => (s.id === seq.id ? seq : s)) })
+  return seq.tracks.find((t) => t.id === fresh.id)!
+}
+
+/** 渲染按 contain 画图：放大 cover/contain 倍，让图片铺满画布（裁掉溢出） */
+function coverTransform(m: MediaItem, settings: ProjectSettings): Transform2D {
+  const t = defaultTransform()
+  if (!m.width || !m.height) return t
+  const sx = settings.width / m.width
+  const sy = settings.height / m.height
+  const k = Math.max(sx, sy) / Math.min(sx, sy)
+  return { ...t, scaleX: k, scaleY: k, fit: 'cover' }
+}
+
 function ensureClipSelected(
   get: () => AppStore,
   set: (p: Partial<AppStore>) => void,
@@ -1591,33 +1695,36 @@ export const useApp = create<AppStore>((set, get) => {
       }
     },
 
-    importMedia(files) {
+    importMedia(files, opts) {
       const items: MediaItem[] = files.map((f) => ({
         id: uid('media'), name: f.name, kind: f.kind, url: f.url, path: f.path,
         duration: f.duration,
         width: f.width, height: f.height, fps: 30,
         hasAudio: f.hasAudio ?? (f.kind === 'audio' || f.kind === 'video'),
-        folderId: f.kind === 'audio' ? 'f_audio' : f.kind === 'sticker' ? 'f_sticker' : 'f_all',
+        ...(f.alpha ? { alpha: true } : {}),
+        folderId: f.folderId ?? (f.kind === 'audio' ? 'f_audio' : f.kind === 'sticker' ? 'f_sticker' : 'f_all'),
         favorite: false, offline: false,
       }))
       const first = items[0]
       set({
         media: [...get().media, ...items],
-        selectedMediaId: first?.id ?? get().selectedMediaId,
-        sourceMediaId: first?.id ?? get().sourceMediaId,
-        ...(first ? {
-          sourceIn: 0,
-          sourceOut: Math.max(0.2, first.duration || 5),
-          sourceIoArmed: false,
-        } : {}),
+        ...(opts?.silent ? {} : {
+          selectedMediaId: first?.id ?? get().selectedMediaId,
+          sourceMediaId: first?.id ?? get().sourceMediaId,
+          ...(first ? {
+            sourceIn: 0,
+            sourceOut: Math.max(0.2, first.duration || 5),
+            sourceIoArmed: false,
+          } : {}),
+        }),
       })
-      notify(`已导入 ${items.length} 个素材`)
+      if (!opts?.silent) notify(`已导入 ${items.length} 个素材`)
       // 立刻落盘，避免关软件丢库
       queueMicrotask(() => get().saveProject({ silent: true }))
       // useProxy 开启时异步生成代理（默认手动：开关关则不跑）
       if (get().settings.useProxy) {
         for (const it of items) {
-          if (it.kind === 'video' && it.path) {
+          if (it.kind === 'video' && it.path && !mayHaveAlpha(it)) {
             void get().makeMediaProxy(it.id)
           }
         }
@@ -1661,6 +1768,10 @@ export const useApp = create<AppStore>((set, get) => {
         if (height !== 480) notify('无法生成代理（需桌面版与本地路径）')
         return false
       }
+      if (mayHaveAlpha(m)) {
+        if (height !== 480) notify('透明视频不生成代理（代理会丢透明通道）')
+        return false
+      }
       const r = await api.makeProxy(m.path, height)
       if (!r.ok || !r.proxyPath) {
         if (height !== 480) notify(`代理失败: ${r.error || 'unknown'}`)
@@ -1680,7 +1791,8 @@ export const useApp = create<AppStore>((set, get) => {
       if (!api?.makeProxy) return
       for (const id of mediaIds) {
         const m = get().media.find((x) => x.id === id)
-        if (!m?.path || m.kind !== 'video') continue
+        // H.264 代理没有透明通道
+        if (!m?.path || m.kind !== 'video' || mayHaveAlpha(m)) continue
         if (m.proxyPath || m.proxyUrl) continue
         void get().makeMediaProxy(id, 480)
       }
@@ -2034,6 +2146,31 @@ export const useApp = create<AppStore>((set, get) => {
       })
     },
 
+    rateStretchClip(id, edge, t, opts) {
+      if (opts?.record !== false) get().pushHistory()
+      const snapped = get().snapTime(t)
+      const media = get().media
+      // 媒体可能已从库里删掉（离线），查不到类型时仍按音视频变速
+      const timed = (c: Clip) => {
+        if (!c.mediaId || c.text || c.solid) return false
+        const kind = media.find((m) => m.id === c.mediaId)?.kind
+        return kind !== 'image' && kind !== 'sticker'
+      }
+      patchSeq((s) => {
+        const primary = s.clips.find((c) => c.id === id)
+        const targets = new Set<string>([id])
+        if (primary && !primary.text) {
+          if (primary.linkedId) targets.add(primary.linkedId)
+          for (const c of s.clips) if (c.linkedId === id) targets.add(c.id)
+          for (const c of s.clips) if (c.text) targets.delete(c.id)
+        }
+        return enforceNoOverlap({
+          ...s,
+          clips: s.clips.map((c) => (targets.has(c.id) ? rateStretchNoOverlap(s, c, edge, snapped, timed(c)) : c)),
+        })
+      })
+    },
+
     resizeEdgeAnim(id, edge, sec, opts) {
       if (opts?.record !== false) get().pushHistory()
       patchSeq((s) => ({
@@ -2185,7 +2322,7 @@ export const useApp = create<AppStore>((set, get) => {
     },
 
     setTimelineZoom(z) {
-      set({ timelineZoom: Math.min(200, Math.max(20, z)) })
+      set({ timelineZoom: clampZoom(z) })
     },
 
     razorAtPlayhead() {
@@ -2503,21 +2640,68 @@ export const useApp = create<AppStore>((set, get) => {
       set({ selectedClipIds: subs.map((c) => c.id) })
     },
 
+    addAiLayerClips(items, { jobId, kind, linkTo, history = true }) {
+      const media = get().media
+      const valid = items.filter((it) => media.some((m) => m.id === it.mediaId) && it.duration > 0.02)
+      if (!valid.length) return items.map(() => null)
+      if (history) get().pushHistory()
+      let sequence = get().seq()
+      const added: Clip[] = []
+      const ids = new Map<(typeof items)[number], string>()
+      const all = () => [...sequence.clips, ...added]
+      const laneOf = (c: Clip) => (c.meta?.source?.jobId === jobId ? c.meta.source.lane : undefined)
+      const laneTracks = (kind: TrackKind, pick: (lane: number) => boolean) => sequence.tracks
+        .map((t, i) => ({ t, i }))
+        .filter(({ t }) => t.kind === kind && all().some((c) => c.trackId === t.id && laneOf(c) != null && pick(laneOf(c)!)))
+      for (const it of valid) {
+        const m = media.find((x) => x.id === it.mediaId)!
+        const tk: TrackKind = m.kind === 'audio' ? 'audio' : 'video'
+        let track = laneTracks(tk, (l) => l === it.lane).map(({ t }) => t)
+          .find((t) => !t.locked && !all().some((c) => c.trackId === t.id && rangeOverlap(it.start, it.duration, c.start, c.duration)))
+        if (!track) {
+          const fresh = newTrackOfKind(sequence, tk)
+          // 夹在本任务的上层（lane 更小）和下层（lane 更大）之间；本任务还没有轨道时放到同类轨最上面
+          const lower = laneTracks(tk, (l) => l > it.lane)[0]
+          const upper = laneTracks(tk, (l) => l < it.lane).at(-1)
+          const tracks = lower ? [...sequence.tracks.slice(0, lower.i), fresh, ...sequence.tracks.slice(lower.i)]
+            : upper ? [...sequence.tracks.slice(0, upper.i + 1), fresh, ...sequence.tracks.slice(upper.i + 1)]
+              : insertTrack(sequence.tracks, fresh, 'before')
+          sequence = { ...sequence, tracks: renameKindTracks(tracks) }
+          track = sequence.tracks.find((t) => t.id === fresh.id)!
+        }
+        const clip: Clip = {
+          id: uid('clip'), trackId: track.id, mediaId: m.id, name: it.name ?? m.name, linkedId: linkTo,
+          start: it.start, duration: it.duration, inPoint: 0, outPoint: it.duration,
+          enabled: true, speed: 1, reverse: false, speedKeyframes: [],
+          transform: { ...defaultTransform(), ...it.transform }, color: defaultColor(), audio: defaultAudio(),
+          effects: [], blend: 'normal', keyframes: it.keyframes ?? {},
+        }
+        clip.meta = buildClipMeta(clip, track, { ...it.source, type: 'ai', jobId, kind, lane: it.lane })
+        added.push(clip)
+        ids.set(it, clip.id)
+      }
+      const tracks = sequence.tracks
+      const end = Math.max(...added.map((c) => c.start + c.duration))
+      patchSeq((sq) => enforceNoOverlap({ ...sq, tracks, clips: [...sq.clips, ...added], workOut: Math.max(sq.workOut, end) }))
+      return items.map((it) => ids.get(it) ?? null)
+    },
+
+    patchClipsQuiet(patches) {
+      patchSeq((sq) => ({
+        ...sq,
+        clips: sq.clips.flatMap((c) => {
+          if (!(c.id in patches)) return [c]
+          const p = patches[c.id]
+          return p ? [{ ...c, ...p }] : []
+        }),
+      }))
+    },
+
     addSolidClip(color) {
       get().pushHistory()
-      let seq = get().seq()
       const start = get().playhead
       const duration = Math.max(0.2, get().settings.stillDuration || 5)
-      // 当背景用：从最底下的视频轨往上找空位，都占了就在视频段最底部新建一条
-      const free = [...seq.tracks].reverse().find((t) => t.kind === 'video' && !t.locked
-        && !seq.clips.some((c) => c.trackId === t.id && rangeOverlap(start, duration, c.start, c.duration)))
-      let track = free
-      if (!track) {
-        track = newTrackOfKind(seq, 'video')
-        seq = { ...seq, tracks: renameKindTracks(insertTrack(seq.tracks, track, 'after')) }
-        track = seq.tracks.find((t) => t.id === track!.id)!
-        set({ sequences: get().sequences.map((s) => (s.id === seq.id ? seq : s)) })
-      }
+      const track = backgroundTrack(get, set, start, duration)
       const clip: Clip = {
         id: uid('clip'), trackId: track.id, name: `纯色 ${color.toUpperCase()}`,
         start, duration, inPoint: 0, outPoint: duration,
@@ -2529,6 +2713,49 @@ export const useApp = create<AppStore>((set, get) => {
       patchSeq((s) => enforceNoOverlap({ ...s, clips: [...s.clips, clip] }))
       set({ selectedClipIds: [clip.id] })
       notify('已添加纯色底')
+    },
+
+    addBackgroundImage(mediaId) {
+      const m = get().media.find((x) => x.id === mediaId)
+      if (!m || (m.kind !== 'image' && m.kind !== 'sticker')) return
+      get().pushHistory()
+      const seq = get().seq()
+      const start = get().playhead
+      const seqEnd = seq.clips.reduce((e, c) => Math.max(e, c.start + c.duration), 0)
+      const duration = seqEnd - start > 0.2 ? seqEnd - start : Math.max(0.2, get().settings.stillDuration || 5)
+      const track = backgroundTrack(get, set, start, duration)
+      const clip: Clip = {
+        id: uid('clip'), trackId: track.id, mediaId, name: `背景 ${m.name}`,
+        start, duration, inPoint: 0, outPoint: duration,
+        enabled: true, speed: 1, reverse: false, speedKeyframes: [],
+        transform: coverTransform(m, get().settings), color: defaultColor(), audio: defaultAudio(),
+        effects: [], blend: 'normal', keyframes: {},
+      }
+      clip.meta = buildClipMeta(clip, track, { type: 'manual' })
+      patchSeq((s) => enforceNoOverlap({ ...s, clips: [...s.clips, clip], workOut: Math.max(s.workOut, start + duration) }))
+      set({ selectedClipIds: [clip.id] })
+      notify('已添加背景图片')
+    },
+
+    setSelectedBackgroundImage(mediaId) {
+      const m = get().media.find((x) => x.id === mediaId)
+      if (!m) return 0
+      const media = get().media
+      const ids = new Set(get().selectedClipIds)
+      const isImageClip = (c: Clip) => {
+        const kind = media.find((x) => x.id === c.mediaId)?.kind
+        return ids.has(c.id) && (kind === 'image' || kind === 'sticker')
+      }
+      const n = get().seq().clips.filter(isImageClip).length
+      if (!n) return 0
+      get().pushHistory()
+      const transform = coverTransform(m, get().settings)
+      patchSeq((s) => ({
+        ...s,
+        clips: s.clips.map((c) => (isImageClip(c) ? { ...c, mediaId, name: `背景 ${m.name}`, transform } : c)),
+      }))
+      notify('已替换背景图片')
+      return n
     },
 
     setSelectedSolidColor(color) {

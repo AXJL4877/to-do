@@ -4,6 +4,7 @@ import { RotateCcw, Save, X } from 'lucide-react'
 import { useApp } from '../store'
 import { defaultAudio, defaultColor, defaultTransform, uid, type Clip } from '../types'
 import { resolveClipTransform } from '../lib/keyframeEval'
+import { applyChalkHand, CHALK_HAND_PRESET_ID } from '../lib/chalkHand'
 import {
   applyPresetKeyframes, defaultValues, findMotionPreset, MOTION_PRESETS, PRESET_GROUPS, presetDuration,
   resolveValues, type MotionPreset, type ParamValues, type PresetGroup,
@@ -105,7 +106,13 @@ function PresetCard({ preset, values, label, selected, onClick, onApply, onDelet
 }
 
 export function MotionPresetLibrary() {
-  const applyAnim = useApp((s) => s.applyAnimPreset)
+  const applyAnimPreset = useApp((s) => s.applyAnimPreset)
+  const applyAnim: typeof applyAnimPreset = (id, values, opts) => {
+    if (id !== CHALK_HAND_PRESET_ID) { applyAnimPreset(id, values, opts); return }
+    const st = useApp.getState()
+    const n = applyChalkHand(st.selectedClipIds, { scale: Number(values.size) || 1 })
+    st.setToast(n ? `已给 ${n} 个元素加上粉笔手` : '粉笔手只能加在黑板手绘的元素书写片段上')
+  }
   const hasSelection = useApp((s) => s.selectedClipIds.length > 0)
   const [group, setGroup] = useState<PresetGroup | 'mine'>('loop')
   const [selId, setSelId] = useState<string>('shake')
