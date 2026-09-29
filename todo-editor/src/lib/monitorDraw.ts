@@ -2,10 +2,11 @@ import type { Clip, MediaItem, ProjectSettings, Sequence, Track } from '../types
 import { blendToComposite, clipCanvasFilter } from './clipFilters'
 import { sampleKeyframes, resolveClipTransform, effectiveTransform } from './keyframeEval'
 import type { SnapGuide } from './monitorSnap'
-import { pauseUnusedVideoSlots, resetFrameSampleStability, videoFrameAt } from './videoCache'
+import { pauseUnusedVideoSlots, prerollVideo, resetFrameSampleStability, shownVideoTime, videoFrameAt } from './videoCache'
 import { mediaTimeAt, pictureClipsAt } from './programPlayer'
 import { drawFancyText, fontStack } from './fancyText'
 import { mayHaveAlpha } from './mediaAlpha'
+import { HAND_TRACK_PREFIX, withChalkHands } from './chalkHandLayers'
 
 export type ImageCache = Map<string, HTMLImageElement>
 export type { SnapGuide } from './monitorSnap'
@@ -65,6 +66,31 @@ function isOpaqueFullscreenCover(clip: Clip, playhead: number, media: MediaItem[
     && m.height * fit * Math.abs(tr.scaleY) >= settings.height * (1 + Math.abs(tr.y))
 }
 
+/** 视频片段这一帧实际显示的画面对应的时间轴时间；没画出来为 null */
+function shownClipTime(clip: Clip, playhead: number, fps: number): number | null {
+  const shown = shownVideoTime(clip.id)
+  if (shown == null) return null
+  const speed = Math.max(0.05, clip.speed || 1)
+  const d = (shown - mediaTimeAt(clip, playhead, fps)) / speed
+  return playhead + (clip.reverse ? -d : d)
+}
+
+const PREROLL_SEC = 1
+const PREROLL_MAX = 8
+
+/** 1 秒内要进场的视频片段先载好首帧 */
+function prerollUpcoming(seq: Sequence, media: MediaItem[], playhead: number, fps: number, live: Set<string>) {
+  let n = 0
+  for (const c of seq.clips) {
+    if (n >= PREROLL_MAX) break
+    if (live.has(c.id) || c.reverse || c.start <= playhead || c.start > playhead + PREROLL_SEC) continue
+    const m = media.find((x) => x.id === c.mediaId)
+    if (m?.kind !== 'video') continue
+    prerollVideo(m, mediaTimeAt(c, c.start, fps), fps, c.id)
+    n++
+  }
+}
+
 /** 被上层遮挡时仍推进该层解码（超时用上一帧）；声不在这里出 */
 function keepVideoAudible(
   clip: Clip,
@@ -118,6 +144,11 @@ export function renderProgramFrame(
   exportLook = false,
 ) {
   resetFrameSampleStability()
+  // 粉笔手不单独按播放头排：紧跟元素画，时间取元素这一帧实际显示的画面，解码慢时手和笔画也对得上
+  const handOf = new Map<string, Clip>()
+  for (const c of withChalkHands(seq.clips, seq.tracks, media, settings).clips) {
+    if (c.trackId.startsWith(HAND_TRACK_PREFIX)) handOf.set(c.id.slice(0, -HAND_TRACK_PREFIX.length), c)
+  }
   const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true } as CanvasRenderingContext2DSettings)
     ?? canvas.getContext('2d')
   if (!ctx) return
@@ -147,6 +178,7 @@ export function renderProgramFrame(
   // ② 每活跃视频 clip 独立 HTMLVideo 槽；未活跃的暂停释放
   const liveIds = new Set(videoLayers.map((c) => c.id))
   pauseUnusedVideoSlots(liveIds)
+  prerollUpcoming(seq, media, playhead, settings.fps, liveIds)
 
   const sx = w / settings.width
   const sy = h / settings.height
@@ -159,6 +191,11 @@ export function renderProgramFrame(
       continue
     }
     drawClip(ctx, clip, media, w, h, sx, sy, cache, playhead, ov, settings.fps, true, true, false)
+    const hand = handOf.get(clip.id)
+    const at = hand && shownClipTime(clip, playhead, settings.fps)
+    if (hand && at != null && at >= hand.start && at < hand.start + hand.duration) {
+      drawClip(ctx, hand, media, w, h, sx, sy, cache, at, undefined, settings.fps, true, true, false)
+    }
   }
 
   if (!exportLook) {

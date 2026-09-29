@@ -17,6 +17,8 @@ type Slot = {
   seekAt: number | null
   /** 实测 seek 耗时（秒，平滑值）；播放中 seek 目标按它前置，否则永远追不上播放头 */
   seekLatency: number
+  /** 本帧实际交出去的画面对应的素材时间；叠在上面、要跟画面走的层（粉笔手）按它对齐 */
+  shown: number | null
 }
 
 const SEEK_LEAD_MAX = 2.5
@@ -233,7 +235,7 @@ function slotOf(clipId: string, m: MediaItem): Slot {
         cur.pending = null
       }
       if (clipId.startsWith('program:')) bump()
-    }), snap: null, settled: null, pending: null, followFrame: null, resumeSync: false, seekAt: null, seekLatency: 0.3 }
+    }), snap: null, settled: null, pending: null, followFrame: null, resumeSync: false, seekAt: null, seekLatency: 0.3, shown: null }
     slots.set(clipId, s)
   }
   const src = playUrl(m)
@@ -273,6 +275,12 @@ export function ensureVideo(m: MediaItem): HTMLVideoElement {
 function htmlFrame(clipId: string, m: MediaItem, t: number, step: number, opts?: VideoFrameOpts): CanvasImageSource | null {
   if (!playUrl(m)) return null
   const s = slotOf(clipId, m)
+  const img = pickHtmlFrame(s, t, step, opts)
+  s.shown = img == null ? null : img === s.v ? s.v.currentTime : s.settled
+  return img
+}
+
+function pickHtmlFrame(s: Slot, t: number, step: number, opts?: VideoFrameOpts): CanvasImageSource | null {
   const v = s.v
   if (v.error) { markUnstable(); return still(s) }
 
@@ -408,6 +416,38 @@ export function videoFrameAt(
   }
 
   return null
+}
+
+/** 片段本帧实际显示的素材时间（当前取帧域）；没画出来为 null */
+export function shownVideoTime(clipId: string): number | null {
+  return slots.get(`${frameScope}:${clipId}`)?.shown ?? null
+}
+
+/**
+ * 节目播放时，快开始的片段先把解码槽载好停在首帧：
+ * 否则进场那一刻才载入，追播放头时会前置 seek，短片段直接跳到尾帧。
+ * 不影响本帧能否写入 RAM 缓存。
+ */
+export function prerollVideo(m: MediaItem, mediaTime: number, fps: number, clipId: string) {
+  if (frameScope !== 'program' || !playUrl(m)) return
+  const flags = [sampleUnstable, sampleCacheable, sampleMissing] as const
+  const s = slotOf(`${frameScope}:${clipId}`, m)
+  const step = 1 / Math.max(1, fps)
+  const t = Math.max(0, mediaTime)
+  const v = s.v
+  if (composePlay) {
+    try { if (!v.paused) v.pause() } catch { /* */ }
+    if (!v.seeking && v.readyState >= 1 && Math.abs(v.currentTime - t) > step / 2 && s.pending !== t) {
+      s.pending = t
+      try { startSeek(s, t) } catch { s.pending = null }
+    }
+    // 下一帧进场时按播放头接着走，不当成「漂了」再前置 seek
+    s.followFrame = null
+    s.resumeSync = false
+  } else {
+    pickHtmlFrame(s, t, step)
+  }
+  ;[sampleUnstable, sampleCacheable, sampleMissing] = flags
 }
 
 export function dropVideo(id: string) {

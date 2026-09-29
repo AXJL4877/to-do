@@ -2,7 +2,7 @@
  * 口播类技能（narrated 管线）的流式入轨：任务跑着的时候就按阶段产物往时间轴上放。
  *   配音一出来 → 放到播放头处的音频轨（之后所有片段都链接它、按它的时间戳换算位置）
  *   每块黑板渲好 → 每个元素一份裁到自身框的透明素材：书写视频（起笔 → 写完）+ 定格图（写完 → 换板），
- *   放回默认排版位置，同一元素位同一条轨；技能参数要手时再套「粉笔手书写」入场动画
+ *   放回默认排版位置，同一元素位同一条轨；技能参数要手时给书写片段开「粉笔手书写」入场动画（不占时间轴）
  * 同一产物只入轨一次：放过的记在片段上和本机，重启 / 刷新也不会重复放，用户删掉的也不会被放回来。
  * 以后的扩展按同一个约定出阶段产物（params.partial）就能直接复用。
  */
@@ -10,7 +10,7 @@ import { useApp } from '../store'
 import type { MediaItem } from '../types'
 import { aiFetch, aiUrl } from './aiFetch'
 import { importAiJob, isSameAiMedia, shouldImport } from './aiJobImport'
-import { applyChalkHand, elementTransform } from './chalkHand'
+import { elementTransform, setChalkHand } from './chalkHand'
 import { isStoreAuthority } from './storeSync'
 
 export type NarratedClipElement = {
@@ -180,7 +180,7 @@ export function syncNarratedJob(j: NarratedJob) {
     const ids = useApp.getState().addAiLayerClips(items, opts)
     if (wantHand) {
       const draws = ids.filter((id, i): id is string => !!id && !!items[i].source?.chalk)
-      if (draws.length) applyChalkHand(draws, { history: false })
+      if (draws.length) setChalkHand(draws, true, { history: false })
     }
   }
 }

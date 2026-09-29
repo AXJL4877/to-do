@@ -862,9 +862,13 @@ export type AppStore = {
   setLayout: (p: Partial<AppStore['layout']>) => void
   setMonitorView: (v: AppStore['monitorView']) => void
   setTimelineZoom: (z: number) => void
-  trimClip: (id: string, edge: 'in' | 'out', t: number, opts?: { record?: boolean }) => void
+  trimClip: (id: string, edge: 'in' | 'out', t: number, opts?: { record?: boolean; free?: boolean }) => void
+  /** 选中片段头对齐（都挪到最早的开头）或尾对齐（都挪到最晚的结尾）；书写 + 定格按一个元素整体挪 */
+  alignSelectedClips: (edge: 'start' | 'end') => void
+  snapGuide: number | null
+  setSnapGuide: (at: number | null) => void
   /** 比率拉伸（R）：音视频改速度；图片 / 文字 / 纯色没有速度，退化成普通裁剪 */
-  rateStretchClip: (id: string, edge: 'in' | 'out', t: number, opts?: { record?: boolean }) => void
+  rateStretchClip: (id: string, edge: 'in' | 'out', t: number, opts?: { record?: boolean; free?: boolean }) => void
   /** 在时间轴上拖出入场/出场时长（转场、文字动画、淡化、透明度关键帧） */
   resizeEdgeAnim: (id: string, edge: 'in' | 'out', sec: number, opts?: { record?: boolean }) => void
   snapTime: (t: number) => number
@@ -979,13 +983,21 @@ function snapClipEdge(
   }
   let best = t
   let bestDist = thresh
+  let at: number | null = null
   for (const target of targets) {
     const dStart = Math.abs(t - target)
-    if (dStart < bestDist) { bestDist = dStart; best = target }
+    if (dStart < bestDist) { bestDist = dStart; best = target; at = target }
     const dEnd = Math.abs(t + duration - target)
-    if (dEnd < bestDist) { bestDist = dEnd; best = target - duration }
+    if (dEnd < bestDist) { bestDist = dEnd; best = target - duration; at = target }
   }
-  return Math.max(0, best)
+  return { t: Math.max(0, best), at }
+}
+
+/** 同一元素的书写 / 定格片段（产物键 s1/s1e1/draw、s1/s1e1/hold）一起算一个单位 */
+function chalkPairKey(c: Clip) {
+  const key = c.meta?.source?.key
+  const m = key && /^(.+)\/(draw|hold)$/.exec(key)
+  return m ? m[1] : null
 }
 
 
@@ -1102,10 +1114,36 @@ function resolveDragDt(
   const primaryId = opts?.primaryId && setIds.has(opts.primaryId) ? opts.primaryId : ids[0]
   const primary = st.seq().clips.find((c) => c.id === primaryId)
   const origin0 = origins[primaryId] ?? primary?.start ?? 0
-  if (!wantSnap || !primary) return dt
+  if (!wantSnap || !primary) { setSnapGuide(null); return dt }
   const raw = Math.max(0, origin0 + dt)
   const snapped = snapClipEdge(raw, primary.duration, setIds, st.seq(), st.playhead, st.settings.fps)
-  return snapped - origin0
+  setSnapGuide(snapped.at)
+  return snapped.t - origin0
+}
+
+/** 裁剪一端时一起动的片段：音视频配对跟着裁，链接的字幕等文字片段各自保留时长 */
+function trimTargets(s: Sequence, id: string) {
+  const primary = s.clips.find((c) => c.id === id)
+  const targets = new Set<string>([id])
+  if (primary && !primary.text) {
+    if (primary.linkedId) targets.add(primary.linkedId)
+    for (const c of s.clips) if (c.linkedId === id) targets.add(c.id)
+    for (const c of s.clips) if (c.text) targets.delete(c.id)
+  }
+  return targets
+}
+
+/** 裁剪边缘吸附到其他片段头尾 / 播放头 / 标记；Alt 拖动不吸附 */
+function snapTrimEdge(st: AppStore, t: number, exclude: Set<string>, free?: boolean) {
+  if (free || !st.settings.snap) { setSnapGuide(null); return t }
+  const r = snapClipEdge(t, 0, exclude, st.seq(), st.playhead, st.settings.fps)
+  setSnapGuide(r.at)
+  return r.t
+}
+
+/** 时间轴上的吸附对齐线（拖动 / 裁剪时贴上了哪个时间点） */
+function setSnapGuide(at: number | null) {
+  if (useApp.getState().snapGuide !== at) useApp.setState({ snapGuide: at })
 }
 
 function flushDragMove(get: () => AppStore, set: (p: Partial<AppStore> | ((s: AppStore) => Partial<AppStore>)) => void) {
@@ -2096,6 +2134,49 @@ export const useApp = create<AppStore>((set, get) => {
       })
     },
 
+    alignSelectedClips(edge) {
+      const s0 = get().seq()
+      const sel = new Set(get().selectedClipIds)
+      // 一组片段都链接到同一段（口播配音）时，那一段是时间基准，不跟着对齐
+      const refs = new Map<string, number>()
+      for (const c of s0.clips) if (sel.has(c.id) && c.linkedId) refs.set(c.linkedId, (refs.get(c.linkedId) ?? 0) + 1)
+      for (const [id, n] of refs) if (n >= 2) sel.delete(id)
+      const units = new Map<string, Clip[]>()
+      for (const c of s0.clips) {
+        const pair = chalkPairKey(c)
+        const unit = pair ? `pair:${pair}` : c.id
+        if (!sel.has(c.id) && !(pair && s0.clips.some((o) => sel.has(o.id) && chalkPairKey(o) === pair))) continue
+        units.set(unit, [...(units.get(unit) ?? []), c])
+      }
+      if (units.size < 2) { notify('至少选中两个片段才能对齐'); return }
+      const span = (cs: Clip[]) => ({
+        start: Math.min(...cs.map((c) => c.start)),
+        end: Math.max(...cs.map((c) => c.start + c.duration)),
+      })
+      const spans = [...units.values()].map(span)
+      const target = edge === 'start' ? Math.min(...spans.map((x) => x.start)) : Math.max(...spans.map((x) => x.end))
+      const moving = new Set<string>()
+      const moved: Clip[] = []
+      for (const cs of units.values()) {
+        const sp = span(cs)
+        const dt = edge === 'start' ? target - sp.start : target - sp.end
+        for (const c of cs) {
+          moving.add(c.id)
+          moved.push({ ...c, start: Math.max(0, c.start + dt) })
+        }
+      }
+      get().pushHistory()
+      patchSeq((s) => {
+        const applied = applyMoveNoOverlap(s, moved, moving)
+        const byId = new Map(applied.clips.map((c) => [c.id, c]))
+        return enforceNoOverlap({ ...applied.seq, clips: applied.seq.clips.map((c) => byId.get(c.id) ?? c) })
+      })
+      notify(edge === 'start' ? `已头对齐 ${units.size} 个片段` : `已尾对齐 ${units.size} 个片段`)
+    },
+
+    snapGuide: null,
+    setSnapGuide,
+
     snapTime(t) {
       const { settings } = get()
       return settings.snap ? Math.round(t * settings.fps) / settings.fps : t
@@ -2124,18 +2205,9 @@ export const useApp = create<AppStore>((set, get) => {
 
     trimClip(id, edge, t, opts) {
       if (opts?.record !== false) get().pushHistory()
-      const snapped = get().snapTime(t)
+      const targets = trimTargets(get().seq(), id)
+      const snapped = get().snapTime(snapTrimEdge(get(), t, targets, opts?.free))
       patchSeq((s) => {
-        const primary = s.clips.find((c) => c.id === id)
-        const targets = new Set<string>([id])
-        // 只有音视频配对跟着一起裁；链接的字幕等文字片段各自保留时长
-        if (primary && !primary.text) {
-          if (primary.linkedId) targets.add(primary.linkedId)
-          for (const c of s.clips) {
-            if (c.linkedId === id) targets.add(c.id)
-          }
-          for (const c of s.clips) if (c.text) targets.delete(c.id)
-        }
         return enforceNoOverlap({
           ...s,
           clips: s.clips.map((c) => {
@@ -2148,7 +2220,8 @@ export const useApp = create<AppStore>((set, get) => {
 
     rateStretchClip(id, edge, t, opts) {
       if (opts?.record !== false) get().pushHistory()
-      const snapped = get().snapTime(t)
+      const targets = trimTargets(get().seq(), id)
+      const snapped = get().snapTime(snapTrimEdge(get(), t, targets, opts?.free))
       const media = get().media
       // 媒体可能已从库里删掉（离线），查不到类型时仍按音视频变速
       const timed = (c: Clip) => {
@@ -2157,13 +2230,6 @@ export const useApp = create<AppStore>((set, get) => {
         return kind !== 'image' && kind !== 'sticker'
       }
       patchSeq((s) => {
-        const primary = s.clips.find((c) => c.id === id)
-        const targets = new Set<string>([id])
-        if (primary && !primary.text) {
-          if (primary.linkedId) targets.add(primary.linkedId)
-          for (const c of s.clips) if (c.linkedId === id) targets.add(c.id)
-          for (const c of s.clips) if (c.text) targets.delete(c.id)
-        }
         return enforceNoOverlap({
           ...s,
           clips: s.clips.map((c) => (targets.has(c.id) ? rateStretchNoOverlap(s, c, edge, snapped, timed(c)) : c)),

@@ -356,8 +356,8 @@ async function executeNarratedJob(job, entry, ctx) {
     if (!existsSync(f)) return null
     try {
       const r = JSON.parse(readFileSync(f, 'utf8'))
-      // 老格式（整幅、带黑板底、没有笔尖轨迹）的缓存不复用
-      if (!r.scene.elements.every((e) => Array.isArray(e.tip) && e.crop)) return null
+      // 老格式（整幅、带黑板底、没有笔尖轨迹）和旧书写效果（上色时手来回扫）的缓存不复用
+      if (!(r.rev >= 2) || !r.scene.elements.every((e) => Array.isArray(e.tip) && e.crop)) return null
       const files = [r.hand?.file, ...r.scene.elements.flatMap((e) => [e.video, e.hold])].filter(Boolean)
       return files.every((name) => existsSync(path.join(outDir, name))) ? r : null
     } catch { return null }

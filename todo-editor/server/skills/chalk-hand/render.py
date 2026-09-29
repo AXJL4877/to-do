@@ -31,6 +31,8 @@ sys.path.insert(0, str(BLACKBOARD_ROOT / "scripts"))
 sys.path.insert(0, str(BLACKBOARD_ROOT))
 
 RENDER_SPEC = "todo-skill-render/1"
+# 书写效果变了就加一：宿主不复用更低版本的分镜缓存（元素图不受影响，只重渲）
+SCENE_REV = 2
 SIZES = {"1280x720", "1920x1080", "1080x1920", "1080x1080", "720x1280"}
 CRF = {"high": 24, "standard": 31, "draft": 38}
 
@@ -180,6 +182,30 @@ def make_renderer_class():
             self._pending_tip = self._last_tip
             return self.drawn.astype(np.uint8)
 
+        # 上色不再让手扫一遍：线稿写完后颜色在本元素区域内直接淡入，这几帧不落笔尖
+        def _wash_contour(self, writer, frames: int, allowed: np.ndarray) -> None:
+            self._fade_color(writer, frames, allowed)
+
+        def _wash_brush(self, writer, frames: int, centers, allowed: np.ndarray) -> None:
+            self._fade_color(writer, frames, allowed)
+
+        # 库在上色前会把骨架漏掉的墨一次补齐；从最后输出的那一帧开始淡，免得突然冒出一块
+        def _fade_color(self, writer, frames: int, allowed: np.ndarray) -> None:
+            ys, xs = np.where(allowed)
+            if ys.size == 0:
+                return
+            y0, y1, x0, x1 = ys.min(), ys.max() + 1, xs.min(), xs.max() + 1
+            mask = allowed[y0:y1, x0:x1]
+            view = self.drawn[y0:y1, x0:x1]
+            shown = getattr(self, "_last_snap", None)
+            base = (shown if shown is not None else self.drawn)[y0:y1, x0:x1][mask].astype(np.float32)
+            target = self.color_img[y0:y1, x0:x1][mask].astype(np.float32)
+            for fi in range(max(0, frames)):
+                a = (fi + 1) / frames
+                view[mask] = base + (target - base) * a
+                self._write_frame(writer, self.drawn.astype(np.uint8))
+            view[mask] = target
+
         def pad_to_budget(self) -> None:
             if self.budget is None:
                 return
@@ -194,6 +220,7 @@ def make_renderer_class():
                     return
                 self.scene_frames += 1
             frame = snap if snap.dtype == np.uint8 else snap.astype(np.uint8)
+            self._last_snap = frame
             if self.tips is not None:
                 self.tips.append(tip)
             if self.crop is not None:
@@ -316,7 +343,7 @@ class Stage:
             ink_path_mode=str(p.get("stroke", "skeleton")),
             color_fill="brush" if fill == "brush" else "contour-wipe",
             color_weight=0 if fill == "none" else 1,
-            ink_weight=2,
+            ink_weight=9,
             pause_mode="heavy",
             board_style="chalkboard",
             canvas_hex="#0b241c",
@@ -593,6 +620,7 @@ def render_scene_clips(req: dict, progress: Progress) -> dict:
     if not req.get("keepWork"):
         shutil.rmtree(work, ignore_errors=True)
     return {
+        "rev": SCENE_REV,
         "alpha": True,
         "width": W,
         "height": H,

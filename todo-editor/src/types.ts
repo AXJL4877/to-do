@@ -152,8 +152,11 @@ export interface ChalkStroke {
   tip: number[][]
   /** 生成时的画幅（手的尺寸按它换算到工程画面） */
   frame: { width: number; height: number }
-  /** 粉笔手图：尺寸为生成画幅下的像素，tipX/tipY 为笔尖在图里的位置 0~1 */
-  hand: { url: string; width: number; height: number; tipX: number; tipY: number }
+  /** 粉笔手图：尺寸为生成画幅下的像素，tipX/tipY 为笔尖在图里的位置 0~1；mediaId 为导入媒体库后的素材 */
+  hand: { url: string; width: number; height: number; tipX: number; tipY: number; mediaId?: string }
+  /** 「粉笔手书写」入场动画是否开启、手的大小倍率 */
+  on?: boolean
+  scale?: number
 }
 
 export interface ClipMeta {
@@ -188,7 +191,7 @@ export interface ClipMeta {
     key?: string
     /** 粉笔元素的书写片段：可套「粉笔手书写」入场动画 */
     chalk?: ChalkStroke
-    /** 粉笔手片段：跟随的元素片段 id */
+    /** 旧版独立粉笔手片段所属元素 id；打开时会并回元素的 chalk.on 并删除该片段 */
     handFor?: string
     handScale?: number
   }

@@ -368,7 +368,7 @@ export const MOTION_PRESETS: MotionPreset[] = [
 
   // ----- 强调 -----
   {
-    // 不改片段自身的变换：由 chalkHand 在上层生成一段跟着笔尖走的手（只对黑板手绘的粉笔元素有效）
+    // 不改片段的变换：开关记在片段上，渲染时由 chalkHandLayers 按笔尖轨迹现画手（只对黑板手绘的粉笔元素有效）
     id: 'chalkHand', name: '粉笔手书写', desc: '粉笔手跟着笔尖把元素画出来（黑板手绘的元素）', group: 'in',
     params: [{ key: 'size', label: '手大小', type: 'range', min: 0.5, max: 1.5, step: 0.05, default: 1, unit: '×' }],
     build: () => [],

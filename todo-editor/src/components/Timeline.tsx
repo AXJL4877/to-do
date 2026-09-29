@@ -60,6 +60,8 @@ export function Timeline({
   const linkSelected = useApp((s) => s.linkSelected)
   const unlinkSelected = useApp((s) => s.unlinkSelected)
   const trimClip = useApp((s) => s.trimClip)
+  const alignSelectedClips = useApp((s) => s.alignSelectedClips)
+  const snapGuide = useApp((s) => s.snapGuide)
   const trackAtY = useApp((s) => s.trackAtY)
   const addClipFromMedia = useApp((s) => s.addClipFromMedia)
   const importMedia = useApp((s) => s.importMedia)
@@ -320,19 +322,19 @@ export function Timeline({
       if (d.kind === 'trim-in' && d.clipId) {
         if ((e.buttons & 1) === 0) { drag.current = null; return }
         d.moved = true
-        st.trimClip(d.clipId, 'in', timeFromEvent(e.clientX), { record: false })
+        st.trimClip(d.clipId, 'in', timeFromEvent(e.clientX), { record: false, free: e.altKey })
         return
       }
       if (d.kind === 'trim-out' && d.clipId) {
         if ((e.buttons & 1) === 0) { drag.current = null; return }
         d.moved = true
-        st.trimClip(d.clipId, 'out', timeFromEvent(e.clientX), { record: false })
+        st.trimClip(d.clipId, 'out', timeFromEvent(e.clientX), { record: false, free: e.altKey })
         return
       }
       if ((d.kind === 'rate-in' || d.kind === 'rate-out') && d.clipId) {
         if ((e.buttons & 1) === 0) { drag.current = null; return }
         d.moved = true
-        st.rateStretchClip(d.clipId, d.kind === 'rate-in' ? 'in' : 'out', timeFromEvent(e.clientX), { record: false })
+        st.rateStretchClip(d.clipId, d.kind === 'rate-in' ? 'in' : 'out', timeFromEvent(e.clientX), { record: false, free: e.altKey })
         return
       }
       if (d.kind === 'move' && d.clipId) {
@@ -484,6 +486,7 @@ export function Timeline({
       }
       drag.current = null
       setMarquee(null)
+      useApp.getState().setSnapGuide(null)
     }
 
     const onCancel = (e: PointerEvent) => {
@@ -495,6 +498,7 @@ export function Timeline({
       if (drag.current?.kind === 'move' && drag.current.moveIds) clearMovePreview(drag.current.moveIds)
       drag.current = null
       setMarquee(null)
+      useApp.getState().setSnapGuide(null)
       setLocalPlayheadScrubbing(false)
       pendingPh = null
     }
@@ -1034,6 +1038,13 @@ export function Timeline({
                 }}
               />
             )}
+            {snapGuide != null && (
+              <div
+                data-testid="tl-snap-guide"
+                className="absolute top-0 bottom-0 z-30 pointer-events-none"
+                style={{ left: xAt(snapGuide), width: 1, background: 'var(--accent)', boxShadow: '0 0 0 0.5px var(--accent)' }}
+              />
+            )}
             <PlayheadOverlay xAt={xAt} />
           </div>
         </div>
@@ -1060,6 +1071,8 @@ export function Timeline({
           onClose={() => setCtx(null)}
           items={[
             ...burnItem,
+            { id: 'align-start', label: '头对齐', disabled: selectedClipIds.length < 2, onClick: () => alignSelectedClips('start') },
+            { id: 'align-end', label: '尾对齐', disabled: selectedClipIds.length < 2, onClick: () => alignSelectedClips('end') },
             { id: 'link', label: '链接', disabled: selectedClipIds.length < 2, onClick: linkSelected },
             { id: 'unlink', label: '解链', disabled: !hasLink, onClick: unlinkSelected },
           ]}

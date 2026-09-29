@@ -103,8 +103,7 @@
     {
       "id": "fill", "type": "select", "group": "stroke", "label": "上色", "default": "wipe",
       "options": [
-        { "value": "wipe", "label": "轮廓扫色" },
-        { "value": "brush", "label": "沿笔刷色" },
+        { "value": "wipe", "label": "写完淡入颜色" },
         { "value": "none", "label": "只描线" }
       ]
     },

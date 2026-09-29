@@ -4,7 +4,7 @@ import { RotateCcw, Save, X } from 'lucide-react'
 import { useApp } from '../store'
 import { defaultAudio, defaultColor, defaultTransform, uid, type Clip } from '../types'
 import { resolveClipTransform } from '../lib/keyframeEval'
-import { applyChalkHand, CHALK_HAND_PRESET_ID } from '../lib/chalkHand'
+import { CHALK_HAND_PRESET_ID, hasChalkHand, setChalkHand } from '../lib/chalkHand'
 import {
   applyPresetKeyframes, defaultValues, findMotionPreset, MOTION_PRESETS, PRESET_GROUPS, presetDuration,
   resolveValues, type MotionPreset, type ParamValues, type PresetGroup,
@@ -110,8 +110,16 @@ export function MotionPresetLibrary() {
   const applyAnim: typeof applyAnimPreset = (id, values, opts) => {
     if (id !== CHALK_HAND_PRESET_ID) { applyAnimPreset(id, values, opts); return }
     const st = useApp.getState()
-    const n = applyChalkHand(st.selectedClipIds, { scale: Number(values.size) || 1 })
-    st.setToast(n ? `已给 ${n} 个元素加上粉笔手` : '粉笔手只能加在黑板手绘的元素书写片段上')
+    const n = setChalkHand(st.selectedClipIds, true, { scale: Number(values.size) || 1 })
+    st.setToast(n ? `已给 ${n} 个元素加上「粉笔手书写」入场` : '粉笔手书写只能加在黑板手绘元素的书写片段上')
+  }
+  const handOnIds = useApp((s) => {
+    const ids = new Set(s.selectedClipIds)
+    return s.seq().clips.filter((c) => ids.has(c.id) && hasChalkHand(c)).map((c) => c.id).join(',')
+  })
+  const removeHand = () => {
+    const n = setChalkHand(handOnIds.split(','), false)
+    useApp.getState().setToast(`已移除 ${n} 个元素的粉笔手`)
   }
   const hasSelection = useApp((s) => s.selectedClipIds.length > 0)
   const [group, setGroup] = useState<PresetGroup | 'mine'>('loop')
@@ -269,6 +277,11 @@ export function MotionPresetLibrary() {
               <Save size={13} />
             </button>
           </div>
+        )}
+        {preset.id === CHALK_HAND_PRESET_ID && handOnIds && (
+          <button type="button" className="btn btn-ghost" data-testid="motion-chalk-hand-remove" onClick={removeHand}>
+            移除选中元素的粉笔手
+          </button>
         )}
         {!hasSelection && (
           <p className="text-[11px] m-0" style={{ color: 'var(--text-muted)' }}>先在时间线选中画面片段；双击卡片直接应用，可撤销（Ctrl+Z）</p>

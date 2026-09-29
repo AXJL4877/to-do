@@ -1,4 +1,5 @@
 import type { FancyText } from '../types'
+import { withChalkHands } from './chalkHandLayers'
 /** 预览/导出共用的时间线描述（v1）。compose / export / Monitor 均消费此结构。 */
 export const EDIT_GRAPH_VERSION = 1 as const
 
@@ -165,6 +166,8 @@ export function buildEditGraph(input: {
   audioOnly?: boolean
   preset?: string
 }): EditGraph {
+  // 「粉笔手书写」入场动画在这里展开成手图层，导出 / 原生预览和画布预览一致
+  input = { ...input, ...withChalkHands(input.clips, input.tracks, input.media, input.settings) }
   const mediaById = new Map(input.media.map((m) => [m.id, m]))
   const settings =
     input.preset === '9x16'

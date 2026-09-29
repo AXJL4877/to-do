@@ -81,7 +81,7 @@ npm run skill -- fetch  <jobId> --out ./out --wait
 | 笔触 | `hand` | select | `chalk` `none` | chalk | 入轨时是否自动给每个元素套「粉笔手书写」入场动画（元素素材本身不带手） |
 | 笔触 | `handSize` | number | 0.6~1.4，步长 0.1 | 1 | 粉笔手图的大小，相对画面短边 |
 | 笔触 | `stroke` | select | `skeleton` `grid` | skeleton | 沿线条骨架书写 / 块状扫写 |
-| 笔触 | `fill` | select | `wipe` `brush` `none` | wipe | 轮廓扫色 / 沿笔刷色 / 只描线 |
+| 笔触 | `fill` | select | `wipe` `none` | wipe | 写完淡入颜色 / 只描线。淡入占元素书写时长的 1/10，这段不落笔尖、不出手 |
 | 输出 | `quality` | select | `high` `standard` `draft` | standard | VP9 CRF 24 / 31 / 38 |
 
 elements 夹具没有配音 / `scenes` / `drawSpeed` / `tail`，换成 `elements`（0~6，0 = AI 决定）、`duration`（3~30 秒）、`hold`（写完停留 0~5 秒）。
@@ -305,12 +305,10 @@ elements 夹具没有配音 / `scenes` / `drawSpeed` / `tail`，换成 `elements
 | `voice` | 音频轨 | 首次看到时的播放头处 |
 | 元素 j 的书写 WebM | 第 j+1 层视频轨（同一元素位共用一条轨），变换按 `crop` 放回默认排版位置 | `startMs` 起，长 `frames / fps` |
 | 元素 j 的定格 PNG | 同上 | 写完 ~ 本块 `endMs` |
-| 粉笔手（`hand` 参数不是 `none` 时） | 所有粉笔层之上 | 该元素落笔区间，位置关键帧沿 `tip` |
-
 - 画面片段都 `linkedId` 链接到配音片段，位置按配音片段当前的 `start / inPoint / speed` 换算，所以先把配音挪走、后到的黑板也会跟过去。
-- 每个片段在 `meta.source.key` 记产物键（`voice`、`s1/s1e1/draw`、`s1/s1e1/hold`、`s1/s1e1/draw/hand`），本机另记一份已入轨清单；重启、刷新、重复轮询都不会重复放，用户删掉的也不会被放回来。
+- 每个片段在 `meta.source.key` 记产物键（`voice`、`s1/s1e1/draw`、`s1/s1e1/hold`），本机另记一份已入轨清单；重启、刷新、重复轮询都不会重复放，用户删掉的也不会被放回来。
 - 同一元素的书写片段和定格片段是一个整体：拖动 / 缩放 / 旋转其中一段，另一段自动跟着改。
-- 粉笔手是动效模块「入场 → 粉笔手书写」预设（`src/lib/chalkHand.ts`）：选中元素的书写片段应用即可加上 / 重加（可调手大小），删掉手片段即去掉；元素的时间、位置、大小、关键帧一变，手的关键帧自动重算。
+- 粉笔手是书写片段自己的入场动画，**不是时间轴上的片段**：开关和大小记在 `meta.source.chalk.on / scale`（`hand` 参数不是 `none` 时入轨即打开）。动效模块「入场 → 粉笔手书写」预设（`src/lib/chalkHand.ts`）对选中的书写片段加上 / 改大小，同一处可移除。预览和导出在渲染时（`src/lib/chalkHandLayers.ts`，`renderProgramFrame` 与 `buildEditGraph` 都经过它）按 `tip` 和元素当下的时间、位置、大小、关键帧现算手的位置，画在元素所在轨正上方。老版本留在时间轴上的独立手片段（`meta.source.handFor`）打开项目时自动并回元素并删除。
 - 素材收进媒体库的「黑板手绘 <标题>」文件夹。
 
 完成清单在 §3.4 基础上去掉 `video still`，带 `audio`（配音 URL）、`tail`、`total`、`hand`、`scenes`、`narration`。配音是时间轴上独立的片段，对它右键「烧字幕」会直接按文案和逐字时间戳对时，不走语音识别。
