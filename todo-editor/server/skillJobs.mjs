@@ -274,7 +274,9 @@ async function executeNarratedJob(job, entry, ctx) {
   const narration = {
     text: req.prompt, duration, speaker: timing.speaker ?? null, audio: url(names.audio), timing: url(names.timing),
   }
-  const partial = params.partial = { voice: narration, tail, hand: null, total: null, scenes: [] }
+  // lanes：这次生成要占几条轨，编辑器按整组找接续位置；分镜出来前画面轨按每块元素上限算
+  const lanes = { audio: 1, video: pack.planner?.maxElements ?? 1 }
+  const partial = params.partial = { voice: narration, tail, hand: null, total: null, lanes, scenes: [] }
   saveParams(params)
 
   // 2. 分板 + 元素
@@ -293,6 +295,7 @@ async function executeNarratedJob(job, entry, ctx) {
   plan.scenes.reduce((n, s) => (offsets.push(n), n + s.elements.length), 0)
   const nEls = plan.scenes.reduce((n, s) => n + s.elements.length, 0)
   partial.total = { scenes: plan.scenes.length, elements: nEls }
+  lanes.video = Math.max(1, ...plan.scenes.map((s) => s.elements.length))
   saveParams(params)
 
   // 3. 生图 ∥ 逐板渲染
@@ -411,6 +414,7 @@ async function executeNarratedJob(job, entry, ctx) {
     audio: narration.audio,
     tail,
     total: partial.total,
+    lanes: partial.lanes,
     hand: partial.hand,
     scenes: partial.scenes,
     narration,

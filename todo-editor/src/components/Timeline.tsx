@@ -195,6 +195,15 @@ export function Timeline({
     return Math.max(0, timeAtX(x))
   }, [timeAtX])
 
+  /** 拖播放头：按住 Shift 吸到附近片段切口 / 标记（和拖片段对齐切口一样） */
+  const playheadTimeFromEvent = useCallback((e: { clientX: number; shiftKey: boolean }) => {
+    const st = useApp.getState()
+    const raw = timeFromEvent(e.clientX)
+    if (e.shiftKey) return st.snapPlayheadTime(raw, pxPerSec)
+    st.setSnapGuide(null)
+    return raw
+  }, [timeFromEvent, pxPerSec])
+
   const clearMovePreview = useCallback((ids: string[]) => {
     const body = bodyRef.current
     if (!body) return
@@ -276,6 +285,7 @@ export function Timeline({
       pendingPh = null
       setLocalPlayheadScrubbing(false)
       drag.current = null
+      useApp.getState().setSnapGuide(null)
       if (commit && t != null) {
         useApp.getState().setPlayhead(t, { exact: true })
         broadcastPlayheadSeek(t)
@@ -308,7 +318,7 @@ export function Timeline({
           return
         }
         d.moved = true
-        const t = timeFromEvent(e.clientX)
+        const t = playheadTimeFromEvent(e)
         // 拖动中只改 live 时钟（播放头/监视器订阅），不写 Zustand、不广播——避免掉帧
         setLivePlayhead(t)
         pendingPh = t
@@ -519,7 +529,7 @@ export function Timeline({
       window.removeEventListener('pointercancel', onCancel)
       window.removeEventListener('lostpointercapture', onCancel)
     }
-  }, [pxPerSec, timeFromEvent, trackFromEvent, clearMovePreview])
+  }, [pxPerSec, timeFromEvent, playheadTimeFromEvent, trackFromEvent, clearMovePreview])
 
   function onRulerClick(e: React.MouseEvent<HTMLDivElement>) {
     if (tool === 'hand') return
@@ -550,7 +560,7 @@ export function Timeline({
     // scrub 时停播，避免空格播放与拖拽抢 playhead
     if (useApp.getState().playing) useApp.setState({ playing: false })
     setLocalPlayheadScrubbing(true)
-    const t = timeFromEvent(e.clientX)
+    const t = playheadTimeFromEvent(e)
     setLivePlayhead(t)
     broadcastPlayheadSeek(t)
     useApp.getState().setPlayhead(t, { exact: true })

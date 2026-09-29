@@ -167,6 +167,24 @@ function pruneEmptyTracks(seq: Sequence): Sequence {
   return { ...seq, tracks }
 }
 
+/** 一次生成要占的轨：每类几条，从同类第一条轨往下数（音频第 1 层 = 第一条音频轨，画面第 k 层 = 从上往下第 k 条视频轨） */
+export type GroupLanes = { audio?: number; video?: number }
+
+/**
+ * 一次 AI 生成（可能是配音 + 好几层画面）整组入轨的起点：
+ * 它要占的那几条轨在播放头处都空着就从播放头放；有一条被占，整组接在这几条轨里最晚的切口后面。
+ * 整组各层从同一时刻开始、组内相对时间不变；不占的轨（比如整条背景音乐）不影响位置，也不另起一组新轨。
+ */
+export function appendGroupSlot(seq: Sequence, lanes: GroupLanes, at: number, duration: number) {
+  const pick = (kind: TrackKind, n = 0) => seq.tracks.filter((t) => t.kind === kind && !t.locked).slice(0, Math.max(0, n))
+  const tracks = { audio: pick('audio', lanes.audio), video: pick('video', lanes.video) }
+  const ids = new Set([...tracks.audio, ...tracks.video].map((t) => t.id))
+  const used = seq.clips.filter((c) => ids.has(c.trackId))
+  const free = !used.some((c) => rangeOverlap(at, duration, c.start, c.duration))
+  const start = free || !used.length ? at : Math.max(...used.map((c) => c.start + c.duration))
+  return { start, tracks: { audio: tracks.audio.map((t) => t.id), video: tracks.video.map((t) => t.id) } }
+}
+
 /** 在 [start, start+duration) 找无重叠的同 kind 轨道；没有则新建（绝对时间不变） */
 function resolveFreeTrack(seq: Sequence, kind: TrackKind, start: number, duration: number): { seq: Sequence; track: Track } {
   const candidates = seq.tracks.filter((t) => t.kind === kind && !t.locked)
@@ -867,6 +885,8 @@ export type AppStore = {
   alignSelectedClips: (edge: 'start' | 'end') => void
   snapGuide: number | null
   setSnapGuide: (at: number | null) => void
+  /** Shift 拖播放头：吸到附近片段切口 / 标记 / 0，并显示对齐线 */
+  snapPlayheadTime: (t: number, pxPerSec: number) => number
   /** 比率拉伸（R）：音视频改速度；图片 / 文字 / 纯色没有速度，退化成普通裁剪 */
   rateStretchClip: (id: string, edge: 'in' | 'out', t: number, opts?: { record?: boolean; free?: boolean; strong?: boolean; pxPerSec?: number }) => void
   /** 在时间轴上拖出入场/出场时长（转场、文字动画、淡化、透明度关键帧） */
@@ -973,6 +993,8 @@ export type SnapOpts = {
   strong?: boolean
   /** 拖动片段所在轨：离得近的轨上的切口优先 */
   trackId?: string
+  /** 拖的就是播放头：不把播放头自己当吸附目标 */
+  skipPlayhead?: boolean
 }
 
 const SNAP_PX = 8
@@ -996,7 +1018,8 @@ function snapClipEdge(
   const toPx = (sec: number) => (pps ? sec * pps : sec / Math.max(0.12, 8 / fps) * radiusPx)
   const rowOf = (id?: string) => seq.tracks.findIndex((tr) => tr.id === id)
   const row = rowOf(opts.trackId)
-  const targets: { t: number; row: number }[] = [0, playhead, ...seq.markers.map((m) => m.t)].map((x) => ({ t: x, row: -1 }))
+  const targets: { t: number; row: number }[] = [0, ...(opts.skipPlayhead ? [] : [playhead]), ...seq.markers.map((m) => m.t)]
+    .map((x) => ({ t: x, row: -1 }))
   for (const c of seq.clips) {
     if (exclude.has(c.id)) continue
     const r = rowOf(c.trackId)
@@ -2207,6 +2230,13 @@ export const useApp = create<AppStore>((set, get) => {
     snapGuide: null,
     setSnapGuide,
 
+    snapPlayheadTime(t, pxPerSec) {
+      const st = get()
+      const r = snapClipEdge(t, 0, new Set(), st.seq(), st.playhead, st.settings.fps, { pxPerSec, strong: true, skipPlayhead: true })
+      setSnapGuide(r.at)
+      return r.t
+    },
+
     snapTime(t) {
       const { settings } = get()
       return settings.snap ? Math.round(t * settings.fps) / settings.fps : t
@@ -2752,13 +2782,20 @@ export const useApp = create<AppStore>((set, get) => {
       for (const it of valid) {
         const m = media.find((x) => x.id === it.mediaId)!
         const tk: TrackKind = m.kind === 'audio' ? 'audio' : 'video'
-        let track = laneTracks(tk, (l) => l === it.lane).map(({ t }) => t)
-          .find((t) => !t.locked && !all().some((c) => c.trackId === t.id && rangeOverlap(it.start, it.duration, c.start, c.duration)))
+        const free = (t: Track) => !t.locked && !all().some((c) => c.trackId === t.id && rangeOverlap(it.start, it.duration, c.start, c.duration))
+        let track = laneTracks(tk, (l) => l === it.lane).map(({ t }) => t).find(free)
+        // 本层还没有轨：夹在本任务的上层（lane 更小）和下层（lane 更大）之间
+        const lower = laneTracks(tk, (l) => l > it.lane)[0]
+        const upper = laneTracks(tk, (l) => l < it.lane).at(-1)
+        if (!track) {
+          // 先复用这段时间空着的已有轨（比如上一个任务的轨），接着往下排，不每个任务都叠一组新轨
+          track = sequence.tracks.find((t, i) => t.kind === tk && free(t)
+            && (!upper || i > upper.i) && (!lower || i < lower.i)
+            && !all().some((c) => c.trackId === t.id && laneOf(c) != null))
+        }
         if (!track) {
           const fresh = newTrackOfKind(sequence, tk)
-          // 夹在本任务的上层（lane 更小）和下层（lane 更大）之间；本任务还没有轨道时放到同类轨最上面
-          const lower = laneTracks(tk, (l) => l > it.lane)[0]
-          const upper = laneTracks(tk, (l) => l < it.lane).at(-1)
+          // 本任务还没有轨道时放到同类轨最上面
           const tracks = lower ? [...sequence.tracks.slice(0, lower.i), fresh, ...sequence.tracks.slice(lower.i)]
             : upper ? [...sequence.tracks.slice(0, upper.i + 1), fresh, ...sequence.tracks.slice(upper.i + 1)]
               : insertTrack(sequence.tracks, fresh, 'before')

@@ -1,4 +1,7 @@
-import { useApp } from '../store'
+import { appendGroupSlot, useApp } from '../store'
+import type { ClipMeta } from '../types'
+
+type ClipSource = NonNullable<ClipMeta['source']>
 import { aiFetch, aiUrl } from './aiFetch'
 import { subtitleClipStyle, type SkillOutput, type SkillParams, type TtsOutput } from './aiSkills'
 import { isNarratedJob, syncNarratedJob, type NarratedJob } from './narratedTimeline'
@@ -66,14 +69,22 @@ function ensureVoiceMedia(j: ImportableAiJob, out: TtsOutput) {
   return addToAiFolder({ name: `${j.params.skill?.name ?? '配音'}_${j.id}.wav`, url: aiUrl(out.audio), kind: 'audio', duration: out.duration })
 }
 
-/** 配音放到播放头处的空闲音频轨 */
+/** 配音放到播放头处；那里被占着就接在音频轨最后一段后面 */
 export function placeTtsVoice(j: ImportableAiJob): boolean {
   const out = ttsOutput(j)
   const mediaId = out && ensureVoiceMedia(j, out)
   if (!mediaId) return false
-  const st = useApp.getState()
-  st.addClipFromMedia(mediaId, undefined, st.playhead, { preferFreeTrack: true, source: { type: 'ai', jobId: j.id, kind: j.kind } })
+  placeAppended(mediaId, 'audio', out.duration, { type: 'ai', jobId: j.id, kind: j.kind })
   return true
+}
+
+/** 单个产物也按整组接：视频连同拆出来的链接音频一起算，画面和声音从同一时刻开始 */
+function placeAppended(mediaId: string, kind: 'audio' | 'video' | 'image', duration: number, source: ClipSource) {
+  const st = useApp.getState()
+  const lanes = kind === 'audio' ? { audio: 1 } : kind === 'video' ? { video: 1, audio: 1 } : { video: 1 }
+  const slot = appendGroupSlot(st.seq(), lanes, st.playhead, duration)
+  const trackId = (kind === 'audio' ? slot.tracks.audio : slot.tracks.video)[0]
+  st.addClipFromMedia(mediaId, trackId, slot.start, { preferFreeTrack: true, source })
 }
 
 /**
@@ -195,10 +206,9 @@ async function importClaimed(j: ImportableAiJob, narrated: boolean): Promise<str
     return addedId
   }
   if (j.params.autoTimeline) {
-    useApp.getState().addClipFromMedia(addedId, undefined, undefined, {
-      preferFreeTrack: true,
-      source: { type: 'ai', jobId: j.id, kind: j.kind },
-    })
+    const m = useApp.getState().media.find((x) => x.id === addedId)
+    const dur = kind === 'image' ? st0.settings.stillDuration : (m?.duration || j.duration || j.params.duration || 5)
+    placeAppended(addedId, kind, dur, { type: 'ai', jobId: j.id, kind: j.kind })
   }
   useApp.getState().setToast(`AI ${label ?? (kind === 'video' ? '视频' : '图片')}已入库`)
   return addedId
