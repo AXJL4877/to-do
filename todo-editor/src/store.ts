@@ -1213,25 +1213,52 @@ function flushDragMove(get: () => AppStore, set: (p: Partial<AppStore> | ((s: Ap
   const primary = cur.clips.find((c) => c.id === (opts?.primaryId && setIds.has(opts.primaryId) ? opts.primaryId : ids[0]))
   const primaryKind = cur.tracks.find((t) => t.id === primary?.trackId)?.kind
 
-  let dest = trackId ? cur.tracks.find((t) => t.id === trackId) : undefined
-  // 拖离现有同 kind 轨道区域 → 自动新建轨道承接
-  if (opts?.spawn && primaryKind && (primaryKind === 'video' || primaryKind === 'audio' || primaryKind === 'subtitle')) {
-    const track = newTrackOfKind(cur, primaryKind)
-    cur = { ...cur, tracks: insertTrack(cur.tracks, track, opts.spawn) }
-    dest = track
+  // 多选整体换轨：同 kind 片段按主片段的轨道偏移一起平移，保持彼此上下间距；越界就在该 kind 段首/尾补轨
+  const retarget = new Map<string, string>()
+  if (primary && primaryKind) {
+    const kindTracks = cur.tracks.filter((t) => t.kind === primaryKind)
+    const pIdx = kindTracks.findIndex((t) => t.id === primary.trackId)
+    const destIdx = opts?.spawn === 'before' ? -1
+      : opts?.spawn === 'after' ? kindTracks.length
+        : kindTracks.findIndex((t) => t.id === trackId)
+    const same = cur.clips.filter((c) => setIds.has(c.id) && kindTracks.some((t) => t.id === c.trackId))
+    const srcIdx = (c: Clip) => kindTracks.findIndex((t) => t.id === c.trackId)
+    const canSpawn = primaryKind === 'video' || primaryKind === 'audio' || primaryKind === 'subtitle'
+    let delta = pIdx >= 0 && (opts?.spawn || destIdx >= 0) ? destIdx - pIdx : 0
+    if (!canSpawn && same.length) {
+      const srcLo = Math.min(...same.map(srcIdx)), srcHi = Math.max(...same.map(srcIdx))
+      delta = Math.max(-srcLo, Math.min(kindTracks.length - 1 - srcHi, delta))
+    }
+    if (delta && same.length) {
+      const idxOf = (c: Clip) => srcIdx(c) + delta
+      const lo = Math.min(...same.map(idxOf)), hi = Math.max(...same.map(idxOf))
+      const above = canSpawn ? Math.max(0, -lo) : 0
+      const below = canSpawn ? Math.max(0, hi - (kindTracks.length - 1)) : 0
+      let tracks = cur.tracks
+      const top: Track[] = [], bottom: Track[] = []
+      for (let i = 0; i < above; i++) top.push(newTrackOfKind({ ...cur, tracks }, primaryKind))
+      for (const t of [...top].reverse()) tracks = insertTrack(tracks, t, 'before')
+      for (let i = 0; i < below; i++) {
+        const t = newTrackOfKind({ ...cur, tracks }, primaryKind)
+        bottom.push(t)
+        tracks = insertTrack(tracks, t, 'after')
+      }
+      if (above || below) cur = { ...cur, tracks: primaryKind === 'subtitle' ? tracks : renameKindTracks(tracks) }
+      const lanes = [...top, ...kindTracks, ...bottom]
+      for (const c of same) {
+        const i = Math.max(0, Math.min(lanes.length - 1, idxOf(c) + above))
+        retarget.set(c.id, lanes[i].id)
+      }
+    }
   }
 
   const moved = cur.clips
     .filter((c) => setIds.has(c.id))
-    .map((c) => {
-      const src = cur.tracks.find((t) => t.id === c.trackId)
-      const canRetarget = !!(dest && src && dest.kind === src.kind)
-      return {
-        ...c,
-        start: Math.max(0, (origins[c.id] ?? c.start) + appliedDt),
-        trackId: canRetarget ? dest!.id : c.trackId,
-      }
-    })
+    .map((c) => ({
+      ...c,
+      start: Math.max(0, (origins[c.id] ?? c.start) + appliedDt),
+      trackId: retarget.get(c.id) ?? c.trackId,
+    }))
   const applied = applyMoveNoOverlap(cur, moved, setIds)
   const byId = new Map(applied.clips.map((c) => [c.id, c]))
   const nextSeq = enforceNoOverlap({

@@ -326,6 +326,29 @@ test('background preview yields while a text editor is focused and resumes after
   }
 })
 
+test('multi-clip drag across tracks keeps each clip on its own lane and stacking order', async () => {
+  const base: Sequence = { ...sequence, tracks: [track('v1'), track('v2'), track('v3'), track('v4'), track('a', { kind: 'audio' })],
+    clips: [clip('p', 'v2', 0, 2, '#ff0000'), clip('q', 'v3', 0, 2, '#00ff00')], workOut: 10 }
+  const lanes = () => {
+    const s = useApp.getState().seq()
+    const idx = (id: string) => s.tracks.findIndex(t => t.id === s.clips.find(c => c.id === id)!.trackId)
+    return { s, p: idx('p'), q: idx('q'), pt: s.clips.find(c => c.id === 'p')!.trackId, qt: s.clips.find(c => c.id === 'q')!.trackId }
+  }
+  const drag = async (primaryId: string, trackId?: string, spawn?: 'before' | 'after') => {
+    useApp.setState({ sequences: [base], activeSeqId: base.id, selectedClipIds: ['p', 'q'], playing: false })
+    useApp.getState().dragMoveClips(['p', 'q'], { p: 0, q: 0 }, 1, trackId, { primaryId, alt: true, spawn })
+    await frames()
+    return lanes()
+  }
+  let r = await drag('p', 'v1')
+  check(r.pt === 'v1' && r.qt === 'v2', `up: p=${r.pt} q=${r.qt}`)
+  r = await drag('q', 'v4')
+  check(r.pt === 'v3' && r.qt === 'v4', `down: p=${r.pt} q=${r.qt}`)
+  r = await drag('p', undefined, 'before')
+  check(r.pt !== r.qt && r.p < r.q && r.q - r.p === 1, `spawn above: p=${r.p} q=${r.q}`)
+  check(r.s.clips.every(c => c.start === 1), 'time offset not applied to the whole selection')
+})
+
 test('live playhead moves immediately without waiting for a React commit', () => {
   const container = document.createElement('div')
   document.body.append(container)

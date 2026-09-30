@@ -497,33 +497,34 @@ export function Timeline({
         const body = bodyRef.current
         if (body) {
           const dxPx = appliedDt * pxPerSec
-          const kindRows = (kind
-            ? st.seq().tracks.filter((t) => t.kind === kind)
-            : []
-          ).map((t) => body.querySelector(`[data-testid="track-row-${t.id}"]`) as HTMLElement | null)
-            .filter(Boolean) as HTMLElement[]
-          let destTop: number | undefined
-          if (place.spawn === 'before' && kindRows[0]) {
-            destTop = kindRows[0].getBoundingClientRect().top - kindRows[0].getBoundingClientRect().height
-          } else if (place.spawn === 'after' && kindRows.length) {
-            const last = kindRows[kindRows.length - 1]
-            destTop = last.getBoundingClientRect().bottom
-          } else if (trackId) {
-            destTop = body.querySelector(`[data-testid="track-row-${trackId}"]`)?.getBoundingClientRect().top
+          // 与 store.flushDragMove 一致：同 kind 片段按主片段的轨道偏移整体平移，保持上下间距
+          const kindTracks = kind ? st.seq().tracks.filter((t) => t.kind === kind) : []
+          const rowRects = kindTracks.map((t) =>
+            body.querySelector(`[data-testid="track-row-${t.id}"]`)?.getBoundingClientRect())
+          const laneOf = (id: string) => {
+            const tid = d.originTrackIds?.[id] ?? st.seq().clips.find((c) => c.id === id)?.trackId
+            return kindTracks.findIndex((t) => t.id === tid)
+          }
+          const pIdx = laneOf(d.clipId)
+          const destIdx = place.spawn === 'before' ? -1
+            : place.spawn === 'after' ? kindTracks.length
+              : kindTracks.findIndex((t) => t.id === trackId)
+          const delta = pIdx >= 0 && (place.spawn || destIdx >= 0) ? destIdx - pIdx : 0
+          const rowTop = (i: number) => {
+            const first = rowRects[0], last = rowRects[rowRects.length - 1]
+            if (!first || !last) return undefined
+            if (i < 0) return first.top + i * first.height
+            if (i >= rowRects.length) return last.bottom + (i - rowRects.length) * last.height
+            return rowRects[i]?.top
           }
           for (const id of ids) {
             const el = body.querySelector(`[data-testid="clip-${id}"]`) as HTMLElement | null
             if (!el) continue
-            const originTrackId = d.originTrackIds?.[id]
-            const clip = st.seq().clips.find((c) => c.id === id)
-            const srcTrack = st.seq().tracks.find((t) => t.id === (originTrackId ?? clip?.trackId))
+            const src = laneOf(id)
             let dyPx = 0
-            if (destTop != null && srcTrack && kind && srcTrack.kind === kind) {
-              const originRow = body.querySelector(
-                `[data-testid="track-row-${originTrackId ?? clip?.trackId}"]`,
-              ) as HTMLElement | null
-              const originTop = originRow?.getBoundingClientRect().top
-              if (originTop != null) dyPx = destTop - originTop
+            if (delta && src >= 0) {
+              const from = rowTop(src), to = rowTop(src + delta)
+              if (from != null && to != null) dyPx = to - from
             }
             el.style.zIndex = '40'
             el.style.transform = (dxPx || dyPx) ? `translate(${dxPx}px, ${dyPx}px)` : ''
