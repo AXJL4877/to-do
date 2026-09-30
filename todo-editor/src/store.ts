@@ -885,6 +885,8 @@ export type AppStore = {
   trimClip: (id: string, edge: 'in' | 'out', t: number, opts?: { record?: boolean; free?: boolean; strong?: boolean; pxPerSec?: number }) => void
   /** 选中片段头对齐（都挪到最早的开头）或尾对齐（都挪到最晚的结尾）；书写 + 定格按一个元素整体挪 */
   alignSelectedClips: (edge: 'start' | 'end') => void
+  /** Ctrl+←/→：播放头之后开始的片段（含字幕、音频）整体平移 frames 帧；跨着播放头的（底层背景）和锁定轨不动，播放头跟着走 */
+  nudgeAfterPlayhead: (dir: 1 | -1, frames?: number) => void
   snapGuide: number | null
   setSnapGuide: (at: number | null) => void
   /** Shift 拖播放头：吸到附近片段切口 / 标记 / 0，并显示对齐线 */
@@ -2214,6 +2216,37 @@ export const useApp = create<AppStore>((set, get) => {
           clips: s.clips.map((c) => byId.get(c.id) ?? c),
         })
       })
+    },
+
+    nudgeAfterPlayhead(dir, frames = 5) {
+      const s0 = get().seq()
+      const fps = get().settings.fps || 30
+      const ph = get().playhead
+      const eps = 0.25 / fps
+      const locked = new Set(s0.tracks.filter((t) => t.locked).map((t) => t.id))
+      const moving = new Set(s0.clips.filter((c) => !locked.has(c.trackId) && c.start >= ph - eps).map((c) => c.id))
+      if (!moving.size) { notify('播放头之后没有可平移的片段'); return }
+      let dt = dir * frames / fps
+      if (dir < 0) {
+        // 向左不能压到同轨不动的片段，也不能越过 0
+        let room = Infinity
+        for (const c of s0.clips) {
+          if (!moving.has(c.id)) continue
+          room = Math.min(room, c.start)
+          for (const o of s0.clips) {
+            const end = o.start + o.duration
+            if (!moving.has(o.id) && o.trackId === c.trackId && end <= c.start + eps) room = Math.min(room, c.start - end)
+          }
+        }
+        // 不足 5 帧时正好贴住前一段
+        if (room <= 1e-6) { notify('左侧已贴住，无法再平移'); return }
+        dt = -Math.min(-dt, room)
+      }
+      get().pushHistory()
+      const clips = s0.clips.map((c) => (moving.has(c.id) ? { ...c, start: Math.max(0, c.start + dt) } : c))
+      const end = Math.max(...clips.map((c) => c.start + c.duration))
+      patchSeq((sq) => (sq.id === s0.id ? { ...sq, clips, workOut: Math.max(sq.workOut, end) } : sq))
+      set({ playhead: Math.max(0, ph + dt), playing: false })
     },
 
     alignSelectedClips(edge) {

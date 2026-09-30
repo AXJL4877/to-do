@@ -349,6 +349,22 @@ test('multi-clip drag across tracks keeps each clip on its own lane and stacking
   check(r.s.clips.every(c => c.start === 1), 'time offset not applied to the whole selection')
 })
 
+test('Ctrl+arrow nudges clips after the playhead by 5 frames, leaving spanning background', () => {
+  const base: Sequence = { ...sequence, tracks: [track('v1'), track('v2'), track('sub', { kind: 'subtitle' }), track('a', { kind: 'audio' })],
+    clips: [clip('bg', 'v2', 0, 10, '#000000'), clip('before', 'v1', 0, 1.9, '#ff0000'), clip('el', 'v1', 2, 1, '#00ff00'),
+      clip('sub', 'sub', 3, 1, '#ffffff'), clip('vo', 'a', 2, 2, '#ffffff')], workOut: 10 }
+  useApp.setState({ sequences: [base], activeSeqId: base.id, playhead: 2, playing: false, settings: { ...settings, fps: 25 } })
+  const at = (id: string) => useApp.getState().seq().clips.find(c => c.id === id)!.start
+  useApp.getState().nudgeAfterPlayhead(1)
+  check(Math.abs(at('el') - 2.2) < 1e-9 && Math.abs(at('sub') - 3.2) < 1e-9 && Math.abs(at('vo') - 2.2) < 1e-9, 'right nudge did not move later clips by 5 frames')
+  check(at('bg') === 0 && at('before') === 0, 'spanning / earlier clips moved')
+  check(Math.abs(useApp.getState().playhead - 2.2) < 1e-9, 'playhead did not follow')
+  useApp.getState().nudgeAfterPlayhead(-1)
+  useApp.getState().nudgeAfterPlayhead(-1)
+  check(Math.abs(at('el') - 1.9) < 1e-9, `left nudge overlapped the earlier clip: ${at('el')}`)
+  check(at('bg') === 0, 'background moved on left nudge')
+})
+
 test('live playhead moves immediately without waiting for a React commit', () => {
   const container = document.createElement('div')
   document.body.append(container)

@@ -247,6 +247,11 @@ export default function App() {
         s.togglePlay()
       }
       if (e.key === 'l' || e.key === 'L') { s.togglePlay(); s.setPlayhead(s.playhead + 1 / s.settings.fps) }
+      if (mod && !e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+        e.preventDefault()
+        s.nudgeAfterPlayhead(e.key === 'ArrowLeft' ? -1 : 1)
+        return
+      }
       if (e.key === 'ArrowLeft') s.stepFrame(-1)
       if (e.key === 'ArrowRight') s.stepFrame(1)
       const hasSelection = s.selectedClipIds.length > 0
