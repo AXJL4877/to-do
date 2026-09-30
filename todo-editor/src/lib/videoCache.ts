@@ -128,7 +128,12 @@ export function holdVideoDecode() {
   for (const s of slots.values()) {
     try {
       s.resumeSync = true
-      if (!s.v.paused) s.v.pause()
+      if (!s.v.paused) {
+        // Keep the last continuously decoded image before cached playback takes over.
+        // The seek/loadeddata snapshot can be seconds older than this image.
+        capture(s)
+        s.v.pause()
+      }
     } catch { /* */ }
   }
 }
@@ -212,6 +217,7 @@ function capture(s: Slot): boolean {
   // 透明视频（WebM alpha）不会覆盖上一帧，不清会叠出残影
   ctx.clearRect(0, 0, dw, dh)
   ctx.drawImage(v, 0, 0, dw, dh)
+  s.settled = v.currentTime
   return sheet.width > 0
 }
 
@@ -230,8 +236,11 @@ function slotOf(clipId: string, m: MediaItem): Slot {
         cur.seekLatency = Math.min(SEEK_LEAD_MAX, cur.seekLatency * 0.5 + lat * 0.5)
         cur.seekAt = null
       }
-      if (capture(cur)) {
-        cur.settled = el.currentTime
+      // A playback seek may deliberately decode ahead of the playhead. Do not
+      // replace the fallback image with that future image before it is presented.
+      if (composePlay && clipId.startsWith('program:')) {
+        if (!el.seeking && el.readyState >= 2) cur.pending = null
+      } else if (capture(cur)) {
         cur.pending = null
       }
       if (clipId.startsWith('program:')) bump()
@@ -304,6 +313,7 @@ function pickHtmlFrame(s: Slot, t: number, step: number, opts?: VideoFrameOpts):
       const ahead = v.currentTime - q
       const drifted = Number.isNaN(v.currentTime) || ahead < -step * 8 || ahead > SEEK_LEAD_MAX + step * 8
       if (drifted || (s.resumeSync && Math.abs(ahead) > step)) {
+        if (!v.paused) capture(s)
         // seek 期间播放头继续走：目标前置一个实测 seek 耗时，落地时正好被播放头追上
         let target = drifted ? q + Math.min(SEEK_LEAD_MAX, s.seekLatency * rate) : q
         if (Number.isFinite(v.duration) && v.duration > 0) target = Math.min(target, Math.max(q, v.duration - step))
@@ -318,6 +328,11 @@ function pickHtmlFrame(s: Slot, t: number, step: number, opts?: VideoFrameOpts):
       if (!v.paused) try { v.pause() } catch { /* */ }
     } else if (v.paused && !v.seeking && v.readyState >= 2) {
       void v.play().catch(() => { /* */ })
+    }
+
+    if (waitForHead) {
+      markUnstable()
+      return still(s)
     }
 
     // 直接画 HTMLVideo；seeking 时优先上一帧，避免占位符闪白/闪黑

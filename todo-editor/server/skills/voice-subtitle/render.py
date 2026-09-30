@@ -78,6 +78,21 @@ def load_burner():
     return bs
 
 
+def retime_tts(timing: dict, audio: Path) -> None:
+    """老配音的 timing 可能是修复前生成的（时长偏短、尾句压扁），用 TTS_timeline 自己的校正在内存里修一遍"""
+    root = Path(os.environ.get("TTS_TIMELINE_ROOT", r"d:\video_Tools\TTS_timeline"))
+    if not (root / "tts_timeline" / "retime.py").exists():
+        log(f"找不到 TTS_timeline 的尾句校正（{root}），按原时间戳对时")
+        return
+    sys.path.insert(0, str(root))
+    from tts_timeline.retime import retime  # noqa: E402
+
+    try:
+        retime(timing, audio)
+    except Exception as e:  # noqa: BLE001
+        log(f"尾句校正跳过：{e}")
+
+
 def to_simplified(chars: list[tuple[str, float, float]]) -> list[tuple[str, float, float]]:
     """Whisper 中文常出繁体；有 zhconv 就转简体，没有就原样"""
     try:
@@ -189,9 +204,13 @@ def render(req: dict) -> dict:
         progress("语音识别", 1.0)
     else:
         progress("字幕对时", 0.05)
+        retime_tts(timing, audio)
         chars = [(str(c["text"]), float(c["start"]), float(c["end"])) for c in timing.get("chars") or []]
         audio_dur = float(timing.get("duration") or 0) or bs.ffprobe_duration(audio)
         silences = bs.detect_silences(audio, work)
+        # TTS 逐字时间戳和文案同源，直接逐字对齐；burn-subtitles 按气口分窗重分文案、把末尾十几个字拉到音频尾，
+        # 是给 ASR 纠偏用的，用在 TTS 上反而会让后半段和尾句漂移
+        bs.align_chars_to_times_smart = lambda narr, asr, dur, _silences=None: bs.align_chars_to_times(narr, asr, dur)
     events = bs.align_chunks(script, chars, audio_dur, silences)
     no_kw = bs.NO_KEYWORDS or bs.MAX_KEYWORDS_PER_CUE <= 0
     cues = [

@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from 'react'
+import { useLayoutEffect, useRef, useSyncExternalStore } from 'react'
 import { getLivePlayhead, subscribeLivePlayhead } from '../lib/livePlayhead'
 
 type Props = {
@@ -7,13 +7,20 @@ type Props = {
 
 /** 始终读 live 时钟；纯展示，不可单独拖（时间轴空白处点击/拖动才改播放头） */
 export function PlayheadOverlay({ xAt }: Props) {
-  const live = useSyncExternalStore(subscribeLivePlayhead, getLivePlayhead, getLivePlayhead)
-  const left = xAt(live)
+  const ref = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const update = () => {
+      if (ref.current) ref.current.style.transform = `translate3d(${xAt(getLivePlayhead()) - 1}px,0,0)`
+    }
+    update()
+    return subscribeLivePlayhead(update)
+  }, [xAt])
 
   return (
     <div
+      ref={ref}
       className="absolute top-0 bottom-0 z-30 pointer-events-none will-change-transform"
-      style={{ transform: `translate3d(${left - 1}px,0,0)`, width: 2 }}
+      style={{ left: 0, width: 2 }}
       data-testid="playhead-layer"
     >
       <div

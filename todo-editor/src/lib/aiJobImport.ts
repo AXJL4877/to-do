@@ -6,6 +6,7 @@ import { aiFetch, aiUrl } from './aiFetch'
 import { subtitleClipStyle, type SkillOutput, type SkillParams, type TtsOutput } from './aiSkills'
 import { isNarratedJob, syncNarratedJob, type NarratedJob } from './narratedTimeline'
 import { isStoreAuthority } from './storeSync'
+import { narrationJobId } from '../../shared/ttsNarration.mjs'
 
 export type ImportableAiJob = {
   id: string
@@ -91,10 +92,8 @@ function placeAppended(mediaId: string, kind: 'audio' | 'video' | 'image', durat
  * 技能任务产物的 URL → 任务 id：配音 `<jobId>_voice.wav`、成片 `<jobId>.webm/.mp4`（黑板手绘带旁白时配音从成片 0 秒开始）。
  * 只说明「可能带配音」，有没有文案和时间戳要看任务的 output.narration。
  */
-const NARRATION_MEDIA_RE = /\/ai-generated\/(s_[A-Za-z0-9]+_[A-Za-z0-9]+)(?:_voice\.wav|\.webm|\.mp4)(?:[?#].*)?$/
-
 export function narrationJobIdOfUrl(url: string | undefined) {
-  return url ? NARRATION_MEDIA_RE.exec(url)?.[1] ?? null : null
+  return narrationJobId(url)
 }
 
 /**

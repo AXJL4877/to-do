@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { useApp } from '../store'
-import { stepZoom } from '../lib/timelineZoom'
+import { wheelZoom } from '../lib/timelineZoom'
 import { setLivePlayhead } from '../lib/livePlayhead'
 import { broadcastPlayheadSeek } from '../lib/storeSync'
 import { PrKeyframeRow, livePropValue } from './PrKeyframeRow'
@@ -159,7 +159,7 @@ export function KeyframeEditor({ scrollRef }: Props) {
     const onWheel = (e: WheelEvent) => {
       if (e.altKey) {
         e.preventDefault()
-        setTimelineZoom(stepZoom(zoomRef.current, e.deltaY < 0 ? 1 : -1, 1.15))
+        if (e.deltaY) setTimelineZoom(wheelZoom(zoomRef.current, e.deltaY))
       } else if (e.ctrlKey || e.shiftKey) {
         e.preventDefault()
         const tl = scrollRef.current

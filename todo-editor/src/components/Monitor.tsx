@@ -8,13 +8,15 @@ import {
   ensurePreviewFingerprint,
   getProgramPreviewCache,
   presentCachedProgramFrame,
-  previewFingerprint,
+  fingerprintOf,
+  markPreviewInteractive,
   readAheadFromDisk,
   stableCacheSize,
 } from '../lib/previewCache'
 import { getPreviewSize, hitTestMotionPathKf, hitTestProgramClips, renderProgramFrame, renderProgramOverlay, renderSourceFrame } from '../lib/monitorDraw'
 import { cancelComposeUpgrade } from '../lib/composePreview'
-import { quantizeAbsT } from '../lib/programPlayer'
+import { pictureClipsAt } from '../lib/programPlayer'
+import { indexClips, indexMedia } from '../lib/sequenceIndex'
 import { clipHalfNorm, snapWithGuides, type SnapGuide } from '../lib/monitorSnap'
 import { useImageCache } from '../hooks/useImageCache'
 import { getLivePlayhead, setLivePlayhead, subscribeLivePlayhead } from '../lib/livePlayhead'
@@ -72,6 +74,7 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program' 
   const [display, setDisplay] = useState({ w: 0, h: 0 })
   const [viewZoom, setViewZoom] = useState(1)
   const [viewPan, setViewPan] = useState({ x: 0, y: 0 })
+  const viewZoomRef = useRef(1)
   const viewPanRef = useRef({ x: 0, y: 0 })
   const notifiedCache = useRef('')
   const paintRef = useRef<(
@@ -83,7 +86,6 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program' 
   const media = useApp((s) => s.media)
   const settings = useApp((s) => s.settings)
   const prefs = useApp((s) => s.prefs)
-  const playhead = useApp((s) => s.playhead)
   const playing = useApp((s) => s.playing)
   const loop = useApp((s) => s.loop)
   const sourceMediaId = useApp((s) => s.sourceMediaId)
@@ -170,7 +172,8 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program' 
     if (!isProgram || !nativeOn) return
     void pushTimeline()
     void seekToPlayhead()
-  }, [isProgram, nativeOn, activeSeqId, sequences, media, playhead, playing])
+    return useApp.subscribe((s, p) => { if (s.playhead !== p.playhead) void seekToPlayhead() })
+  }, [isProgram, nativeOn, activeSeqId, sequences, media, playing])
 
   useEffect(() => {
     if (!isSeq) return
@@ -180,8 +183,20 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program' 
       if (!(e.ctrlKey || e.metaKey)) return
       e.preventDefault()
       e.stopPropagation()
+      const rect = el.getBoundingClientRect()
+      const cx = e.clientX - rect.left - el.clientWidth / 2
+      const cy = e.clientY - rect.top - el.clientHeight / 2
+      const z = viewZoomRef.current
       const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1
-      setViewZoom((z) => Math.min(4, Math.max(0.25, Math.round(z * factor * 100) / 100)))
+      const next = Math.min(4, Math.max(0.25, Math.round(z * factor * 100) / 100))
+      if (next === z || !z) return
+      const k = next / z
+      const p = viewPanRef.current
+      const pan = { x: cx * (1 - k) + p.x * k, y: cy * (1 - k) + p.y * k }
+      viewZoomRef.current = next
+      viewPanRef.current = pan
+      setViewZoom(next)
+      setViewPan(pan)
     }
     const blockMid = (e: MouseEvent) => {
       if (e.button === 1) e.preventDefault()
@@ -197,8 +212,9 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program' 
   }, [isSeq])
 
   function resetView() {
-    setViewZoom(1)
+    viewZoomRef.current = 1
     viewPanRef.current = { x: 0, y: 0 }
+    setViewZoom(1)
     setViewPan({ x: 0, y: 0 })
   }
 
@@ -228,6 +244,28 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program' 
     isSeq && viewDirty
       ? `translate(${viewPan.x}px, ${viewPan.y}px) scale(${viewZoom})`
       : undefined
+
+  const autoCacheTimer = useRef(0)
+  const scheduleAutoCache = useCallback((frame: number) => {
+    window.clearTimeout(autoCacheTimer.current)
+    autoCacheTimer.current = window.setTimeout(() => {
+      autoCacheTimer.current = 0
+      const st = useApp.getState()
+      if (st.playing) return
+      const seq = st.sequences.find((q) => q.id === st.activeSeqId) ?? st.sequences[0]
+      autoCacheProgramFrames({
+        cache: getProgramPreviewCache(),
+        fromFrame: frame,
+        fps: Math.max(1, st.settings.fps),
+        seq,
+        media: st.media,
+        settings: st.settings,
+        imgCache: imgCache.current,
+        maxEdge: st.prefs.previewCacheMaxEdge ?? 720,
+      })
+    }, 180)
+  }, [imgCache])
+  useEffect(() => () => window.clearTimeout(autoCacheTimer.current), [])
 
   const paint = useCallback((t: number, transformOverrides?: Record<string, { x: number; y: number }>, opts?: { playing?: boolean; guides?: SnapGuide[] }) => {
     const canvas = canvasRef.current
@@ -274,40 +312,51 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program' 
       )
     }
 
-    // 静止时后台自动缓存整条序列；播放中缓存会 seek 解码槽导致闪一下
-    if (!st.playing && !opts?.playing) {
-      autoCacheProgramFrames({
-        cache: getProgramPreviewCache(),
-        fromFrame: frame,
-        fps,
-        seq,
-        media,
-        settings,
-        imgCache: imgCache.current,
-        maxEdge,
-      })
-    }
-  }, [mode, isProgram, isEdit, drivesClock, media, settings, sourceMediaId, sourceIn, sourceOut, preview.w, preview.h, imgCache, imgVersion, selectedClipIds, autoKeyframe])
+    // 静止时后台自动缓存整条序列；拖播放头/缩放时先别开，合成会和预览抢主线程
+    if (!st.playing && !opts?.playing) scheduleAutoCache(frame)
+  }, [mode, isProgram, isEdit, drivesClock, media, settings, sourceMediaId, sourceIn, sourceOut, preview.w, preview.h, imgCache, imgVersion, selectedClipIds, autoKeyframe, scheduleAutoCache])
 
   paintRef.current = paint
 
+  // 拖播放头/连续改动时一帧只画一次，指针事件比刷新率密得多
+  const paintRaf = useRef(0)
+  const paintT = useRef(0)
+  const schedulePaint = useCallback((t: number) => {
+    markPreviewInteractive()
+    paintT.current = t
+    if (paintRaf.current) return
+    paintRaf.current = requestAnimationFrame(() => {
+      paintRaf.current = 0
+      paintRef.current(paintT.current)
+    })
+  }, [])
+  const cancelScheduledPaint = useCallback(() => {
+    cancelAnimationFrame(paintRaf.current)
+    paintRaf.current = 0
+  }, [])
+  useEffect(() => cancelScheduledPaint, [cancelScheduledPaint])
+
+  // 只订阅 store.playhead 变化，不让整个监视器随播放头重渲染；勿在媒体缓存 bump 时把 live 拽回旧时间
   useEffect(() => {
     if (use3d) return
     if (isSeq && playing) return
-    if (dragRef.current) return
-    // 仅当 store.playhead 本身变化时同步 live；勿在媒体缓存 bump 时把 live 拽回旧时间
-    localPlayhead.current = playhead
-    setLivePlayhead(playhead)
-    paint(playhead)
-  }, [playhead, playing, mode, use3d, isSeq]) // eslint-disable-line react-hooks/exhaustive-deps
+    const sync = (t: number) => {
+      if (dragRef.current) return
+      localPlayhead.current = t
+      setLivePlayhead(t)
+      schedulePaint(t)
+    }
+    sync(useApp.getState().playhead)
+    return useApp.subscribe((s, p) => { if (s.playhead !== p.playhead) sync(s.playhead) })
+  }, [playing, mode, use3d, isSeq, schedulePaint])
 
   // 素材/选中/序列变化：按当前 live 重画，不改播放头
   useEffect(() => {
     if (use3d) return
     if (isSeq && playing) return
     if (dragRef.current) return
-    paint(getLivePlayhead())
-  }, [paint, selectedClipIds, sequences, activeSeqId, autoKeyframe, use3d, mode, playing, isSeq])
+    schedulePaint(getLivePlayhead())
+  }, [paint, selectedClipIds, sequences, activeSeqId, autoKeyframe, use3d, mode, playing, isSeq, schedulePaint])
 
   // 跟 live：非驱动钟的编辑窗在双窗播放时也要画；驱动钟自己在 tick 里画
   useEffect(() => {
@@ -317,15 +366,20 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program' 
       if (dragRef.current) return
       const t = getLivePlayhead()
       if (Math.abs(t - localPlayhead.current) < 1e-4) return
+      const fps = Math.max(1, useApp.getState().settings.fps)
+      if (playing && Math.floor(t * fps) === Math.floor(localPlayhead.current * fps)) return
       localPlayhead.current = t
-      paint(t)
+      schedulePaint(t)
     })
-  }, [use3d, isSeq, playing, paint, drivesClock])
+  }, [use3d, isSeq, playing, drivesClock, schedulePaint])
 
   // 墙钟播放环：仅 drivesClock 的窗负责推进 + 音频
   // 注意：deps 不含 media/paint——代理生成会换 media 引用，重建循环会闪一下并重置墙钟
   useEffect(() => {
     if (use3d || !drivesClock || !playing) return
+    window.clearTimeout(autoCacheTimer.current)
+    autoCacheTimer.current = 0
+    cancelScheduledPaint()
     cancelPrefetchProgramFrames()
     cancelComposeUpgrade()
     void stopNativePlaySession()
@@ -342,14 +396,14 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program' 
     const maxEdge = st0.prefs.previewCacheMaxEdge ?? 720
     const { w: cw0, h: ch0 } = stableCacheSize(settings, maxEdge)
     const seq0 = st0.sequences.find((q) => q.id === st0.activeSeqId) ?? st0.sequences[0]
-    ensurePreviewFingerprint(cache, previewFingerprint(seq0, settings, cw0, ch0), cw0, ch0)
+    ensurePreviewFingerprint(cache, fingerprintOf(seq0, settings, cw0, ch0, st0.media), cw0, ch0)
     notifiedCache.current = ''
     localPlayhead.current = tStart
     setLivePlayhead(tStart)
     broadcastLivePlayhead(tStart)
 
     const seqEnd = (seq: typeof st0.sequences[0]) =>
-      Math.max(seq.workOut, ...seq.clips.map((c) => c.start + c.duration), 5)
+      Math.max(seq.workOut, indexClips(seq.clips).end, 5)
 
     const tick = (now: number) => {
       const st = useApp.getState()
@@ -361,7 +415,8 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program' 
       }
 
       const end = seqEnd(seq)
-      let t = quantizeAbsT(tStart + (now - wall0) / 1000, fps)
+      // UI clock follows the display refresh rate; only video presentation is frame-quantized.
+      let t = tStart + (now - wall0) / 1000
       if (t >= end) {
         if (st.loop) {
           const span = Math.max(0.05, end - seq.workIn)
@@ -386,13 +441,8 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program' 
       if (frame !== lastShown) {
         lastShown = frame
         const mediaNow = st.media
-        const videoIds = new Set(mediaNow.filter((m) => m.kind === 'video').map((m) => m.id))
-        const videoClips = seq.clips.filter((c) => {
-          if (!c.enabled || !c.mediaId || !videoIds.has(c.mediaId)) return false
-          if (t < c.start || t >= c.start + c.duration) return false
-          const track = seq.tracks.find((tr) => tr.id === c.trackId)
-          return !!track && !track.hidden && track.kind !== 'audio'
-        })
+        const mediaById = indexMedia(mediaNow)
+        const videoClips = pictureClipsAt(seq, t).filter(c => mediaById.get(c.mediaId ?? '')?.kind === 'video')
         for (const c of videoClips) if (c.mediaId) proxyWanted.add(c.mediaId)
         const dw = preview.w
         const dh = preview.h
@@ -408,10 +458,10 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program' 
             st.selectedClipIds, st.autoKeyframe,
           )
         }
-        setLivePlayhead(t)
         if (frame % 2 === 0) broadcastLivePlayhead(t)
       }
 
+      setLivePlayhead(t)
       syncProgramAudio(seq, st.media, t, true, fps)
       raf = requestAnimationFrame(tick)
     }
@@ -811,8 +861,8 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program' 
       <div className={clsx('flex items-center justify-center gap-1 border-t shrink-0', compact ? 'px-1 py-1' : 'px-2 py-1.5')} style={{ borderColor: 'var(--border-ink)' }}>
         {mode === 'source' ? (
           <>
-            <button className={clsx(compact ? 'btn btn-ink text-[10px] h-6 px-2' : 'btn btn-ink')} data-testid="btn-mark-in" onClick={() => setSourceIO(playhead, sourceOut)} title="入点 (I)">I</button>
-            <button className={clsx(compact ? 'btn btn-ink text-[10px] h-6 px-2' : 'btn btn-ink')} data-testid="btn-mark-out" onClick={() => setSourceIO(sourceIn, Math.max(sourceIn + 0.1, playhead))} title="出点 (O)">O</button>
+            <button className={clsx(compact ? 'btn btn-ink text-[10px] h-6 px-2' : 'btn btn-ink')} data-testid="btn-mark-in" onClick={() => setSourceIO(useApp.getState().playhead, sourceOut)} title="入点 (I)">I</button>
+            <button className={clsx(compact ? 'btn btn-ink text-[10px] h-6 px-2' : 'btn btn-ink')} data-testid="btn-mark-out" onClick={() => setSourceIO(sourceIn, Math.max(sourceIn + 0.1, useApp.getState().playhead))} title="出点 (O)">O</button>
             {!compact && <button className="btn btn-primary" data-testid="btn-three-point" onClick={threePointEdit}>三点剪辑</button>}
           </>
         ) : (

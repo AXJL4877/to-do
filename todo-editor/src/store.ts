@@ -16,6 +16,7 @@ import { aiFetch } from './lib/aiFetch'
 import { setLivePlayhead } from './lib/livePlayhead'
 import { reviveMediaList, parseDesktopMedia, pathToFileUrl } from './lib/importFiles'
 import { buildEditGraph } from './lib/editGraph'
+import { tidyTimeline } from './lib/timelineTidy'
 
 function sampleAt(c: Clip, prop: string, localT: number): number {
   const tr = c.transform
@@ -834,6 +835,7 @@ export type AppStore = {
   addMarker: (label?: string) => void
   setWorkArea: (a: number, b: number) => void
   toggleTrack: (id: string, key: 'locked' | 'muted' | 'solo' | 'hidden') => void
+  tidyTimeline: () => void
   setTrackHeight: (id: string, height: number) => void
   addTrack: (kind: TrackKind) => void
   matchFrame: () => void
@@ -2962,6 +2964,16 @@ export const useApp = create<AppStore>((set, get) => {
     },
 
     setWorkArea(a, b) { patchSeq((s) => ({ ...s, workIn: a, workOut: b })) },
+
+    tidyTimeline() {
+      const current = get().seq()
+      const next = tidyTimeline(current, get().media, get().settings)
+      if (next === current) { notify('时间轴已整齐，没有可安全合并的轨道'); return }
+      get().pushHistory()
+      patchSeq(() => next)
+      const moved = next.clips.filter((c, i) => c.trackId !== current.clips[i].trackId).length
+      notify(`已整理：移动 ${moved} 个片段，减少 ${current.tracks.length - next.tracks.length} 条轨道，可撤销`)
+    },
 
     toggleTrack(id, key) {
       patchSeq((s) => ({

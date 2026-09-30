@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { memo, useCallback, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ArrowDown, ArrowUp, Blocks, Loader2, Plus, Sparkles, Trash2, Wand2, X } from 'lucide-react'
 import clsx from 'clsx'
@@ -89,7 +89,7 @@ export function SkillParamControl({ p, values, onChange }: {
 }
 
 /** 书写时间轴：每个元素一段，尾部停留单独一段 */
-export function SkillTimingBar({ plan, duration, hold }: { plan: SkillPlan; duration: number; hold: number }) {
+export const SkillTimingBar = memo(function SkillTimingBar({ plan, duration, hold }: { plan: SkillPlan; duration: number; hold: number }) {
   const timings = estimateTimings(plan, duration, hold)
   const total = duration * 1000 || 1
   return (
@@ -111,7 +111,7 @@ export function SkillTimingBar({ plan, duration, hold }: { plan: SkillPlan; dura
       )}
     </div>
   )
-}
+})
 
 export function SkillStudio(props: Props) {
   const { pack, prompt, setPrompt, params, setParams, plan, setPlan, autoTimeline, setAutoTimeline, onSubmit, onClose } = props
@@ -136,37 +136,17 @@ export function SkillStudio(props: Props) {
     return [...out.entries()]
   }, [pack, countParam])
   const preview = pack.previews[alpha ? 1 : 0] ?? pack.previews[0]
-  const planValid = !plan || plan.elements.every((e) => e.draw.trim())
+  const planValid = useMemo(() => !plan || plan.elements.every((e) => e.draw.trim()), [plan])
   const canSubmit = !!prompt.trim() && planValid && !submitting && !planning
 
   function setParam(id: string, v: string | number) {
     setParams({ ...params, [id]: v })
   }
 
-  function writePlan(next: SkillPlan | null) {
+  const writePlan = useCallback((next: SkillPlan | null) => {
     setPlan(next)
     if (countParam) setParams({ ...params, [countParam]: next ? next.elements.length : 0 })
-  }
-
-  function patchElement(i: number, patch: Partial<SkillElement>) {
-    if (!plan) return
-    writePlan({ ...plan, elements: plan.elements.map((e, j) => (j === i ? { ...e, ...patch } : e)) })
-  }
-
-  function moveElement(i: number, d: -1 | 1) {
-    if (!plan) return
-    const els = [...plan.elements]
-    const j = i + d
-    if (j < 0 || j >= els.length) return
-    ;[els[i], els[j]] = [els[j], els[i]]
-    writePlan({ ...plan, elements: els })
-  }
-
-  function removeElement(i: number) {
-    if (!plan) return
-    const els = plan.elements.filter((_, j) => j !== i)
-    writePlan(els.length ? { ...plan, elements: els } : null)
-  }
+  }, [countParam, params, setParams, setPlan])
 
   function addElement() {
     const base = plan ?? { title: prompt.slice(0, 12), notes: '', elements: [] }
@@ -280,48 +260,7 @@ export function SkillStudio(props: Props) {
                   <SkillParamControl p={countParamDef} values={params} onChange={setParam} />
                 </div>
               )}
-              {plan?.elements.map((el, i) => (
-                <div key={i} className="skill-element" data-testid={`skill-element-${i}`}>
-                  <span className="skill-element-index" style={{ background: ELEMENT_COLORS[i % ELEMENT_COLORS.length] }}>{i + 1}</span>
-                  <div className="flex-1 min-w-0 flex flex-col gap-1.5">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <input
-                        className="skill-element-label"
-                        value={el.label}
-                        maxLength={12}
-                        data-testid={`skill-element-label-${i}`}
-                        onChange={(e) => patchElement(i, { label: e.target.value })}
-                      />
-                      <div className="skill-seg">
-                        {(Object.keys(ROLE_LABELS) as SkillRole[]).map((r) => (
-                          <button key={r} type="button" className={clsx(el.role === r && 'active')} onClick={() => patchElement(i, { role: r })}>
-                            {ROLE_LABELS[r]}
-                          </button>
-                        ))}
-                      </div>
-                      <label className="skill-element-weight" title="书写时长权重">
-                        时长
-                        <input type="range" min={0.5} max={3} step={0.1} value={el.weight} onChange={(e) => patchElement(i, { weight: Number(e.target.value) })} />
-                        <span>{el.weight.toFixed(1)}</span>
-                      </label>
-                      <span className="ml-auto flex items-center">
-                        <button type="button" className="icon-btn" style={{ width: 24, height: 24 }} title="上移" disabled={i === 0} onClick={() => moveElement(i, -1)}><ArrowUp size={12} /></button>
-                        <button type="button" className="icon-btn" style={{ width: 24, height: 24 }} title="下移" disabled={i === plan.elements.length - 1} onClick={() => moveElement(i, 1)}><ArrowDown size={12} /></button>
-                        <button type="button" className="icon-btn" style={{ width: 24, height: 24 }} title="删除" data-testid={`skill-element-del-${i}`} onClick={() => removeElement(i)}><Trash2 size={12} /></button>
-                      </span>
-                    </div>
-                    <textarea
-                      rows={2}
-                      className={clsx('skill-textarea', !el.draw.trim() && 'is-invalid')}
-                      maxLength={240}
-                      placeholder="画面描述"
-                      data-testid={`skill-element-draw-${i}`}
-                      value={el.draw}
-                      onChange={(e) => patchElement(i, { draw: e.target.value })}
-                    />
-                  </div>
-                </div>
-              ))}
+              {plan && <SkillPlanElements plan={plan} writePlan={writePlan} />}
               {(plan?.elements.length ?? 0) < max && (
                 <button type="button" className="skill-element-add" data-testid="skill-element-add" onClick={addElement}>
                   <Plus size={13} />添加元素
@@ -369,3 +308,71 @@ export function SkillStudio(props: Props) {
     document.body,
   )
 }
+
+// Prompt edits must not reconcile the complete element editor and timing bar.
+const SkillPlanElements = memo(function SkillPlanElements({ plan, writePlan }: { plan: SkillPlan; writePlan: (next: SkillPlan | null) => void }) {
+  function patchElement(i: number, patch: Partial<SkillElement>) {
+    if (!plan) return
+    writePlan({ ...plan, elements: plan.elements.map((e, j) => (j === i ? { ...e, ...patch } : e)) })
+  }
+
+  function moveElement(i: number, d: -1 | 1) {
+    if (!plan) return
+    const els = [...plan.elements]
+    const j = i + d
+    if (j < 0 || j >= els.length) return
+    ;[els[i], els[j]] = [els[j], els[i]]
+    writePlan({ ...plan, elements: els })
+  }
+
+  function removeElement(i: number) {
+    if (!plan) return
+    const els = plan.elements.filter((_, j) => j !== i)
+    writePlan(els.length ? { ...plan, elements: els } : null)
+  }
+
+  return <>
+    {plan?.elements.map((el, i) => (
+      <div key={i} className="skill-element" data-testid={`skill-element-${i}`}>
+        <span className="skill-element-index" style={{ background: ELEMENT_COLORS[i % ELEMENT_COLORS.length] }}>{i + 1}</span>
+        <div className="flex-1 min-w-0 flex flex-col gap-1.5">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <input
+              className="skill-element-label"
+              value={el.label}
+              maxLength={12}
+              data-testid={`skill-element-label-${i}`}
+              onChange={(e) => patchElement(i, { label: e.target.value })}
+            />
+            <div className="skill-seg">
+              {(Object.keys(ROLE_LABELS) as SkillRole[]).map((r) => (
+                <button key={r} type="button" className={clsx(el.role === r && 'active')} onClick={() => patchElement(i, { role: r })}>
+                  {ROLE_LABELS[r]}
+                </button>
+              ))}
+            </div>
+            <label className="skill-element-weight" title="书写时长权重">
+              时长
+              <input type="range" min={0.5} max={3} step={0.1} value={el.weight} onChange={(e) => patchElement(i, { weight: Number(e.target.value) })} />
+              <span>{el.weight.toFixed(1)}</span>
+            </label>
+            <span className="ml-auto flex items-center">
+              <button type="button" className="icon-btn" style={{ width: 24, height: 24 }} title="上移" disabled={i === 0} onClick={() => moveElement(i, -1)}><ArrowUp size={12} /></button>
+              <button type="button" className="icon-btn" style={{ width: 24, height: 24 }} title="下移" disabled={i === plan.elements.length - 1} onClick={() => moveElement(i, 1)}><ArrowDown size={12} /></button>
+              <button type="button" className="icon-btn" style={{ width: 24, height: 24 }} title="删除" data-testid={`skill-element-del-${i}`} onClick={() => removeElement(i)}><Trash2 size={12} /></button>
+            </span>
+          </div>
+          <textarea
+            rows={2}
+            className={clsx('skill-textarea', !el.draw.trim() && 'is-invalid')}
+            maxLength={240}
+            placeholder="画面描述"
+            data-testid={`skill-element-draw-${i}`}
+            value={el.draw}
+            onChange={(e) => patchElement(i, { draw: e.target.value })}
+          />
+        </div>
+      </div>
+    ))}
+  </>
+})

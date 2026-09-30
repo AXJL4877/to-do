@@ -145,24 +145,66 @@ async function pruneOldKeys() {
   }
 }
 
-/** 切换当前内容键：异步读回该键已落盘的帧号 */
-export function useDiskKey(key: string): Promise<void> {
+/** 旧键上还没挪完的帧：连续改动时合并筛选条件，从最初那份旧键一次挪到位 */
+let carry: { from: string; keep: (frame: number) => boolean } | null = null
+let carryChain: Promise<void> = Promise.resolve()
+
+/** 把旧键上画面没变的帧改挂到新键（只改键不重编码），其余旧帧删掉 */
+async function moveFrames(db: IDBDatabase, from: string, to: string, keep: (frame: number) => boolean, have: Set<number>) {
+  const moved: number[] = []
+  let bytes = 0
+  const tx = db.transaction(FRAMES, 'readwrite')
+  const store = tx.objectStore(FRAMES)
+  const cursor = store.openCursor(frameRange(from))
+  cursor.onsuccess = () => {
+    const c = cursor.result
+    if (!c) return
+    const rec = c.value as FrameRec
+    if (keep(rec.f) && !have.has(rec.f)) {
+      store.put({ k: to, f: rec.f, blob: rec.blob } satisfies FrameRec)
+      moved.push(rec.f)
+      bytes += rec.blob.size
+    }
+    c.delete()
+    c.continue()
+  }
+  await txDone(tx)
+  const del = db.transaction(KEYS, 'readwrite')
+  del.objectStore(KEYS).delete(from)
+  await txDone(del).catch(() => {})
+  keyBytes.delete(from)
+  keyBytes.set(to, (keyBytes.get(to) ?? 0) + bytes)
+  return moved
+}
+
+/** 切换当前内容键：异步读回该键已落盘的帧号；给了 keep 就把上一个键里仍有效的帧带过来 */
+export function useDiskKey(key: string, keep?: (frame: number) => boolean): Promise<void> {
   if (key === currentKey) return indexReady
-  if (currentKey) void flushMeta()
+  const prev = currentKey
+  if (prev) void flushMeta()
+  if (carry && carry.from !== key && keep) {
+    const before = carry.keep
+    carry = { from: carry.from, keep: (f) => before(f) && keep(f) }
+  } else carry = prev && keep && prev !== key ? { from: prev, keep } : null
   currentKey = key
   index = new Set()
   pendingReads.clear()
   const mine = index
-  indexReady = (async () => {
+  const job = carry
+  indexReady = carryChain = carryChain.then(async () => {
     await loadKeys()
     const db = await openDb()
     if (!db || currentKey !== key) return
     const keys = await req(db.transaction(FRAMES).objectStore(FRAMES).getAllKeys(frameRange(key)))
     if (currentKey !== key) return
     for (const k of keys) mine.add((k as [string, number])[1])
+    if (job && carry === job) {
+      for (const f of await moveFrames(db, job.from, key, job.keep, mine)) mine.add(f)
+      if (carry === job) carry = null
+    }
     scheduleMetaFlush()
     void pruneOldKeys()
-  })().catch(() => {})
+  }).catch(() => {})
   return indexReady
 }
 
@@ -187,12 +229,61 @@ export function diskBusy() {
   return pendingWrites >= MAX_PENDING_WRITES
 }
 
+const ENCODER_SRC = `
+const c = new OffscreenCanvas(1, 1)
+const g = c.getContext('2d')
+onmessage = async (e) => {
+  const { id, bmp, q } = e.data
+  try {
+    if (c.width !== bmp.width || c.height !== bmp.height) { c.width = bmp.width; c.height = bmp.height }
+    g.drawImage(bmp, 0, 0)
+    bmp.close()
+    postMessage({ id, blob: await c.convertToBlob({ type: 'image/jpeg', quality: q }) })
+  } catch { postMessage({ id, blob: null }) }
+}`
+
+let encoder: Worker | null | undefined
+let encodeSeq = 0
+const encodeWaits = new Map<number, (b: Blob | null) => void>()
+
+function jpegWorker(): Worker | null {
+  if (encoder !== undefined) return encoder
+  encoder = null
+  if (typeof Worker === 'undefined' || typeof OffscreenCanvas === 'undefined' || typeof createImageBitmap === 'undefined') return null
+  try {
+    const w = new Worker(URL.createObjectURL(new Blob([ENCODER_SRC], { type: 'text/javascript' })))
+    w.onmessage = (e: MessageEvent<{ id: number; blob: Blob | null }>) => {
+      encodeWaits.get(e.data.id)?.(e.data.blob)
+      encodeWaits.delete(e.data.id)
+    }
+    w.onerror = () => {
+      encoder = null
+      encodeWaits.forEach((cb) => cb(null))
+      encodeWaits.clear()
+    }
+    encoder = w
+  } catch { /* */ }
+  return encoder
+}
+
+/** JPEG 编码放 Worker：主线程 toBlob 一帧几十毫秒，会卡住拖播放头和缩放 */
+function encodeJpeg(source: HTMLCanvasElement): Promise<Blob | null> {
+  const w = jpegWorker()
+  if (!w) return new Promise((resolve) => source.toBlob(resolve, 'image/jpeg', JPEG_QUALITY))
+  // createImageBitmap 在调用瞬间取像素，之后 source 可立即复用
+  return createImageBitmap(source).then((bmp) => new Promise<Blob | null>((resolve) => {
+    const id = ++encodeSeq
+    encodeWaits.set(id, resolve)
+    w.postMessage({ id, bmp, q: JPEG_QUALITY }, [bmp])
+  }), () => null)
+}
+
 /** 画布内容在调用瞬间快照，调用后可立即复用 source；落盘成功才进索引 */
 export function diskWrite(frame: number, source: HTMLCanvasElement): Promise<boolean> {
   const key = currentKey
   if (!key || index.has(frame) || !diskWritable()) return Promise.resolve(false)
   pendingWrites++
-  return new Promise<Blob | null>((resolve) => source.toBlob(resolve, 'image/jpeg', JPEG_QUALITY))
+  return encodeJpeg(source)
     .then(async (blob) => {
       if (!blob) return false
       const db = await openDb()

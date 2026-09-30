@@ -1,4 +1,5 @@
 import type { MediaItem, ProjectSettings, Sequence } from '../types'
+import { pictureIdentity, changedPictureRanges, retainedPictureFrame } from './previewIdentity'
 import type { ImageCache } from './monitorDraw'
 import { renderProgramFrame } from './monitorDraw'
 import { anyVideoSeeking, frameSampleUnstable, frameSampleCacheable, frameSampleMissing, holdVideoDecode, releaseVideoDecode, withVideoFrameScope } from './videoCache'
@@ -41,6 +42,19 @@ const cacheSubs = new Set<() => void>()
 
 /** 后台自动缓存的代号，播放/改动时递增以作废进行中的任务 */
 let prefetchGen = 0
+/** 拖播放头、缩放时记一笔：这段时间只显示，不往缓存里塞新帧，避免分配和淘汰跟手抢主线程 */
+let interactiveUntil = 0
+
+export function markPreviewInteractive(ms = 220) {
+  interactiveUntil = Math.max(interactiveUntil, performance.now() + ms)
+}
+
+export function previewInteractive() {
+  const active = document.activeElement
+  return performance.now() < interactiveUntil || !!active?.matches(
+    'textarea, input:not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"]), [contenteditable="true"]',
+  )
+}
 let scratch: HTMLCanvasElement | null = null
 let composeScratch: HTMLCanvasElement | null = null
 let lastPresented: HTMLCanvasElement | null = null
@@ -124,26 +138,9 @@ export function previewFingerprint(
   settings: ProjectSettings,
   cacheW: number,
   cacheH: number,
+  media: MediaItem[] = [],
 ): string {
-  const clips = seq.clips.map((c) =>
-    [
-      c.id, c.trackId, c.mediaId ?? '', c.start, c.duration, c.inPoint, c.outPoint,
-      c.enabled ? 1 : 0, c.speed, c.reverse ? 1 : 0, c.freeze ?? '', c.blend,
-      JSON.stringify(c.transform),
-      JSON.stringify(c.keyframes),
-      JSON.stringify(c.color),
-      c.text ? JSON.stringify(c.text) : '',
-      c.solid?.color ?? '',
-      JSON.stringify(c.effects),
-      c.transitionOut ? JSON.stringify(c.transitionOut) : '',
-    ].join(','),
-  ).join('|')
-  return [
-    seq.id, cacheW, cacheH, settings.width, settings.height, settings.fps,
-    settings.canvasBg, settings.canvasColor,
-    seq.tracks.map((t) => `${t.id}:${t.kind}:${t.hidden ? 0 : 1}`).join(','),
-    clips,
-  ].join('#')
+  return pictureIdentity(seq, settings, cacheW, cacheH, media)
 }
 
 export function cachePixelSize(previewW: number, previewH: number, maxEdge: number = 720) {
@@ -164,7 +161,19 @@ export function ensurePreviewFingerprint(
   cacheH: number,
 ) {
   if (cache.fingerprint === fp && cache.cacheW === cacheW && cache.cacheH === cacheH) return
-  clearPreviewCache(cache)
+  const ranges = changedPictureRanges(cache.fingerprint, fp)
+  if (ranges && cache.cacheW === cacheW && cache.cacheH === cacheH) {
+    const keep = retainedPictureFrame(cache.fingerprint, fp)
+    for (const [frame, sheet] of cache.frames) {
+      if (keep(frame)) continue
+      cache.frames.delete(frame)
+      cache.bytes -= frameBytes(cache)
+      releaseSheet(sheet)
+    }
+    lastPresentedFrame = -1
+    lastPresented = null
+    cancelPrefetchProgramFrames()
+  } else clearPreviewCache(cache)
   cache.fingerprint = fp
   cache.cacheW = cacheW
   cache.cacheH = cacheH
@@ -279,25 +288,18 @@ export function putCachedFrame(
   notifyPreviewCacheChanged()
 }
 
-let diskKeyMemo: { fp: string; media: MediaItem[]; key: string } | null = null
 let syncedDiskKey = ''
+let syncedDiskFingerprint = ''
 
-/** 共享缓存对应的磁盘内容键：画面指纹 + 所用素材文件；只有共享缓存落盘 */
-function syncDiskKey(cache: PreviewRamCache, seq: Sequence, media: MediaItem[]) {
+/** Carry unchanged disk pixels into the new revision without decoding/re-encoding. */
+function syncDiskKey(cache: PreviewRamCache, _seq: Sequence, _media: MediaItem[]) {
   if (cache !== sharedCache || !cache.fingerprint) return false
-  if (!diskKeyMemo || diskKeyMemo.fp !== cache.fingerprint || diskKeyMemo.media !== media) {
-    const used = new Set(seq.clips.map((c) => c.mediaId).filter(Boolean))
-    const files = media
-      .filter((m) => used.has(m.id))
-      .map((m) => `${m.id}:${m.path ?? m.url}:${m.duration}`)
-      .sort()
-      .join('|')
-    diskKeyMemo = { fp: cache.fingerprint, media, key: hashKey(`${cache.fingerprint}#${files}`) }
-  }
-  const key = diskKeyMemo.key
+  const key = hashKey(cache.fingerprint)
   if (key !== syncedDiskKey) {
+    const keep = retainedPictureFrame(syncedDiskFingerprint, cache.fingerprint)
     syncedDiskKey = key
-    void useDiskKey(key).then(() => notifyPreviewCacheChanged(true))
+    syncedDiskFingerprint = cache.fingerprint
+    void useDiskKey(key, keep).then(() => notifyPreviewCacheChanged(true))
   }
   return true
 }
@@ -321,23 +323,27 @@ export function blitCachedFrame(
 type FpMemo = {
   seq: Sequence
   settings: ProjectSettings
+  media: MediaItem[]
   cw: number
   ch: number
   fp: string
 }
 
 let fpMemo: FpMemo | null = null
+const noMedia: MediaItem[] = []
 
-function fingerprintOf(seq: Sequence, settings: ProjectSettings, cw: number, ch: number) {
+/** 同一序列对象重复取指纹直接复用；长序列算一次要把每个片段 JSON 化 */
+export function fingerprintOf(seq: Sequence, settings: ProjectSettings, cw: number, ch: number, media: MediaItem[] = noMedia) {
   if (
     fpMemo
     && fpMemo.seq === seq
     && fpMemo.settings === settings
+    && fpMemo.media === media
     && fpMemo.cw === cw
     && fpMemo.ch === ch
   ) return fpMemo.fp
-  const fp = previewFingerprint(seq, settings, cw, ch)
-  fpMemo = { seq, settings, cw, ch, fp }
+  const fp = previewFingerprint(seq, settings, cw, ch, media)
+  fpMemo = { seq, settings, media, cw, ch, fp }
   return fp
 }
 
@@ -361,7 +367,7 @@ export function presentCachedProgramFrame(
   opts?: { playing?: boolean; followOnly?: boolean },
 ): boolean {
   const { w: cw, h: ch } = stableCacheSize(settings, maxEdge)
-  const fp = fingerprintOf(seq, settings, cw, ch)
+  const fp = fingerprintOf(seq, settings, cw, ch, media)
   ensurePreviewFingerprint(cache, fp, cw, ch)
   syncDiskKey(cache, seq, media)
   const t = frame / Math.max(1, fps)
@@ -408,7 +414,7 @@ export function presentCachedProgramFrame(
   blitCachedFrame(dest, compose, displayW, displayH)
   publishPresented(dest, frame)
 
-  if (!unstable && frameSampleCacheable() && !cache.frames.has(frame)) {
+  if (!previewInteractive() && !unstable && frameSampleCacheable() && !cache.frames.has(frame)) {
     const sheet = scratchCanvas(cw, ch)
     const sctx = sheet.getContext('2d')
     if (sctx) {
@@ -443,12 +449,13 @@ function sequenceEndFrame(seq: Sequence, fps: number) {
   return Math.max(0, Math.ceil(end * fps - 1e-6))
 }
 
-function scheduleIdle(cb: () => void, timeout: number) {
+function scheduleIdle(cb: (deadline?: IdleDeadline) => void, timeout: number) {
   const ric = (window as Window & {
-    requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number
+    requestIdleCallback?: (cb: (deadline: IdleDeadline) => void) => number
   }).requestIdleCallback
-  if (ric) ric(cb, { timeout })
-  else window.setTimeout(cb, 0)
+  // Background cache must never turn an expired timeout into foreground work.
+  if (ric) ric(cb)
+  else window.setTimeout(() => cb(), timeout)
 }
 
 /**
@@ -469,7 +476,7 @@ export function autoCacheProgramFrames(opts: {
   const maxEdge = opts.maxEdge ?? 720
   const fps = Math.max(1, opts.fps)
   const { w: cw, h: ch } = stableCacheSize(opts.settings, maxEdge)
-  const fp = previewFingerprint(opts.seq, opts.settings, cw, ch)
+  const fp = fingerprintOf(opts.seq, opts.settings, cw, ch, opts.media)
   const cache = opts.cache
   ensurePreviewFingerprint(cache, fp, cw, ch)
   const useDisk = syncDiskKey(cache, opts.seq, opts.media)
@@ -490,8 +497,12 @@ export function autoCacheProgramFrames(opts: {
     return diskHas(f) && ramFull()
   }
 
-  const step = () => {
+  const step = (deadline?: IdleDeadline) => {
     if (!alive()) return
+    if (previewInteractive() || (deadline && deadline.timeRemaining() < 8)) {
+      window.setTimeout(() => { if (alive()) scheduleIdle(step, 80) }, 200)
+      return
+    }
     if (useDisk && diskBusy()) {
       window.setTimeout(step, 30)
       return

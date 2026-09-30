@@ -175,8 +175,9 @@ function placeStage(j: NarratedJob, stage: NarratedStage & { voice: NonNullable<
     scene.elements.forEach((e, k) => {
       // 书写片段不用最后一帧（渲染多留了 200ms 写完的画面），交界对齐到帧，定格图从同一时刻接上，不留缝
       const t0 = snap(at(e.startMs / 1000))
-      const t1 = Math.max(t0 + 1 / projFps, snap(t0 + Math.max(1, e.frames - 1) / fps))
       const t2 = snap(at(scene.endMs / 1000))
+      // 书写视频末尾多留的收尾帧不能越过本块结束：换板要硬切，最后一块要和配音同时结束
+      const t1 = Math.max(t0 + 1 / projFps, Math.min(t2, snap(t0 + Math.max(1, e.frames - 1) / fps)))
       const drawSec = t1 - t0
       const holdSec = Math.max(0, t2 - t1)
       const size = e.crop ? { width: e.crop[2], height: e.crop[3] } : frame

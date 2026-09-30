@@ -90,13 +90,13 @@ export function SubtitleBurnDialog({ clipIds, onClose }: { clipIds: string[]; on
     void Promise.all(jobIds.map(async (id) => [id, await narrationText(id)] as const)).then((pairs) => {
       const texts = new Map(pairs)
       const list = targets.burnable.flatMap((b): ReadyTarget[] => {
-        if (b.jobId && texts.get(b.jobId) != null) return [{ clipId: b.clip.id, jobId: b.jobId }]
+        if (b.jobId && texts.get(b.jobId) != null) return [{ clipId: b.clip.id, jobId: b.jobId, media: b.media ?? undefined }]
         return b.media ? [{ clipId: b.clip.id, media: b.media }] : []
       })
       setReady(list)
       const first = list.find((r) => r.jobId)
       setScript(first?.jobId ? texts.get(first.jobId) ?? '' : '')
-    })
+    }).catch((e) => setError(e instanceof Error ? e.message : String(e)))
   }, [targets])
 
   useEffect(() => {
@@ -130,7 +130,7 @@ export function SubtitleBurnDialog({ clipIds, onClose }: { clipIds: string[]; on
           <Captions size={14} style={{ color: 'var(--accent)' }} />
           <span className="eyebrow">烧录字幕</span>
           <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
-            {ready == null ? '正在检查配音…' : `${count} 段音频${asrCount > 0 ? ` · 其中 ${asrCount} 段没有文案，用语音识别（较慢）` : ''}${skipped > 0 ? ` · 跳过 ${skipped} 段（读不到本地文件）` : ''}`}
+            {ready == null ? '正在检查配音…' : `${count} 段音频${count > asrCount ? ` · ${count - asrCount} 段复用 TTS 时间戳` : ''}${asrCount > 0 ? ` · ${asrCount} 段无 TTS 时间戳，使用语音识别` : ''}${skipped > 0 ? ` · 跳过 ${skipped} 段（读不到本地文件）` : ''}`}
           </span>
           <button className="icon-btn ml-auto" data-testid="subburn-close" onClick={onClose} aria-label="关闭">
             <X size={14} />

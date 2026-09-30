@@ -3,6 +3,7 @@ import { aiFetch } from './aiFetch'
 import { importAiJob, narrationJobIdOfUrl, shouldImport, type ImportableAiJob } from './aiJobImport'
 import { SUBTITLE_SKILL_ID, defaultSkillParams, enqueueSkill, fetchSkills, type SkillPack, type SkillParams, type SubtitleSourceMedia } from './aiSkills'
 import type { Clip, MediaItem } from '../types'
+import { availableNarration } from '../../shared/ttsNarration.mjs'
 
 /** 服务端读得到文件的素材：AI 生成的（按 url 找）或带本机路径的；浏览器里拖进来的 blob 素材读不到 */
 function asrMedia(m: MediaItem | undefined): SubtitleSourceMedia | null {
@@ -26,7 +27,8 @@ export function subtitleTargets(clipIds: string[]) {
   const audio = seq.clips.filter((c) => clipIds.includes(c.id) && seq.tracks.find((t) => t.id === c.trackId)?.kind === 'audio')
   const burnable = audio.flatMap((c): BurnTarget[] => {
     const m = st.media.find((x) => x.id === c.mediaId)
-    const jobId = narrationJobIdOfUrl(m?.url)
+    const jobId = narrationJobIdOfUrl(m?.aiUrl) ?? narrationJobIdOfUrl(m?.url)
+      ?? narrationJobIdOfUrl(m?.path) ?? c.meta?.source?.jobId ?? null
     const media = asrMedia(m)
     return jobId || media ? [{ clip: c, jobId, media }] : []
   })
@@ -75,17 +77,15 @@ export function saveSubtitleStyle(params: SkillParams) {
   try { localStorage.setItem(STYLE_STORE, JSON.stringify(Object.fromEntries(STYLE_KEYS.map((k) => [k, params[k]])))) } catch { /* */ }
 }
 
-/** 任务的配音文案；任务没有配音（文案 + 逐字时间戳）或取不到时返回 null */
+/** 完整任务或已完成的配音阶段；确实没有时间戳才返回 null，网络错误不降级成识别。 */
 export async function narrationText(jobId: string): Promise<string | null> {
-  try {
-    const r = await aiFetch(`/api/ai-jobs/${jobId}`)
-    const data = await r.json()
-    const n = data.job?.params?.output?.narration
-    const ok = n?.text && n.timing && ['done', 'imported'].includes(data.job?.status)
-    return ok ? String(n.text) : null
-  } catch {
-    return null
-  }
+  const r = await aiFetch(`/api/ai-jobs/${jobId}`)
+  // A temporary network/server failure is not evidence that TTS timing is absent.
+  if (r.status === 404) return null
+  if (!r.ok) throw new Error('读取 TTS 时间戳失败，请稍后重试')
+  const data = await r.json()
+  if (!data.ok) throw new Error(data.error || '读取 TTS 时间戳失败，请稍后重试')
+  return availableNarration(data.job)?.text ?? null
 }
 
 const watching = new Set<string>()
@@ -123,7 +123,7 @@ export async function burnSubtitles(targets: { clipId: string; jobId?: string; m
   saveSubtitleStyle(params)
   const jobs = await Promise.all(targets.map(({ clipId, jobId, media }) => enqueueSkill({
     skillId: SUBTITLE_SKILL_ID, prompt: '', params, autoTimeline: true, anchorClipId: clipId,
-    ...(jobId ? { sourceJobId: jobId } : { sourceMedia: media }),
+    ...(jobId ? { sourceJobId: jobId } : {}), ...(media ? { sourceMedia: media } : {}),
   })))
   jobs.forEach((j) => watch(j.id))
   useApp.getState().setToast(`正在烧录 ${jobs.length} 段字幕`)

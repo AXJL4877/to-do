@@ -10,6 +10,7 @@
  * 音频异常时不挂住视频（本来就不挂音频钟）。
  */
 import type { Clip, MediaItem, Sequence, Track } from '../types'
+import { activeClipsAt, indexClips, indexMedia, indexTracks } from './sequenceIndex'
 
 export function quantizeAbsT(absT: number, fps: number): number {
   const f = Math.max(1, fps)
@@ -55,14 +56,14 @@ export function clipCoversAbsT(clip: Clip, absT: number): boolean {
 }
 
 export function trackVisible(seq: Sequence, trackId: string): Track | undefined {
-  const tr = seq.tracks.find((t) => t.id === trackId)
+  const tr = indexTracks(seq.tracks).get(trackId)
   if (!tr || tr.hidden) return undefined
   return tr
 }
 
 /** ① 播放头 T 下全部画面层（不含纯音轨），供合成器按 z-order 全画 */
 export function pictureClipsAt(seq: Sequence, absT: number): Clip[] {
-  return seq.clips.filter((c) => {
+  return activeClipsAt(seq, absT).filter((c) => {
     if (!clipCoversAbsT(c, absT)) return false
     const tr = trackVisible(seq, c.trackId)
     return !!tr && tr.kind !== 'audio'
@@ -71,7 +72,7 @@ export function pictureClipsAt(seq: Sequence, absT: number): Clip[] {
 
 /** ③ 播放头 T 下应进混音器的片段（音轨 + 无链接 A 的视频声源） */
 export function audibleClipsAt(seq: Sequence, absT: number): Clip[] {
-  return seq.clips.filter((c) => {
+  return activeClipsAt(seq, absT).filter((c) => {
     if (!clipCoversAbsT(c, absT) || c.audio.mute) return false
     const tr = trackVisible(seq, c.trackId)
     return !!tr && !tr.muted
@@ -85,16 +86,17 @@ export function videoNeedsDirectAudio(
   absT: number,
   media: MediaItem[],
 ): boolean {
-  const tr = seq.tracks.find((t) => t.id === clip.trackId)
+  const tr = indexTracks(seq.tracks).get(clip.trackId)
   if (!tr || tr.kind !== 'video' || tr.muted || tr.hidden) return false
   if (!clipCoversAbsT(clip, absT) || clip.audio.mute) return false
-  const m = media.find((x) => x.id === clip.mediaId)
+  const m = indexMedia(media).get(clip.mediaId ?? '')
   if (!m || m.kind !== 'video' || !m.url || m.offline) return false
 
-  const partner = (clip.linkedId ? seq.clips.find((x) => x.id === clip.linkedId) : undefined)
-    ?? seq.clips.find((x) => x.linkedId === clip.id && x.id !== clip.id)
+  const indexed = indexClips(seq.clips)
+  const partner = (clip.linkedId ? indexed.byId.get(clip.linkedId) : undefined)
+    ?? indexed.linkedTo.get(clip.id)
   if (!partner || !clipCoversAbsT(partner, absT) || partner.audio.mute) return true
-  const ptr = seq.tracks.find((t) => t.id === partner.trackId)
+  const ptr = indexTracks(seq.tracks).get(partner.trackId)
   if (!ptr || ptr.kind !== 'audio' || ptr.muted) return true
   return false
 }

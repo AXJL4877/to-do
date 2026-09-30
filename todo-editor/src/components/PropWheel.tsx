@@ -54,7 +54,7 @@ export function PropWheel() {
   const wheel = useApp((s) => s.propWheel)
   const closePropWheel = useApp((s) => s.closePropWheel)
   const selectedClipIds = useApp((s) => s.selectedClipIds)
-  const playhead = useApp((s) => s.playhead)
+  const playhead = useApp((s) => (s.propWheel ? s.playhead : 0))
   const sequences = useApp((s) => s.sequences)
   const activeSeqId = useApp((s) => s.activeSeqId)
   const updateSelectedTransform = useApp((s) => s.updateSelectedTransform)

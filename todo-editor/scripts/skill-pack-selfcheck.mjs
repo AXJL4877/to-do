@@ -205,6 +205,10 @@ assert(assetAspect({ size: '1080x1920' }, 1) === '9:16' && assetAspect({ size: '
   const sch = narrationSchedule(p, ph, 9, 1)
   assert(sch[0].startMs === 0 && sch[0].endMs === 3000 && sch[1].endMs === 10000, '黑板在换板短语开口时切换，最后一块留到配音后 tail 秒')
   assert(sch[1].elements[0].atMs === 3000 && sch[1].elements[0].windowEndMs === 6350 && sch[1].elements[1].windowEndMs === 9850, '元素在锚点起笔，写到下一个元素前')
+  const late = narrationSchedule({ scenes: [{ start: 0, elements: [{ at: 0 }] }, { start: 2, elements: [{ at: 3 }] }] }, ph, 9, 1)
+  const intro = narrationSchedule({ scenes: [{ start: 0, elements: [{ at: 1 }, { at: 2 }] }] }, ph, 9, 1)
+  assert(intro[0].elements[0].atMs === Math.round(ph[0].start * 1000) && intro[0].elements[1].atMs === Math.round(ph[2].start * 1000), '第一块的首个元素随配音开口起笔，其余仍按锚点')
+  assert(late[0].endMs === late[1].elements[0].atMs && late[1].elements[0].atMs > late[1].startMs, '上一块留到下一块第一个元素起笔，硬切不空屏')
 }
 
 // 6b. 配音 / 字幕：文案清洗 / 编译 / 参数 / TTS 输出解析

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import { Blocks, ChevronDown, ChevronLeft, ChevronRight, Loader2, Plus, RotateCcw, SlidersHorizontal, Sparkles, Trash2, Wand2 } from 'lucide-react'
 import clsx from 'clsx'
 import { useApp } from '../store'
@@ -22,7 +22,7 @@ const jobSkillId = (j: SkillJob) => j.params.skill?.id ?? CHALK_SKILL_ID
 
 type Draft = { prompt: string; params: SkillParams; plan: SkillPlan | null }
 
-function SkillJobCard({ j, onRetry, onRemove }: { j: SkillJob; onRetry: () => void; onRemove: () => void }) {
+const SkillJobCard = memo(function SkillJobCard({ j, onRetry, onRemove }: { j: SkillJob; onRetry: (id: string) => void; onRemove: (id: string) => void }) {
   const media = useApp((s) => s.media)
   const addClipFromMedia = useApp((s) => s.addClipFromMedia)
   const out = j.params.output
@@ -33,6 +33,7 @@ function SkillJobCard({ j, onRetry, onRemove }: { j: SkillJob; onRetry: () => vo
   const stage = isNarratedJob(j) ? narratedStage(j as unknown as NarratedJob) : null
   const lastScene = stage?.scenes?.[stage.scenes.length - 1]
   const still = lastScene?.elements[lastScene.elements.length - 1]?.hold
+  const failedEls = (j.params as { partial?: { failed?: unknown[] } }).partial?.failed?.length ?? 0
   const sceneCount = stage?.total ? `${stage.scenes?.length ?? 0}/${stage.total.scenes} 块黑板${j.params.autoTimeline ? '已入轨' : '已生成'}` : null
 
   return (
@@ -89,19 +90,19 @@ function SkillJobCard({ j, onRetry, onRemove }: { j: SkillJob; onRetry: () => vo
       </div>
       <div className="flex flex-col shrink-0">
         {j.status === 'error' && (
-          <button type="button" className="icon-btn" style={{ width: 22, height: 22 }} title="重试" data-testid={`skill-job-retry-${j.id}`} onClick={onRetry}>
+          <button type="button" className="icon-btn" style={{ width: 22, height: 22 }} title={failedEls ? `只重试失败的 ${failedEls} 个元素（已成功的不重新生成）` : '重试（已完成的步骤直接复用）'} data-testid={`skill-job-retry-${j.id}`} onClick={() => onRetry(j.id)}>
             <RotateCcw size={11} />
           </button>
         )}
         {j.status !== 'running' && (
-          <button type="button" className="icon-btn" style={{ width: 22, height: 22 }} title={j.status === 'queued' ? '取消' : '移除'} data-testid={`skill-job-del-${j.id}`} onClick={onRemove}>
+          <button type="button" className="icon-btn" style={{ width: 22, height: 22 }} title={j.status === 'queued' ? '取消' : '移除'} data-testid={`skill-job-del-${j.id}`} onClick={() => onRemove(j.id)}>
             <Trash2 size={11} />
           </button>
         )}
       </div>
     </div>
   )
-}
+})
 
 /**
  * 媒体库「Skill」页，渐进展开：先只列技能（缩略图 + 说明）→ 点进某个技能才出描述框和生成
@@ -120,16 +121,17 @@ export function SkillsPanel() {
   const [jobs, setJobs] = useState<SkillJob[]>([])
 
   const pack = packs?.find((p) => p.id === selectedId) ?? null
-  const draft: Draft = (pack && drafts[pack.id]) || { prompt: '', params: pack ? defaultSkillParams(pack) : {}, plan: null }
+  const emptyDraft = useMemo<Draft>(() => ({ prompt: '', params: pack ? defaultSkillParams(pack) : {}, plan: null }), [pack])
+  const draft = (pack && drafts[pack.id]) || emptyDraft
   const { prompt, params, plan } = draft
 
-  function patchDraft(patch: Partial<Draft>) {
+  const patchDraft = useCallback((patch: Partial<Draft>) => {
     if (!pack) return
-    setDrafts((d) => ({ ...d, [pack.id]: { ...draft, ...d[pack.id], ...patch } }))
-  }
-  const setPrompt = (v: string) => patchDraft({ prompt: v })
-  const setParams = (v: SkillParams) => patchDraft({ params: v })
-  const setPlan = (v: SkillPlan | null) => patchDraft({ plan: v })
+    setDrafts((d) => ({ ...d, [pack.id]: { ...emptyDraft, ...d[pack.id], ...patch } }))
+  }, [pack, emptyDraft])
+  const setPrompt = useCallback((v: string) => patchDraft({ prompt: v }), [patchDraft])
+  const setParams = useCallback((v: SkillParams) => patchDraft({ params: v }), [patchDraft])
+  const setPlan = useCallback((v: SkillPlan | null) => patchDraft({ plan: v }), [patchDraft])
 
   function select(id: string | null) {
     setSelectedId(id)
@@ -137,7 +139,7 @@ export function SkillsPanel() {
     setError(null)
   }
 
-  async function refreshJobs() {
+  const refreshJobs = useCallback(async () => {
     try {
       const r = await aiFetch('/api/ai-jobs?limit=40')
       const data = await r.json()
@@ -148,7 +150,7 @@ export function SkillsPanel() {
         if (shouldImport(j)) void importAiJob(j).catch((e) => setError(e instanceof Error ? e.message : String(e)))
       }
     } catch { /* */ }
-  }
+  }, [])
 
   useEffect(() => {
     fetchSkills()
@@ -192,17 +194,17 @@ export function SkillsPanel() {
     }
   }
 
-  async function retry(id: string) {
+  const retry = useCallback(async (id: string) => {
     const r = await aiFetch(`/api/ai-jobs/${id}/retry`, { method: 'POST' })
     const data = await r.json().catch(() => ({}))
     if (!data.ok) setError(data.error || '重试失败')
     void refreshJobs()
-  }
+  }, [refreshJobs])
 
-  async function remove(id: string) {
+  const remove = useCallback(async (id: string) => {
     await aiFetch(`/api/ai-jobs/${id}`, { method: 'DELETE' })
     void refreshJobs()
-  }
+  }, [refreshJobs])
 
   if (!packs || !packs.length) {
     return (
@@ -303,7 +305,7 @@ export function SkillsPanel() {
           <label>任务</label>
           <div className="flex flex-col gap-1.5">
             {packJobs.slice(0, 10).map((j) => (
-              <SkillJobCard key={j.id} j={j} onRetry={() => void retry(j.id)} onRemove={() => void remove(j.id)} />
+              <SkillJobCard key={j.id} j={j} onRetry={retry} onRemove={remove} />
             ))}
           </div>
         </div>

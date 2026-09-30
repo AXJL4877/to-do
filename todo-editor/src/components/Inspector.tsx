@@ -8,12 +8,12 @@ import { PropSection } from './PropUI'
 export function Inspector({ onClose }: { onClose: () => void }) {
   const clip = useApp(s => s.sequences.find(q => q.id === s.activeSeqId)?.clips.find(c => s.selectedClipIds.includes(c.id)))
   const count = useApp(s => s.selectedClipIds.length)
-  const playhead = useApp(s => s.playhead)
   const updateTransform = useApp(s => s.updateSelectedTransform)
   const updateText = useApp(s => s.updateSelectedText)
   const updateColor = useApp(s => s.updateSelectedColor)
   const updateAudio = useApp(s => s.updateSelectedAudio)
   const keyed = useApp(s => s.autoKeyframe)
+  const playhead = useApp(s => keyed && clip ? s.playhead : 0)
   const [advanced, setAdvanced] = useState(false)
   const tf = clip && (keyed ? resolveClipTransform(clip, playhead) : clip.transform)
   function transform(prop: 'x' | 'y' | 'scale' | 'rotation' | 'opacity', value: number) {

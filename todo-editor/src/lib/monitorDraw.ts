@@ -7,6 +7,7 @@ import { mediaTimeAt, pictureClipsAt } from './programPlayer'
 import { drawFancyText, fontStack } from './fancyText'
 import { mayHaveAlpha } from './mediaAlpha'
 import { HAND_TRACK_PREFIX, withChalkHands } from './chalkHandLayers'
+import { indexClips, indexTracks, upcomingClips } from './sequenceIndex'
 
 export type ImageCache = Map<string, HTMLImageElement>
 export type { SnapGuide } from './monitorSnap'
@@ -81,9 +82,11 @@ const PREROLL_MAX = 8
 /** 1 秒内要进场的视频片段先载好首帧 */
 function prerollUpcoming(seq: Sequence, media: MediaItem[], playhead: number, fps: number, live: Set<string>) {
   let n = 0
-  for (const c of seq.clips) {
+  for (const c of upcomingClips(seq, playhead, PREROLL_SEC)) {
     if (n >= PREROLL_MAX) break
     if (live.has(c.id) || c.reverse || c.start <= playhead || c.start > playhead + PREROLL_SEC) continue
+    const track = indexTracks(seq.tracks).get(c.trackId)
+    if (!c.enabled || !track || track.hidden || track.kind === 'audio') continue
     const m = media.find((x) => x.id === c.mediaId)
     if (m?.kind !== 'video') continue
     prerollVideo(m, mediaTimeAt(c, c.start, fps), fps, c.id)
@@ -144,9 +147,10 @@ export function renderProgramFrame(
   exportLook = false,
 ) {
   resetFrameSampleStability()
+  const visible = sortClipsByStack(pictureClipsAt(seq, playhead), seq.tracks)
   // 粉笔手不单独按播放头排：紧跟元素画，时间取元素这一帧实际显示的画面，解码慢时手和笔画也对得上
   const handOf = new Map<string, Clip>()
-  for (const c of withChalkHands(seq.clips, seq.tracks, media, settings).clips) {
+  for (const c of withChalkHands(visible, seq.tracks, media, settings).clips) {
     if (c.trackId.startsWith(HAND_TRACK_PREFIX)) handOf.set(c.id.slice(0, -HAND_TRACK_PREFIX.length), c)
   }
   const ctx = canvas.getContext('2d', { alpha: false, desynchronized: true } as CanvasRenderingContext2DSettings)
@@ -163,7 +167,6 @@ export function renderProgramFrame(
   ctx.fillRect(0, 0, w, h)
 
   // ① 调度：T 下全部 active 画面层；z-order 从下到上全合成（不 break、不只取一层）
-  const visible = sortClipsByStack(pictureClipsAt(seq, playhead), seq.tracks)
 
   const videoLayers = visible.filter((c) => isVideoClip(c, media))
   // 上层不透明铺满时可跳过下层绘制，但解码槽仍推进（超时用上一帧）
@@ -208,8 +211,9 @@ export function renderProgramFrame(
 
     // K帧模式：运动路径（点 + 线）
     if (showMotionPath) {
-      for (const clip of seq.clips) {
-        if (!selectedIds.includes(clip.id)) continue
+      for (const id of selectedIds) {
+        const clip = indexClips(seq.clips).byId.get(id)
+        if (!clip) continue
         drawMotionPath(ctx, clip, w, h)
       }
     }
@@ -253,20 +257,15 @@ export function renderProgramOverlay(
     canvas.width = w
     canvas.height = h
   }
-  const visible = seq.clips.filter((c) => {
-    if (!c.enabled) return false
-    if (playhead < c.start || playhead >= c.start + c.duration) return false
-    const tr = seq.tracks.find((t) => t.id === c.trackId)
-    if (!tr || tr.hidden || tr.kind === 'audio') return false
-    return true
-  })
+  const visible = pictureClipsAt(seq, playhead)
   for (const clip of visible) {
     if (!selectedIds.includes(clip.id)) continue
     drawSelection(ctx, clip, w, h, playhead)
   }
   if (showMotionPath) {
-    for (const clip of seq.clips) {
-      if (!selectedIds.includes(clip.id)) continue
+    for (const id of selectedIds) {
+      const clip = indexClips(seq.clips).byId.get(id)
+      if (!clip) continue
       drawMotionPath(ctx, clip, w, h)
     }
   }
@@ -423,13 +422,7 @@ export function hitTestProgramClips(
   preferIds: string[] = [],
 ): string | null {
   const visible = sortClipsByStack(
-    seq.clips.filter((c) => {
-      if (!c.enabled) return false
-      if (playhead < c.start || playhead >= c.start + c.duration) return false
-      const tr = seq.tracks.find((t) => t.id === c.trackId)
-      if (!tr || tr.hidden || tr.kind === 'audio') return false
-      return true
-    }),
+    pictureClipsAt(seq, playhead),
     seq.tracks,
   )
   // 顶层优先命中

@@ -4,9 +4,15 @@ import type { Clip, Track } from '../types'
 import { useApp } from '../store'
 import { loadWaveformPeaks, slicePeaks } from '../lib/waveform'
 import { isEntranceKeyframes } from '../lib/keyframeEval'
+import { indexMedia } from '../lib/sequenceIndex'
+
+/** 波形画布按 2 的幂档位画、CSS 拉伸铺满片段：缩放时间轴时不用每一帧重建画布、重算波峰 */
+export function waveformDrawWidth(widthPx: number) {
+  return Math.min(2048, Math.max(16, 2 ** Math.ceil(Math.log2(Math.max(1, widthPx)))))
+}
 
 function AudioWaveform({
-  mediaId, url, mediaPath, durationHint, inPoint, outPoint, widthPx,
+  mediaId, url, mediaPath, durationHint, inPoint, outPoint, drawW,
 }: {
   mediaId: string
   url: string
@@ -14,7 +20,7 @@ function AudioWaveform({
   durationHint?: number
   inPoint: number
   outPoint: number
-  widthPx: number
+  drawW: number
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   /** undefined = 加载中；null = 读不到音频 */
@@ -29,7 +35,7 @@ function AudioWaveform({
     return () => { alive = false }
   }, [mediaId, url, mediaPath, durationHint])
 
-  const bars = Math.max(8, Math.min(640, Math.round(widthPx / 2)))
+  const bars = Math.max(8, Math.min(640, Math.round(drawW / 2)))
   const heights = useMemo(() => {
     if (!set) return null
     return slicePeaks(set, inPoint, outPoint, bars)
@@ -38,12 +44,12 @@ function AudioWaveform({
   useEffect(() => {
     const c = canvasRef.current
     if (!c) return
-    const w = Math.max(1, Math.floor(widthPx))
+    const w = drawW
     const h = Math.max(1, c.clientHeight || 28)
     const dpr = Math.min(2, window.devicePixelRatio || 1)
     c.width = Math.floor(w * dpr)
     c.height = Math.floor(h * dpr)
-    c.style.width = `${w}px`
+    c.style.width = '100%'
     c.style.height = '100%'
     const ctx = c.getContext('2d')
     if (!ctx) return
@@ -63,7 +69,7 @@ function AudioWaveform({
       const bh = Math.max(1, (data[i] ?? 0) * h * 0.92)
       ctx.fillRect(i * bw, h - bh, Math.max(1, bw * 0.8), bh)
     }
-  }, [set, heights, widthPx])
+  }, [set, heights, drawW])
 
   return (
     <canvas
@@ -75,10 +81,10 @@ function AudioWaveform({
 }
 
 /** 根据转场 / 入出场动画 / 音频淡化 / 透明度关键帧，算左右渐变 */
-function edgeHints(clip: Clip, widthPx: number) {
+function edgeHints(clip: Clip) {
   const dur = Math.max(0.05, clip.duration)
-  const toPx = (sec: number) =>
-    Math.min(widthPx * 0.48, Math.max(10, (Math.min(sec, dur * 0.9) / dur) * widthPx))
+  // CSS 宽度随片段宽度走，缩放时间轴时不用重算
+  const toCss = (sec: number) => `min(48%, max(10px, ${(Math.min(sec, dur * 0.9) / dur) * 100}%))`
 
   let inSec = 0
   let outSec = 0
@@ -143,8 +149,8 @@ function edgeHints(clip: Clip, widthPx: number) {
   return {
     inSec,
     outSec,
-    inPx: inSec > 0.03 ? toPx(inSec) : 0,
-    outPx: outSec > 0.03 ? toPx(outSec) : 0,
+    inW: inSec > 0.03 ? toCss(inSec) : '',
+    outW: outSec > 0.03 ? toCss(outSec) : '',
     inLabel: inSec > 0.03 ? `${inLabel} ${inSec.toFixed(2)}s · 拖边缘调时长` : '',
     outLabel: outSec > 0.03 ? `${outLabel} ${outSec.toFixed(2)}s · 拖边缘调时长` : '',
   }
@@ -155,20 +161,26 @@ type Props = {
   track: Track
   selected: boolean
   tool: string
-  left: number
-  width: number
-  onPointerDown: (e: React.PointerEvent) => void
-  onTrimIn: (e: React.PointerEvent) => void
-  onTrimOut: (e: React.PointerEvent) => void
-  onContextMenu: (e: React.MouseEvent) => void
+  geometryZoom: number
+  /** 几何缩放在连续操作结束后更新，中途仅变换父层。 */
+  trimmable: boolean
+  waveW: number
+  /** 回调都带片段 id，时间轴传稳定的函数，缩放 / 滚动时没变的片段不重渲染 */
+  onPointerDown: (e: React.PointerEvent, clipId: string, trackLocked: boolean) => void
+  onTrim: (e: React.PointerEvent, clipId: string, edge: 'in' | 'out', trackLocked: boolean) => void
+  onContextMenu: (e: React.MouseEvent, clipId: string) => void
 }
 
 export const TimelineClip = memo(function TimelineClip({
-  clip, track, selected, tool, left, width,
-  onPointerDown, onTrimIn, onTrimOut, onContextMenu,
+  clip, track, selected, tool, geometryZoom, trimmable, waveW,
+  onPointerDown: onDown, onTrim, onContextMenu: onMenu,
 }: Props) {
+  const onPointerDown = (e: React.PointerEvent) => onDown(e, clip.id, track.locked)
+  const onTrimIn = (e: React.PointerEvent) => onTrim(e, clip.id, 'in', track.locked)
+  const onTrimOut = (e: React.PointerEvent) => onTrim(e, clip.id, 'out', track.locked)
+  const onContextMenu = (e: React.MouseEvent) => onMenu(e, clip.id)
   const resizeEdgeAnim = useApp((s) => s.resizeEdgeAnim)
-  const media = useApp((s) => (clip.mediaId ? s.media.find((m) => m.id === clip.mediaId) : undefined))
+  const media = useApp((s) => (clip.mediaId && track.kind === 'audio' ? indexMedia(s.media).get(clip.mediaId) : undefined))
   const drag = useRef<{ edge: 'in' | 'out'; startX: number; originSec: number } | null>(null)
   const bg = clip.solid
     ? `color-mix(in oklab, ${clip.solid.color} 70%, transparent)`
@@ -179,15 +191,12 @@ export const TimelineClip = memo(function TimelineClip({
       : 'hsl(200 55% 48% / 0.25)'
 
   const rate = tool === 'rate'
-  // 按真实时长画，不设最小宽度：缩小时间轴时撑宽的短片段会盖住后面紧接的片段
-  const w = Math.max(1, width)
-  const trimmable = w >= 12
-  const hints = useMemo(() => edgeHints(clip, w), [clip, w])
-  const pxPerSec = w / Math.max(0.05, clip.duration)
+  const hints = useMemo(() => edgeHints(clip), [clip])
 
   function onAnimHandleDown(e: React.PointerEvent, edge: 'in' | 'out') {
     e.stopPropagation()
     e.preventDefault()
+    const pxPerSec = Math.max(1e-3, useApp.getState().timelineZoom)
     const originSec = edge === 'in' ? hints.inSec : hints.outSec
     drag.current = { edge, startX: e.clientX, originSec }
     resizeEdgeAnim(clip.id, edge, originSec, { record: true })
@@ -215,7 +224,9 @@ export const TimelineClip = memo(function TimelineClip({
     <div
       className={clsx('absolute top-1 bottom-1 rounded-md overflow-hidden border group', selected && 'ring-2')}
       style={{
-        left, width: w,
+        // 按真实时长画，不设最小宽度：缩小时间轴时撑宽的短片段会盖住后面紧接的片段
+        left: clip.start * geometryZoom,
+        width: Math.max(1, clip.duration * geometryZoom),
         background: bg,
         borderColor: selected ? 'var(--accent)' : 'var(--border)',
         opacity: clip.enabled ? 1 : 0.4,
@@ -225,6 +236,9 @@ export const TimelineClip = memo(function TimelineClip({
         WebkitUserSelect: 'none',
       }}
       data-testid={`clip-${clip.id}`}
+      aria-label={clip.name}
+      data-clip-start={clip.start}
+      data-clip-duration={clip.duration}
       onPointerDown={onPointerDown}
       onDoubleClick={(e) => {
         e.stopPropagation()
@@ -252,11 +266,11 @@ export const TimelineClip = memo(function TimelineClip({
         />
       )}
 
-      {trimmable && hints.inPx > 0 && (
+      {trimmable && hints.inW && (
         <div
           className="absolute left-0 top-0 bottom-0 z-[1]"
           style={{
-            width: hints.inPx,
+            width: hints.inW,
             background: 'linear-gradient(90deg, hsl(24 85% 52% / 0.55), hsl(24 85% 52% / 0.12), transparent)',
           }}
           title={hints.inLabel}
@@ -271,11 +285,11 @@ export const TimelineClip = memo(function TimelineClip({
           />
         </div>
       )}
-      {trimmable && hints.outPx > 0 && (
+      {trimmable && hints.outW && (
         <div
           className="absolute right-0 top-0 bottom-0 z-[1]"
           style={{
-            width: hints.outPx,
+            width: hints.outW,
             background: 'linear-gradient(90deg, transparent, hsl(24 85% 52% / 0.12), hsl(24 85% 52% / 0.55))',
           }}
           title={hints.outLabel}
@@ -303,12 +317,13 @@ export const TimelineClip = memo(function TimelineClip({
           )}
           inPoint={clip.inPoint}
           outPoint={clip.outPoint}
-          widthPx={w}
+          drawW={waveW}
         />
       )}
       <span
+        data-clip-label=""
         className="text-[10px] font-medium truncate block px-1.5 pt-0.5 pointer-events-none relative z-[2] select-none"
-        style={{ userSelect: 'none', WebkitUserSelect: 'none' }}
+        style={{ display: 'none' }}
         draggable={false}
       >
         {Math.abs((clip.speed || 1) - 1) > 1e-3 && (

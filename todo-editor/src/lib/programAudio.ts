@@ -6,6 +6,7 @@
 import type { Clip, MediaItem, Sequence } from '../types'
 import { muteAllVideos, pauseAllVideos } from './videoCache'
 import { mediaTimeAt, videoNeedsDirectAudio } from './programPlayer'
+import { activeClipsAt, indexMedia, indexTracks } from './sequenceIndex'
 
 const mixSlots = new Map<string, HTMLAudioElement>()
 const followFrame = new Map<string, number>()
@@ -44,7 +45,9 @@ type MixWant = {
 }
 
 function audibleAt(seq: Sequence, media: MediaItem[], t: number, fps: number): MixWant[] {
-  const byId = new Map(media.map((m) => [m.id, m]))
+  const byId = indexMedia(media)
+  const tracks = indexTracks(seq.tracks)
+  const active = activeClipsAt(seq, t)
   const out: MixWant[] = []
   const step = 1 / Math.max(1, fps)
   const seen = new Set<string>()
@@ -64,16 +67,16 @@ function audibleAt(seq: Sequence, media: MediaItem[], t: number, fps: number): M
     })
   }
 
-  for (const c of seq.clips) {
+  for (const c of active) {
     if (!c.enabled || !c.mediaId || c.audio.mute || !inRange(c, t)) continue
-    const track = seq.tracks.find((tr) => tr.id === c.trackId)
+    const track = tracks.get(c.trackId)
     if (!track || track.kind !== 'audio' || track.muted) continue
     const m = byId.get(c.mediaId)
     if (!m?.url || m.offline) continue
     push(c, m.url)
   }
 
-  for (const c of seq.clips) {
+  for (const c of active) {
     if (!videoNeedsDirectAudio(seq, c, t, media)) continue
     const m = byId.get(c.mediaId!)
     if (!m?.url) continue

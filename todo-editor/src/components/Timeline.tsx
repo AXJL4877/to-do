@@ -1,16 +1,18 @@
-import { useMemo, useRef, useEffect, useCallback, useState, useSyncExternalStore } from 'react'
+import { useMemo, useRef, useEffect, useLayoutEffect, useCallback, useState, useSyncExternalStore } from 'react'
+import { flushSync } from 'react-dom'
 import {
   Lock, VolumeX, EyeOff, Magnet, Scissors, Trash2, ZoomIn, ZoomOut,
-  MousePointer2, Hand, Gauge, Undo2, Redo2, Save, FolderOpen, Download, MoreHorizontal,
+  MousePointer2, Hand, Gauge, Undo2, Redo2, Save, FolderOpen, Download, MoreHorizontal, ListCollapse,
 } from 'lucide-react'
 import { useApp, formatTime } from '../store'
-import { fmtRulerTime, rulerStep, stepZoom } from '../lib/timelineZoom'
+import { clampZoom, fmtRulerTime, fmtZoom, rulerStep, stepZoom, wheelZoom } from '../lib/timelineZoom'
 import { parseMediaFiles, filesFromDataTransfer } from '../lib/importFiles'
 import { acceptMediaDrop, readMediaDrag } from '../lib/mediaDrag'
 import { desktop } from '../lib/desktop'
 import {
   getPreviewBarRanges,
   getPreviewCacheRev,
+  markPreviewInteractive,
   subscribePreviewCache,
 } from '../lib/previewCache'
 import { getLivePlayhead, setLivePlayhead, subscribeLivePlayhead } from '../lib/livePlayhead'
@@ -19,9 +21,12 @@ import { subtitleTargets } from '../lib/subtitleBurn'
 import { SubtitleBurnDialog } from './SubtitleBurnDialog'
 import { linkedClosure } from '../lib/clipLinks'
 import { ContextMenu } from './ContextMenu'
-import { TimelineClip } from './TimelineClip'
+import { TimelineClip, waveformDrawWidth } from './TimelineClip'
 import { PlayheadOverlay } from './PlayheadOverlay'
+import { TimelineLabels } from './TimelineLabels'
 import { TimelineFloatLaunch } from './TimelineFloat'
+import { indexClips } from '../lib/sequenceIndex'
+import { useTimelineGeometryZoom } from '../lib/useTimelineGeometryZoom'
 import clsx from 'clsx'
 import type { RefObject } from 'react'
 
@@ -41,11 +46,6 @@ export function Timeline({
     [sequences, activeSeqId],
   )
   const fps = useApp((s) => s.settings.fps)
-  const previewCacheRev = useSyncExternalStore(subscribePreviewCache, getPreviewCacheRev, getPreviewCacheRev)
-  const cacheRanges = useMemo(
-    () => getPreviewBarRanges(Math.max(1, fps)),
-    [previewCacheRev, fps],
-  )
   const snap = useApp((s) => s.settings.snap)
   const selectedClipIds = useApp((s) => s.selectedClipIds)
   const tool = useApp((s) => s.tool)
@@ -71,6 +71,8 @@ export function Timeline({
   const setTool = useApp((s) => s.setTool)
   const undo = useApp((s) => s.undo)
   const redo = useApp((s) => s.redo)
+  const tidyTimeline = useApp((s) => s.tidyTimeline)
+  const clipsByTrack = useMemo(() => indexClips(seq.clips).byTrack, [seq.clips])
   const canUndo = useApp((s) => s.history.length > 0)
   const canRedo = useApp((s) => s.future.length > 0)
   const saveProjectToFile = useApp((s) => s.saveProjectToFile)
@@ -136,6 +138,20 @@ export function Timeline({
   } | null>(null)
 
   const pxPerSec = timelineZoom
+  const { geometryZoom, finish: finishGeometryZoom } = useTimelineGeometryZoom(pxPerSec, seq.id, drag.current !== null)
+  const geometryScale = pxPerSec / geometryZoom
+  // A zoom while the pointer is held must also rescale the existing move
+  // preview, including when the user releases without another pointermove.
+  useLayoutEffect(() => {
+    const d = drag.current
+    if (d?.kind !== 'move' || d.lastDt == null) return
+    for (const id of d.moveIds ?? []) {
+      const el = bodyRef.current?.querySelector<HTMLElement>(`[data-testid="clip-${id}"]`)
+      if (!el) continue
+      const dy = new DOMMatrix(el.style.transform).m42
+      el.style.transform = `translate(${d.lastDt * geometryZoom}px, ${dy}px)`
+    }
+  }, [geometryZoom])
 
   const duration = useMemo(
     () => Math.max(seq.workOut, ...seq.clips.map((c) => c.start + c.duration), 12),
@@ -177,6 +193,101 @@ export function Timeline({
   const lanePx = Math.max(Math.ceil(duration * pxPerSec), bodyW)
   const layoutDur = lanePx / Math.max(1, pxPerSec)
   const needHScroll = bodyW > 0 && lanePx > bodyW + 1
+  const zoomScroll = useRef<{ zoom: number; left: number } | null>(null)
+  const mouseClientX = useRef<number | null>(null)
+  const zoomAtPointer = useCallback((next: number, clientX?: number) => {
+    const el = scrollRef.current
+    const prev = useApp.getState().timelineZoom
+    const zoom = clampZoom(next)
+    if (!el || zoom === prev) return
+    const rect = el.getBoundingClientRect()
+    const pointer = clientX ?? mouseClientX.current ?? (rect.left + el.clientWidth / 2)
+    const x = Math.max(0, Math.min(el.clientWidth, pointer - rect.left))
+    const left = zoomScroll.current?.zoom === prev ? zoomScroll.current.left : el.scrollLeft
+    const time = (left + x) / prev
+    const maxScroll = Math.max(0, Math.ceil(duration * zoom) - el.clientWidth)
+    zoomScroll.current = { zoom, left: Math.max(0, Math.min(maxScroll, time * zoom - x)) }
+    setTimelineZoom(zoom)
+  }, [duration, scrollRef, setTimelineZoom])
+  // 触控板一帧能来好几格滚轮：合成一次再改缩放，避免一格一次整表重渲染
+  const zoomRaf = useRef(0)
+  const zoomPending = useRef<{ zoom: number; x: number } | null>(null)
+  const queueWheelZoom = useCallback((deltaY: number, clientX: number) => {
+    const base = zoomPending.current?.zoom ?? useApp.getState().timelineZoom
+    zoomPending.current = { zoom: wheelZoom(base, deltaY), x: clientX }
+    if (zoomRaf.current) return
+    zoomRaf.current = requestAnimationFrame(() => {
+      zoomRaf.current = 0
+      const pending = zoomPending.current
+      zoomPending.current = null
+      if (!pending) return
+      markPreviewInteractive()
+      zoomAtPointer(pending.zoom, pending.x)
+    })
+  }, [zoomAtPointer])
+  useEffect(() => () => cancelAnimationFrame(zoomRaf.current), [])
+  // Apply after the new lane width reaches the DOM; doing it earlier clamps
+  // scrollLeft against the old width and makes the anchor jump near the end.
+  useLayoutEffect(() => {
+    const pending = zoomScroll.current
+    if (pending?.zoom !== timelineZoom || !scrollRef.current) return
+    scrollRef.current.scrollLeft = pending.left
+    zoomScroll.current = null
+  }, [timelineZoom, lanePx, scrollRef])
+
+  // 鼠标滚轮一格 100px 直接跳显得卡顿：大步长缓动过去，触控板的小步长直接跟手
+  const scrollAnim = useRef<{ target: number; raf: number } | null>(null)
+  const stopSmoothScroll = useCallback(() => {
+    if (scrollAnim.current) cancelAnimationFrame(scrollAnim.current.raf)
+    scrollAnim.current = null
+  }, [])
+  const smoothScrollBy = useCallback((el: HTMLElement, dx: number) => {
+    const a = scrollAnim.current
+    if (!a && Math.abs(dx) < 40) { el.scrollLeft += dx; return }
+    const max = Math.max(0, el.scrollWidth - el.clientWidth)
+    const target = Math.max(0, Math.min(max, (a ? a.target : el.scrollLeft) + dx))
+    if (a) { a.target = target; return }
+    const s = { target, raf: 0 }
+    scrollAnim.current = s
+    const step = () => {
+      const cur = el.scrollLeft
+      const d = s.target - cur
+      const next = Math.abs(d) <= 1 ? s.target : cur + Math.sign(d) * Math.max(1, Math.abs(d) * 0.3)
+      el.scrollLeft = next
+      // 到位或被边界卡住就停
+      if (next === s.target || el.scrollLeft === cur) { scrollAnim.current = null; return }
+      s.raf = requestAnimationFrame(step)
+    }
+    s.raf = requestAnimationFrame(step)
+  }, [])
+
+  // 按 256px 分档更新，前后留缓冲；选中和联动片段始终渲染，供拖动预览使用。
+  const VIEW_CHUNK = 256
+  const [viewLeft, setViewLeft] = useState(0)
+  const onBodyScroll = useCallback((el: HTMLDivElement) => {
+    setViewLeft(Math.floor(el.scrollLeft / VIEW_CHUNK) * VIEW_CHUNK)
+  }, [])
+  const pendingLeft = zoomScroll.current?.zoom === timelineZoom ? zoomScroll.current.left : null
+  const viewW = bodyW || 2000
+  const viewX0 = (pendingLeft ?? viewLeft) - VIEW_CHUNK
+  const viewX1 = (pendingLeft ?? viewLeft) + viewW + 2 * VIEW_CHUNK
+  const visibleStart = viewX0 / pxPerSec
+  const visibleEnd = viewX1 / pxPerSec
+  const retainedWindow = useRef({ sequenceId: seq.id, start: visibleStart, end: visibleEnd })
+  const previousWindow = retainedWindow.current
+  const unionStart = Math.min(previousWindow.start, visibleStart)
+  const unionEnd = Math.max(previousWindow.end, visibleEnd)
+  // Keep edge clips alive across direction changes, but bound retention if the
+  // user also scrolls a long distance during a burst. Reclaim immediately at rest.
+  retainedWindow.current = geometryZoom !== pxPerSec && previousWindow.sequenceId === seq.id
+    && unionEnd - unionStart <= (visibleEnd - visibleStart) * 3
+    ? { sequenceId: seq.id, start: unionStart, end: unionEnd }
+    : { sequenceId: seq.id, start: visibleStart, end: visibleEnd }
+  const renderWindow = retainedWindow.current
+  const pinnedClips = useMemo(
+    () => new Set(selectedClipIds.length ? linkedClosure(seq.clips, selectedClipIds) : []),
+    [seq.clips, selectedClipIds],
+  )
 
   const ruler = rulerStep(pxPerSec)
 
@@ -319,6 +430,7 @@ export function Timeline({
         }
         d.moved = true
         const t = playheadTimeFromEvent(e)
+        markPreviewInteractive()
         // 拖动中只改 live 时钟（播放头/监视器订阅），不写 Zustand、不广播——避免掉帧
         setLivePlayhead(t)
         pendingPh = t
@@ -794,23 +906,43 @@ export function Timeline({
   }
 
   // Alt+滚轮缩放；Ctrl / Shift+滚轮（或手型工具）左右移动。须用非被动的原生监听才拦得住页面缩放
-  const wheelRef = useRef({ tool, zoom: timelineZoom })
-  wheelRef.current = { tool, zoom: timelineZoom }
+  const wheelRef = useRef({ tool, queueWheelZoom })
+  wheelRef.current = { tool, queueWheelZoom }
   useEffect(() => {
     const el = scrollRef.current
     if (!el) return
     const onWheel = (e: WheelEvent) => {
       if (e.altKey) {
         e.preventDefault()
-        setTimelineZoom(stepZoom(wheelRef.current.zoom, e.deltaY < 0 ? 1 : -1, 1.15))
+        if (e.deltaY === 0) return
+        stopSmoothScroll()
+        wheelRef.current.queueWheelZoom(e.deltaY, e.clientX)
       } else if (e.ctrlKey || e.shiftKey || wheelRef.current.tool === 'hand') {
         e.preventDefault()
-        el.scrollLeft += e.deltaY || e.deltaX
+        smoothScrollBy(el, e.deltaY || e.deltaX)
       }
     }
     el.addEventListener('wheel', onWheel, { passive: false })
-    return () => el.removeEventListener('wheel', onWheel)
-  }, [setTimelineZoom])
+    return () => { el.removeEventListener('wheel', onWheel); stopSmoothScroll() }
+  }, [setTimelineZoom, smoothScrollBy, stopSmoothScroll])
+
+  // 片段回调保持同一引用，TimelineClip 的 memo 才生效：缩放 / 滚动时没变的片段不重渲染
+  const clipHandlers = useRef({ onClipPointerDown, onTrimPointerDown, selectedClipIds })
+  clipHandlers.current = { onClipPointerDown, onTrimPointerDown, selectedClipIds }
+  const clipEvents = useMemo(() => ({
+    down: (e: React.PointerEvent, id: string, locked: boolean) => clipHandlers.current.onClipPointerDown(e, id, locked),
+    trim: (e: React.PointerEvent, id: string, edge: 'in' | 'out', locked: boolean) => {
+      if (!locked) clipHandlers.current.onTrimPointerDown(e, id, edge)
+    },
+    menu: (e: React.MouseEvent, id: string) => {
+      e.preventDefault()
+      if (!clipHandlers.current.selectedClipIds.includes(id)) useApp.getState().selectClips([id])
+      setCtx({ x: e.clientX, y: e.clientY, clipId: id })
+    },
+  }), [])
+
+  const rulerFrom = Math.max(0, Math.floor(viewX0 / pxPerSec / ruler))
+  const rulerTo = Math.min(Math.floor(layoutDur / ruler), Math.ceil(viewX1 / pxPerSec / ruler))
 
   return (
     <section
@@ -829,6 +961,10 @@ export function Timeline({
         <button className="icon-btn" data-testid="btn-save" onClick={() => { void saveProjectToFile() }} title="保存 Ctrl+S"><Save size={12} /></button>
         <button className="icon-btn" data-testid="btn-undo" onClick={undo} disabled={!canUndo} title="撤销 Ctrl+Z" style={{ opacity: canUndo ? 1 : 0.35 }}><Undo2 size={12} /></button>
         <button className="icon-btn" data-testid="btn-redo" onClick={redo} disabled={!canRedo} title="重做 Ctrl+Shift+Z" style={{ opacity: canRedo ? 1 : 0.35 }}><Redo2 size={12} /></button>
+        <button className="btn shrink-0 text-[10px] flex items-center gap-1" data-testid="btn-tidy-timeline" onClick={tidyTimeline}
+          title="将可合并的片段整理到更少轨道，保持时间与上下层关系；跳过锁定、隐藏、静音和独奏轨道，可撤销">
+          <ListCollapse size={12} />一键整理
+        </button>
         <div className="w-px h-4 shrink-0" style={{ background: 'var(--border)' }} />
         <button
           className={clsx('icon-btn text-[10px] font-semibold', monitorCompose === '3d' && 'active')}
@@ -854,9 +990,9 @@ export function Timeline({
         <button className="icon-btn" data-testid="tl-split" onClick={razorAtPlayhead} title="分割"><Scissors size={12} /></button>
         <button className="icon-btn" data-testid="tl-delete" onClick={() => deleteSelected(true)} title="删除"><Trash2 size={12} /></button>
         <div className="w-px h-4 shrink-0" style={{ background: 'var(--border)' }} />
-        <button className="icon-btn" data-testid="tl-zoom-out" onClick={() => setTimelineZoom(stepZoom(timelineZoom, -1))} title="缩小"><ZoomOut size={12} /></button>
-        <span className="text-[10px] tabular-nums w-7 text-center" style={{ color: 'var(--text-muted)' }}>{timelineZoom}</span>
-        <button className="icon-btn" data-testid="tl-zoom-in" onClick={() => setTimelineZoom(stepZoom(timelineZoom, 1))} title="放大"><ZoomIn size={12} /></button>
+        <button className="icon-btn" data-testid="tl-zoom-out" onClick={() => zoomAtPointer(stepZoom(timelineZoom, -1))} title="以鼠标位置为中心缩小"><ZoomOut size={12} /></button>
+        <span className="text-[10px] tabular-nums w-7 text-center" style={{ color: 'var(--text-muted)' }}>{fmtZoom(timelineZoom)}</span>
+        <button className="icon-btn" data-testid="tl-zoom-in" onClick={() => zoomAtPointer(stepZoom(timelineZoom, 1))} title="以鼠标位置为中心放大"><ZoomIn size={12} /></button>
         <span className="text-[11px] tabular-nums ml-1 truncate max-w-[10ch]" style={{ color: 'var(--text-muted)' }}>{seq.name}</span>
         <div className="flex-1" />
         <TimelineFloatLaunch />
@@ -938,7 +1074,12 @@ export function Timeline({
           ref={scrollRef}
           className={clsx('flex-1 min-w-0 relative overflow-y-auto', needHScroll ? 'overflow-x-auto' : 'overflow-x-hidden')}
           data-testid="timeline-body"
+          onPointerDownCapture={() => {
+            if (geometryZoom !== pxPerSec) flushSync(finishGeometryZoom)
+          }}
+          onPointerMove={(e) => { mouseClientX.current = e.clientX }}
           onScroll={(e) => {
+            onBodyScroll(e.currentTarget)
             const headers = headersRef.current
             if (!headers || syncingScroll.current) return
             syncingScroll.current = true
@@ -953,36 +1094,24 @@ export function Timeline({
             onPointerDown={onRulerPointerDown}
             data-testid="timeline-ruler"
           >
-            {Array.from({ length: Math.floor(layoutDur / ruler) + 1 }, (_, i) => (
-              <span key={i} className="absolute text-[9px] tabular-nums" style={{ left: xAt(i * ruler) + 2, top: 3, color: 'var(--text-muted)' }}>{fmtRulerTime(i * ruler, ruler)}</span>
-            ))}
+            {Array.from({ length: Math.max(0, rulerTo - rulerFrom + 1) }, (_, k) => {
+              const i = rulerFrom + k
+              return <span key={i} className="absolute text-[9px] tabular-nums" style={{ left: xAt(i * ruler) + 2, top: 3, color: 'var(--text-muted)' }}>{fmtRulerTime(i * ruler, ruler)}</span>
+            })}
             {seq.markers.map((m) => (
               <div key={m.id} className="absolute top-0 bottom-0 w-0.5" style={{ left: xAt(m.t), background: m.color }} title={m.label} />
             ))}
             <div className="absolute top-0 bottom-0 w-0.5 z-20" style={{ left: xAt(seq.workIn), background: 'var(--accent)', opacity: 0.35 }} />
             <div className="absolute top-0 bottom-0 w-0.5 z-20" style={{ left: xAt(seq.workOut), background: 'var(--accent)', opacity: 0.35 }} />
             {/* 预览已缓存区间 */}
-            <div
-              className="absolute left-0 right-0 bottom-0 h-[3px] pointer-events-none"
-              data-testid="preview-cache-bar"
-              title={cacheRanges.length ? '绿色：已缓存预览' : '播放后将在此显示缓存进度'}
-            >
-              {cacheRanges.map((r, i) => (
-                <div
-                  key={`${r.start}-${r.end}-${i}`}
-                  className="absolute top-0 bottom-0"
-                  style={{
-                    left: xAt(r.start),
-                    width: Math.max(2, xAt(r.end) - xAt(r.start)),
-                    background: 'hsl(145 55% 42%)',
-                    opacity: 0.9,
-                  }}
-                />
-              ))}
-            </div>
+            <PreviewCacheBar fps={fps} pxPerSec={pxPerSec} />
           </div>
 
-          <div ref={bodyRef} className="relative" style={{ width: lanePx }} onPointerDown={onBodyPointerDown} data-testid="timeline-tracks">
+          <div ref={bodyRef} className="relative" style={{ width: lanePx, overflow: 'clip' }} onPointerDown={onBodyPointerDown} data-testid="timeline-tracks">
+            <div data-testid="timeline-geometry" style={{
+              width: Math.max(duration * geometryZoom, bodyW / geometryScale),
+              transform: `scaleX(${geometryScale})`, transformOrigin: 'left top',
+            }}>
             {seq.tracks.map((track) => (
               <div
                 key={track.id}
@@ -990,25 +1119,24 @@ export function Timeline({
                 style={{ height: track.height, borderColor: 'var(--border)', background: track.hidden ? 'var(--surface-2)' : 'transparent' }}
                 data-testid={`track-row-${track.id}`}
               >
-                {seq.clips.filter((c) => c.trackId === track.id).map((clip) => (
-                  <TimelineClip
-                    key={clip.id}
-                    clip={clip}
-                    track={track}
-                    selected={selectedClipIds.includes(clip.id)}
-                    tool={tool}
-                    left={xAt(clip.start)}
-                    width={xAt(clip.duration)}
-                    onPointerDown={(e) => onClipPointerDown(e, clip.id, track.locked)}
-                    onTrimIn={(e) => !track.locked && onTrimPointerDown(e, clip.id, 'in')}
-                    onTrimOut={(e) => !track.locked && onTrimPointerDown(e, clip.id, 'out')}
-                    onContextMenu={(e) => {
-                      e.preventDefault()
-                      if (!selectedClipIds.includes(clip.id)) selectClips([clip.id])
-                      setCtx({ x: e.clientX, y: e.clientY, clipId: clip.id })
-                    }}
-                  />
-                ))}
+                {(clipsByTrack.get(track.id) ?? []).map((clip) => {
+                  if ((clip.start + clip.duration < renderWindow.start || clip.start > renderWindow.end) && !pinnedClips.has(clip.id)) return null
+                  return (
+                    <TimelineClip
+                      key={clip.id}
+                      clip={clip}
+                      track={track}
+                      selected={selectedClipIds.includes(clip.id)}
+                      tool={tool}
+                      geometryZoom={geometryZoom}
+                      trimmable={clip.duration * geometryZoom >= 12}
+                      waveW={track.kind === 'audio' ? waveformDrawWidth(clip.duration * geometryZoom) : 0}
+                      onPointerDown={clipEvents.down}
+                      onTrim={clipEvents.trim}
+                      onContextMenu={clipEvents.menu}
+                    />
+                  )
+                })}
                 <div
                   className="absolute left-0 right-0 bottom-0 h-1 cursor-ns-resize z-20"
                   data-testid={`track-row-resize-${track.id}`}
@@ -1040,8 +1168,9 @@ export function Timeline({
                 />
               </div>
             ))}
+            </div>
 
-
+            <TimelineLabels seq={seq} pxPerSec={pxPerSec} scrollRef={scrollRef} viewportWidth={bodyW} />
             {marquee && (
               <div
                 data-testid="marquee-rect"
@@ -1099,6 +1228,18 @@ export function Timeline({
       })()}
       {burnClipIds && <SubtitleBurnDialog clipIds={burnClipIds} onClose={closeBurn} />}
     </section>
+  )
+}
+
+function PreviewCacheBar({ fps, pxPerSec }: { fps: number; pxPerSec: number }) {
+  const rev = useSyncExternalStore(subscribePreviewCache, getPreviewCacheRev, getPreviewCacheRev)
+  const ranges = useMemo(() => getPreviewBarRanges(Math.max(1, fps)), [rev, fps])
+  return (
+    <div className="absolute left-0 right-0 bottom-0 h-[3px] pointer-events-none"
+      data-testid="preview-cache-bar" title={ranges.length ? '绿色：已缓存预览' : '播放后将在此显示缓存进度'}>
+      {ranges.map((r, i) => <div key={`${r.start}-${r.end}-${i}`} className="absolute top-0 bottom-0"
+        style={{ left: r.start * pxPerSec, width: Math.max(2, (r.end - r.start) * pxPerSec), background: 'hsl(145 55% 42%)', opacity: 0.9 }} />)}
+    </div>
   )
 }
 

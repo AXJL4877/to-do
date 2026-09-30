@@ -78,6 +78,39 @@ async function test(name: string, fn: () => void | Promise<void>) {
     const changed = { ...seq, clips: seq.clips.map((c: any) => ({ ...c, freeze: 2 })) }
     check(a !== preview.previewFingerprint(changed, settings, 320, 180), 'freeze ignored by fingerprint')
   })
+  await test('local visual edits preserve cached frames outside the changed interval', () => {
+    const c = preview.createPreviewCache()
+    const base = { ...seq, clips: [{ ...seq.clips[0], duration: 2 }, { ...seq.clips[1], start: 3, duration: 2 }] }
+    const setup = (s: any) => preview.ensurePreviewFingerprint(c, preview.previewFingerprint(s, settings, 320, 180), 320, 180)
+    setup(base)
+    for (const f of [15, 75, 105]) preview.putCachedFrame(c, f, dest)
+    const untouched = c.frames.get(105)
+    setup({ ...base, clips: [{ ...base.clips[0], transform: { ...base.clips[0].transform, x: 0.2 } }, base.clips[1]] })
+    check(!c.frames.has(15), 'edited pixels survived')
+    check(c.frames.get(105) === untouched && c.frames.has(75), 'unchanged intervals were discarded')
+  })
+  await test('new blackboard track and audio edits do not discard existing picture cache', () => {
+    const c = preview.createPreviewCache()
+    const setup = (s: any) => preview.ensurePreviewFingerprint(c, preview.previewFingerprint(s, settings, 320, 180), 320, 180)
+    setup(seq); preview.putCachedFrame(c, 30, dest)
+    const unchanged = c.frames.get(30)
+    const added = { ...seq, tracks: [{ id: 'new', kind: 'video' }, ...seq.tracks, { id: 'sound', kind: 'audio' }],
+      clips: [...seq.clips, { ...clip('new', 0), start: 8, duration: 1 }, { ...clip('sound', 0), duration: 20 }] }
+    setup(added)
+    check(c.frames.get(30) === unchanged, 'adding a later blackboard layer or audio cleared current picture')
+  })
+  await test('reordering the clip array (save / insert) keeps cached pictures', () => {
+    const c = preview.createPreviewCache()
+    const setup = (s: any) => preview.ensurePreviewFingerprint(c, preview.previewFingerprint(s, settings, 320, 180), 320, 180)
+    setup(seq); preview.putCachedFrame(c, 30, dest)
+    const unchanged = c.frames.get(30)
+    setup({ ...seq, clips: [...seq.clips].reverse() })
+    check(c.frames.get(30) === unchanged, 'clip array order change cleared the cache')
+  })
+  await test('chalk hand metadata participates in visual cache identity', () => {
+    const changed = { ...seq, clips: [{ ...seq.clips[0], meta: { source: { chalk: { on: true, scale: 2, hand: { mediaId: 'hand' }, tip: [[0, 0, 0]] } } } }, seq.clips[1]] }
+    check(preview.previewFingerprint(seq, settings, 320, 180) !== preview.previewFingerprint(changed, settings, 320, 180), 'chalk hand changes reused stale pixels')
+  })
   await test('leaving cached playback must seek the paused decoder to the current target', async () => {
     video.setVideoSeekQuiet(false)
     video.videoFrameAt(media[0], 1, 30, 'resume-test')
@@ -188,6 +221,22 @@ async function test(name: string, fn: () => void | Promise<void>) {
     check(bmp && bmp.width === 320 && bmp.height === 180, 'disk frame did not decode back')
     bmp!.close()
     await disk.clearDiskCache()
+  })
+  await test('local edits reuse unchanged disk pixels without recomposition', async () => {
+    const shared = preview.getProgramPreviewCache()
+    const base = { ...seq, clips: [{ ...seq.clips[0], duration: 2, mediaId: undefined, solid: { color: '#112233' } }] }
+    const show = (s: any) => preview.presentCachedProgramFrame(shared, 0, 30, dest, s, [], settings, images, 320, 180, 320)
+    show(base)
+    await disk.diskReady()
+    await Promise.all([disk.diskWrite(30, dest), disk.diskWrite(120, dest)])
+    check(disk.diskHas(30) && disk.diskHas(120), 'disk fixture missing')
+    show({ ...base, clips: [{ ...base.clips[0], solid: { color: '#445566' } }] })
+    await disk.diskReady()
+    check(!disk.diskHas(30), 'edited disk frame survived')
+    check(disk.diskHas(120), 'unchanged disk frame was discarded')
+    const bmp = await disk.diskRead(120)
+    check(!!bmp, 'retained disk entry has no pixels')
+    bmp?.close()
   })
   video.pauseAllVideos()
   return { failed: results.filter(r => !r.ok).length, results, pixelFailure: (window as any).pixelFailure }

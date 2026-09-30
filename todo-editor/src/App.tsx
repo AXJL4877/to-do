@@ -63,12 +63,12 @@ export default function App() {
   }, [])
 
   // 独立窗：停播跟 store；播放跟主窗 broadcast 的 live（见 Monitor）
-  const playing = useApp((s) => s.playing)
-  const playhead = useApp((s) => s.playhead)
   useEffect(() => {
     if (!POPOUT) return
-    if (!playing) setLivePlayhead(playhead)
-  }, [playing, playhead])
+    const sync = (s: { playing: boolean; playhead: number }) => { if (!s.playing) setLivePlayhead(s.playhead) }
+    sync(useApp.getState())
+    return useApp.subscribe((s, prev) => { if (s.playhead !== prev.playhead || s.playing !== prev.playing) sync(s) })
+  }, [])
 
   useEffect(() => {
     if (TIMELINE_POPOUT) {

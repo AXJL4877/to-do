@@ -77,7 +77,7 @@
     },
     {
       "id": "tail", "type": "number", "group": "timing", "label": "结尾停留",
-      "min": 0, "max": 3, "step": 0.5, "default": 1, "unit": "秒", "hint": "配音结束后停在最后一块黑板"
+      "min": 0, "max": 3, "step": 0.5, "default": 0, "unit": "秒", "hint": "配音结束后停在最后一块黑板；0 = 画面和配音同时结束"
     },
     {
       "id": "fps", "type": "select", "group": "timing", "label": "帧率", "default": "30",

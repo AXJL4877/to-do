@@ -5,7 +5,7 @@
  *   subtitle：取一条 tts 任务的文案 / 配音 / 时间戳 → 渲染（按逐字时间戳切条 + 透明底烧录）。
  *   narrated：口播 → 配音 → 按短语时间戳分板拆元素 → 元素生图 ∥ 逐板渲染成时间轴片段；阶段产物随时写进 params.partial 供前端流式入轨。各步产物落盘，重试复用。
  */
-import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { saveImageResult, submitImageGeneration } from './huniuClient.mjs'
@@ -132,21 +132,22 @@ async function executeElementsJob(job, entry, ctx) {
   const aspect = assetAspect(req.params, els.length)
   let done = els.filter((_, i) => existsSync(path.join(outDir, elementImageName(job.id, i)))).length
   phase(`生成元素图 ${done}/${els.length}（${pctOf('assets', done / els.length)}%）`)
+  const imageFails = []
   await Promise.all(els.map(async (el, i) => {
     const file = path.join(outDir, elementImageName(job.id, i))
     if (existsSync(file)) return
-    const tmp = `${file}.part`
-    await withRetry(async () => {
-      const submitted = await submitImageGeneration(config, {
+    try {
+      await generateElementImage(config, withRetry, {
         prompt: assetPrompt(pack, el, req.params), model: pack.assets.models[0], size: aspect, quality: pack.assets.resolution,
-      })
-      await saveImageResult(config, submitted, tmp)
-    })
-    // 下载完才改名，中途失败不会留下半张图被重试误复用
-    renameSync(tmp, file)
+      }, file)
+    } catch (e) {
+      imageFails.push({ index: i, label: el.label, error: errText(e) })
+      return
+    }
     done++
     phase(`生成元素图 ${done}/${els.length}（${pctOf('assets', done / els.length)}%）`)
   }))
+  if (imageFails.length) throw new Error(imageFailMessage(imageFails, done, els.length))
 
   // 3. 渲染
   const request = {
@@ -204,23 +205,59 @@ const narratedPct = (stage, local) => Math.round(stage === 'tts' ? 10 * local : 
 const NARRATED_IMAGE_CONCURRENCY = Math.max(1, Math.min(8, Number(process.env.TODO_AI_CONCURRENCY) || 4))
 
 /**
+ * 生一张元素图到 out。提交即扣费，所以网络波动只重试下载；提交返回的地址先落盘（out.url.json），
+ * 下载失败后任务重试会先拿这个地址再下一次，地址失效才重新提交。
+ */
+async function generateElementImage(config, withRetry, request, out) {
+  const tmp = `${out}.part`
+  const pending = `${out}.url.json`
+  if (existsSync(pending)) {
+    try {
+      await withRetry(() => saveImageResult(config, JSON.parse(readFileSync(pending, 'utf8')), tmp))
+      renameSync(tmp, out)
+      rmSync(pending, { force: true })
+      return
+    } catch { rmSync(pending, { force: true }) }
+  }
+  const submitted = await withRetry(() => submitImageGeneration(config, request))
+  if (submitted.kind === 'url') writeFileSync(pending, JSON.stringify(submitted))
+  await withRetry(() => saveImageResult(config, submitted, tmp))
+  // 下载完才改名，中途失败不会留下半张图被重试误复用
+  renameSync(tmp, out)
+  rmSync(pending, { force: true })
+}
+
+const errText = (e) => String(e instanceof Error ? e.message : e).slice(0, 120)
+
+function imageFailMessage(fails, done, total) {
+  const list = fails.sort((a, b) => a.index - b.index).map((f) => `「${f.label || `元素${f.index + 1}`}」${f.error}`).join('；')
+  return `${fails.length} 个元素生图失败（成功的 ${done}/${total} 已保留，重试只补失败的）：${list}`
+}
+
+/**
  * 分板 → 渲染时间表（毫秒，绝对时间）。黑板在换板短语开口时切换，第一块从 0 开始，最后一块留到配音结束后 tail 秒。
  * 元素在锚点短语开口时起笔，最晚写到下一个元素起笔前（windowEndMs），实际书写时长由渲染端按墨量和书写速度定。
  */
 export function narrationSchedule(plan, phrases, durationSec, tailSec) {
   const endMs = Math.round((durationSec + tailSec) * 1000)
   const at = (i) => Math.round(phrases[i].start * 1000)
-  return plan.scenes.map((s, k) => {
+  const boards = plan.scenes.map((s, k) => {
     const startMs = k === 0 ? 0 : at(s.start)
-    const sceneEnd = k + 1 < plan.scenes.length ? at(plan.scenes[k + 1].start) : endMs
+    const nextStart = k + 1 < plan.scenes.length ? at(plan.scenes[k + 1].start) : endMs
     let prev = startMs - 400
-    const starts = s.elements.map((e) => (prev = Math.max(at(e.at), prev + 400, startMs)))
+    // 第一块黑板的第一个元素随配音开口起笔，片头不空屏；之后各块由上一块留到本块起笔，不需要提前
+    const starts = s.elements.map((e, j) => (prev = Math.max(k === 0 && j === 0 ? at(s.start) : at(e.at), prev + 400, startMs)))
+    return { startMs, starts: starts.map((t) => Math.min(t, nextStart - 300)) }
+  })
+  return boards.map(({ startMs, starts }, k) => {
+    // 上一块黑板一直留到下一块第一个元素起笔，两板硬切，中间不空屏
+    const sceneEnd = k + 1 < boards.length ? boards[k + 1].starts[0] ?? boards[k + 1].startMs : endMs
     return {
       startMs,
       endMs: sceneEnd,
-      elements: s.elements.map((e, j) => ({
-        atMs: Math.min(starts[j], sceneEnd - 300),
-        windowEndMs: Math.max(Math.min(starts[j], sceneEnd - 300) + 300, (starts[j + 1] ?? sceneEnd) - 150),
+      elements: starts.map((t, j) => ({
+        atMs: t,
+        windowEndMs: Math.max(t + 300, (starts[j + 1] ?? sceneEnd) - 150),
       })),
     }
   })
@@ -258,7 +295,7 @@ async function executeNarratedJob(job, entry, ctx) {
   const { pack } = entry
   const names = ttsNames(job.id)
   const file = (k) => path.join(outDir, names[k])
-  const tail = Number(req.params.tail ?? 1)
+  const tail = Number(req.params.tail ?? 0)
 
   // 1. 配音（逐字时间戳）→ 先上时间轴
   if (!existsSync(file('audio')) || !existsSync(file('timing'))) {
@@ -302,7 +339,6 @@ async function executeNarratedJob(job, entry, ctx) {
   const imageOf = (k, j) => path.join(outDir, elementImageName(job.id, offsets[k] + j))
   let imagesDone = plan.scenes.reduce((n, s, k) => n + s.elements.filter((_, j) => existsSync(imageOf(k, j))).length, 0)
   let elsRendered = 0
-  let failed = false
   const report = (what) => phase(`${what} · 生图 ${imagesDone}/${nEls} · 黑板 ${partial.scenes.length}/${plan.scenes.length}（${narratedPct('work', 0.4 * imagesDone / nEls + 0.6 * elsRendered / nEls)}%）`)
   const gate = limiter(NARRATED_IMAGE_CONCURRENCY)
   let renderQueue = Promise.resolve()
@@ -367,35 +403,42 @@ async function executeNarratedJob(job, entry, ctx) {
   }
 
   report('开始')
-  const settled = await Promise.allSettled(plan.scenes.map(async (s, k) => {
+  // 单个元素失败不牵连其它元素和其它黑板：图齐的板照常渲染入轨，最后汇总报错，重试时只补缺的图
+  const imageFails = []
+  const renderFails = []
+  await Promise.all(plan.scenes.map(async (s, k) => {
     const cached = cachedScene(k)
     if (cached) { publish(k, cached); return }
-    await Promise.all(s.elements.map((el, j) => gate(async () => {
+    const ok = await Promise.all(s.elements.map((el, j) => gate(async () => {
       const out = imageOf(k, j)
-      if (failed || existsSync(out)) return
-      const tmp = `${out}.part`
-      await withRetry(async () => {
-        const submitted = await submitImageGeneration(config, {
+      if (existsSync(out)) return true
+      try {
+        await generateElementImage(config, withRetry, {
           prompt: assetPrompt(pack, el, req.params), model: pack.assets.models[0], size: '1:1', quality: pack.assets.resolution,
-        })
-        await saveImageResult(config, submitted, tmp)
-      })
-      renameSync(tmp, out)
+        }, out)
+      } catch (e) {
+        imageFails.push({ index: offsets[k] + j, scene: k, label: el.label, error: errText(e) })
+        partial.failed = [...imageFails].sort((a, b) => a.index - b.index)
+        saveParams(params)
+        report('生成元素图')
+        return false
+      }
       imagesDone++
       report('生成元素图')
-    }).catch((e) => { failed = true; throw e })))
+      return true
+    })))
+    if (!ok.every(Boolean)) return
     const run = renderQueue.then(async () => {
-      if (failed) throw new Error('已中止')
       report(`渲染第 ${k + 1} 块黑板`)
       publish(k, await renderScene(k))
       report(`第 ${k + 1} 块黑板已入轨`)
     })
     renderQueue = run.catch(() => {})
-    await run.catch((e) => { failed = true; throw e })
+    await run.catch((e) => { renderFails.push(`第 ${k + 1} 块黑板渲染失败：${errText(e)}`) })
   }))
-  const firstError = settled.find((r) => r.status === 'rejected' && !/已中止/.test(String(r.reason)))
-    ?? settled.find((r) => r.status === 'rejected')
-  if (firstError) throw firstError.reason
+  if (imageFails.length || renderFails.length) {
+    throw new Error([imageFails.length && imageFailMessage(imageFails, imagesDone, nEls), ...renderFails].filter(Boolean).join('；'))
+  }
 
   const width = Number(String(req.params.size).split('x')[0]) || 1280
   const height = Number(String(req.params.size).split('x')[1]) || 720

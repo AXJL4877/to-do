@@ -3,6 +3,7 @@
  * ponytail: 并发=1；要并行多路时再加 claimNext 槽位。
  */
 import { DatabaseSync } from 'node:sqlite'
+import { subtitleNarrationSource } from '../shared/ttsNarration.mjs'
 import { mkdirSync, writeFileSync, readFileSync, existsSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -264,13 +265,6 @@ function enqueueAnimJob(body) {
  */
 const ASR_MEDIA_EXT = new Set(['.wav', '.mp3', '.m4a', '.aac', '.flac', '.ogg', '.opus', '.mp4', '.mov', '.mkv', '.webm', '.avi', '.m4v'])
 
-function narrationSource(sourceJobId) {
-  const job = rowToJob(getJob.get(String(sourceJobId || '')))
-  const n = job?.params?.output?.narration
-  if (!job || !n?.text || !n.timing || !['done', 'imported'].includes(job.status)) return null
-  return { mode: 'script', jobId: job.id, text: n.text, audio: n.audio, timing: n.timing, duration: n.duration }
-}
-
 /** 语音识别来源：AI 产物按 /ai-generated/ 文件名找；其余只认本机绝对路径上的音视频文件 */
 function mediaSource(m) {
   if (!m || typeof m !== 'object') return null
@@ -288,7 +282,7 @@ function mediaSource(m) {
 }
 
 function subtitleSource(body) {
-  const narration = body.sourceJobId ? narrationSource(body.sourceJobId) : null
+  const narration = subtitleNarrationSource(body, (id) => rowToJob(getJob.get(String(id))))
   const source = narration ?? mediaSource(body.sourceMedia)
   if (!source) throw new Error('这段音频没有配音文案和时间戳，也没有给出素材文件，烧不了字幕')
   return source
@@ -384,7 +378,7 @@ function laneOf(row) {
   try { return JSON.parse(row.params || '{}').engine === 'h3' ? 'h3' : 'cloud' } catch { return 'cloud' }
 }
 
-const TRANSIENT_RE = /fetch failed|ECONNRESET|ETIMEDOUT|ECONNREFUSED|EAI_AGAIN|socket hang up|UND_ERR|network|timed? ?out|\b(429|502|503|504)\b/i
+const TRANSIENT_RE = /fetch failed|terminated|ECONNRESET|ETIMEDOUT|ECONNREFUSED|EAI_AGAIN|socket hang up|UND_ERR|network|timed? ?out|\b(429|502|503|504)\b/i
 const AUTO_RETRIES = 2
 
 async function withTransientRetry(jobId, fn) {
