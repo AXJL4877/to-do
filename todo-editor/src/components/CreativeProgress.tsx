@@ -17,7 +17,7 @@ const BARS = [0.35, 0.7, 0.45, 0.95, 0.55, 0.8, 0.4, 0.65, 0.5, 0.85, 0.6, 0.75]
 /** 按任务类型挑进度主题 */
 export function progressThemeForJob(j: {
   kind?: string
-  params?: { skill?: { pipeline?: string; id?: string; name?: string }; engine?: string }
+  params?: { skill?: { pipeline?: string; id?: string; name?: string } | null; engine?: string }
 }): CreativeProgressTheme {
   const pipe = j.params?.skill?.pipeline || ''
   const id = j.params?.skill?.id || ''

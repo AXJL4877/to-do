@@ -5,6 +5,7 @@ import type { SnapGuide } from './monitorSnap'
 import { pauseUnusedVideoSlots, prerollVideo, resetFrameSampleStability, shownVideoTime, videoFrameAt } from './videoCache'
 import { mediaTimeAt, pictureClipsAt } from './programPlayer'
 import { drawFancyText, fontStack } from './fancyText'
+import { drawDynamicText } from './dynamicText'
 import { mayHaveAlpha } from './mediaAlpha'
 import { HAND_TRACK_PREFIX, withChalkHands } from './chalkHandLayers'
 import { indexClips, indexTracks, upcomingClips } from './sequenceIndex'
@@ -572,6 +573,7 @@ export function drawTextClip(
   const localT = Math.max(0, playhead - clip.start)
   const fontSize = sampleKeyframes(clip.keyframes.fontSize, localT, t.fontSize)
   const fontPx = Math.max(12, fontSize * (h / 1080))
+  if (t.fancy?.dynamic && drawDynamicText(ctx, t, w, h, localT, clip.duration, fontSize)) return
   const inDur = Math.max(0.05, t.animInDur ?? 0.8)
   const outDur = Math.max(0.05, t.animOutDur ?? 0.4)
 

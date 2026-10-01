@@ -390,7 +390,8 @@ function exportViaFfmpegCli(seq, outPath, opts = {}) {
             `pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2:color=black@0,setsar=1,fps=${fps}[${lab}]`,
           )
         }
-        filters.push(`[${lab}]tpad=start_duration=${start}[${delayed}]`)
+        // A later clip must not cover earlier layers with opaque black before it starts.
+        filters.push(`[${lab}]tpad=start_duration=${start}:color=black@0[${delayed}]`)
         filters.push(`[${last}][${delayed}]overlay=eof_action=pass[${next}]`)
         last = next
       })

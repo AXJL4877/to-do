@@ -59,7 +59,18 @@ export interface TextStyle {
 /** 花字尺寸类数值均以 1080p 画面像素计，渲染时按画布高度缩放 */
 export interface FancyStroke { color: string; width: number }
 
+export interface DynamicText {
+  version: 1
+  engine: 'jizura'
+  presetId: string
+  seed: number
+  duration: number
+  motion: number
+  accent: string
+}
+
 export interface FancyText {
+  dynamic?: DynamicText
   chalk?: { duration: number; grain: number; hand: boolean }
   /** 来源预设 id（仅展示用） */
   preset?: string

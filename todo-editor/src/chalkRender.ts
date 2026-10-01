@@ -1,6 +1,7 @@
 import { drawTextClip } from './lib/monitorDraw'
 import { fontStack } from './lib/fancyText'
 import { defaultText, type Clip } from './types'
+import { invalidateDynamicTextFonts } from './lib/dynamicText'
 
 const canvas = document.createElement('canvas')
 // This isolated renderer shares the exact text drawing code with the timeline.
@@ -16,8 +17,9 @@ Object.assign(window, {
   },
   /** 先把要用到的字体载入，否则第一帧会用回退字体画 */
   async loadTextFonts(families: string[]) {
-    await Promise.all(families.flatMap((f) => ['400', '600'].map((wt) => document.fonts.load(`${wt} 48px ${fontStack(f)}`, '字Ab').catch(() => []))))
+    await Promise.all(families.flatMap((f) => ['400', '600', '700', '800'].map((wt) => document.fonts.load(`${wt} 48px ${fontStack(f)}`, '字Ab').catch(() => []))))
     await document.fonts.ready
+    invalidateDynamicTextFonts()
     return true
   },
 })

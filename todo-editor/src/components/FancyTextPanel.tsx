@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { ChevronLeft, Pause, Play, Plus } from 'lucide-react'
+import { ChevronLeft, Pause, Play, Plus, Shuffle } from 'lucide-react'
 import { useApp } from '../store'
-import { defaultText, type FancyText, type TextStyle } from '../types'
+import { defaultText, type Clip, type DynamicText, type FancyText, type TextStyle } from '../types'
 import { FANCY_CATEGORIES, FANCY_PRESETS, availableFonts, clonePresetFancy, drawFancyText, onFancyTextureLoaded, pickFont, presetCategory, type FancyCategory, type FancyPreset } from '../lib/fancyText'
 import { NumInput } from './NumInput'
 import { PropSection } from './PropUI'
+import { drawTextClip } from '../lib/monitorDraw'
+import { dynamicTextWarning, invalidateDynamicTextFonts, normalizeDynamicText } from '../lib/dynamicText'
 
 const DEFAULT_PRESET = FANCY_PRESETS[0]
 
@@ -30,7 +32,7 @@ function swatch(f: FancyText): CSSProperties {
   ].filter(Boolean).join(',')
   return {
     color: f.fill[0], fontWeight: f.fontWeight,
-    background: f.bg?.color ?? (f.chalk ? '#203532' : undefined),
+    background: f.bg?.color ?? (f.chalk ? '#203532' : f.dynamic ? '#242b36' : undefined),
     WebkitTextStroke: outer ? `1px ${outer.color}` : undefined,
     textShadow: shadows || undefined,
   }
@@ -41,19 +43,25 @@ const hex = (c: string | undefined, fb: string) => (c && /^#[0-9a-f]{6}/i.test(c
 export function FancyTextPanel() {
   const clip = useApp(s => s.sequences.find(q => q.id === s.activeSeqId)?.clips.find(c => c.id === s.selectedClipIds[0] && c.text))
   const selectedCount = useApp(s => s.selectedClipIds.length)
+  const settings = useApp(s => s.settings)
   const update = useApp(s => s.updateSelectedText)
   const [draft, setDraft] = useState(initialText)
   const text = clip?.text ?? draft
   const style = fancyOf(text)
   const chalk = style.chalk
-  const [category, setCategory] = useState<FancyCategory | null>(() => clip?.text?.fancy ? presetCategory(style.preset) : null)
+  const dynamic = normalizeDynamicText(style.dynamic)
+  const isDynamic = !!style.dynamic
+  const [category, setCategory] = useState<FancyCategory | null>(() => clip?.text?.fancy ? (isDynamic ? 'dynamic' : presetCategory(style.preset)) : null)
   const [playing, setPlaying] = useState(false)
+  const [playCycle, setPlayCycle] = useState(0)
   const [time, setTime] = useState(99)
   const [board, setBoard] = useState(true)
   const [texTick, setTexTick] = useState(0)
   const canvas = useRef<HTMLCanvasElement>(null)
   const fonts = useMemo(() => availableFonts(), [])
-  const total = chalk ? chalk.duration + 1 : 0
+  const total = dynamic ? (clip?.duration ?? dynamic.duration) : chalk ? chalk.duration + 1 : 0
+  const previewW = isDynamic ? (settings.height > settings.width ? 360 : 640) : 640
+  const previewH = isDynamic ? Math.round(previewW * settings.height / settings.width) : 200
   const presetName = FANCY_PRESETS.find(p => p.id === style.preset)?.name ?? '文字'
 
   function patch(p: Partial<TextStyle>) {
@@ -62,12 +70,13 @@ export function FancyTextPanel() {
   }
   function setFancy(p: Partial<FancyText>) { patch({ fancy: { ...style, ...p } }) }
   function setChalk(p: Partial<NonNullable<FancyText['chalk']>>) { if (chalk) setFancy({ chalk: { ...chalk, ...p } }) }
+  function setDynamic(p: Partial<DynamicText>) { if (dynamic) setFancy({ dynamic: { ...dynamic, ...p } }) }
   function applyPreset(p: FancyPreset) {
     const next = clonePresetFancy(p)
     const d = defaultText()
-    const anim = next.chalk ? { animIn: 'none', animOut: 'none' } : chalk ? { animIn: d.animIn, animOut: d.animOut } : {}
+    const anim = next.chalk || next.dynamic ? { animIn: 'none', animOut: 'none' } : chalk || isDynamic ? { animIn: d.animIn, animOut: d.animOut } : {}
     patch({ fancy: next, fontFamily: pickFont(p.fonts), color: next.fill[0], ...anim } as Partial<TextStyle>)
-    if (next.chalk) { setTime(0); setPlaying(true) }
+    if (next.chalk || next.dynamic) { setTime(0); setPlaying(true); setPlayCycle(n => n + 1) }
   }
   function openCategory(id: FancyCategory) {
     setCategory(id)
@@ -75,27 +84,41 @@ export function FancyTextPanel() {
     if (first && (!text.fancy || presetCategory(style.preset) !== id)) applyPreset(first)
   }
 
-  useEffect(() => { setPlaying(false); setTime(99); setCategory(clip?.text?.fancy ? presetCategory(style.preset) : null) }, [clip?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setPlaying(false); setTime(isDynamic ? Math.min(1.2, total / 2) : 99); setCategory(clip?.text?.fancy ? (isDynamic ? 'dynamic' : presetCategory(style.preset)) : null) }, [clip?.id]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => onFancyTextureLoaded(() => setTexTick(n => n + 1)), [])
+  useEffect(() => {
+    if (!isDynamic) return
+    let cancelled = false
+    document.fonts.load(`${style.fontWeight || 700} 48px "${text.fontFamily}"`, text.content || '字Ab')
+      .then(() => { if (!cancelled) { invalidateDynamicTextFonts(); setTexTick(n => n + 1) } }).catch(() => {})
+    return () => { cancelled = true }
+  }, [isDynamic, text.fontFamily, style.fontWeight])
   useEffect(() => {
     if (!playing) return
     let raf = 0
     const start = performance.now()
+    const from = time >= total ? 0 : time
     const tick = (now: number) => {
-      const t = (now - start) / 1000
+      const t = from + (now - start) / 1000
       setTime(Math.min(total, t))
       if (t < total) raf = requestAnimationFrame(tick)
       else setPlaying(false)
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
-  }, [playing, total])
+  }, [playing, total, style.preset, dynamic?.seed, playCycle])
   useEffect(() => {
     const cv = canvas.current
     if (!cv) return
     const ctx = cv.getContext('2d')!
     ctx.clearRect(0, 0, cv.width, cv.height)
     ctx.save(); ctx.translate(cv.width / 2, cv.height / 2)
+    if (isDynamic) {
+      drawTextClip(ctx, { text: { ...text, fancy: style }, start: 0, duration: total || 3, keyframes: clip?.keyframes ?? {} } as Clip,
+        cv.width, cv.height, Math.min(time, total || 3))
+      ctx.restore()
+      return
+    }
     const lines = text.content.split('\n')
     const longest = Math.max(1, ...lines.map(l => Array.from(l).length))
     const px = Math.min(64, 520 / longest, 150 / (lines.length * text.lineHeight))
@@ -103,12 +126,15 @@ export function FancyTextPanel() {
       lineHeight: text.lineHeight, letterSpacing: text.letterSpacing,
       fancy: style, k: px / text.fontSize, time: chalk ? time : undefined })
     ctx.restore()
-  }, [text, time, texTick, category]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [text, time, texTick, category, previewW, previewH, total, clip?.keyframes]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function add() {
     const name = `${presetName} · ${text.content.slice(0, 12)}`
     useApp.getState().addTextClip({ name, text: { ...text, fancy: style } })
-    if (chalk) useApp.getState().updateSelectedClip({ duration: Math.max(3, total), outPoint: Math.max(3, total) })
+    if (chalk || dynamic) {
+      const duration = Math.max(3, chalk ? total : dynamic!.duration)
+      useApp.getState().updateSelectedClip({ duration, outPoint: duration })
+    }
   }
 
   const outer = style.strokes[style.strokes.length - 1]
@@ -134,15 +160,27 @@ export function FancyTextPanel() {
       {clip && <span className="fancy-editing">编辑中 · {clip.name}{selectedCount > 1 ? `（+${selectedCount - 1}）` : ''}</span>}
     </div>
     <div className="chalk-title-preview" style={{ background: board ? (chalk ? '#203532' : '#1c1f22') : undefined }}>
-      <canvas ref={canvas} width={640} height={200} data-testid="fancy-preview" />
+      <canvas ref={canvas} width={previewW} height={previewH} style={isDynamic ? { maxHeight: 320, objectFit: 'contain' } : undefined} data-testid="fancy-preview" />
       <div className="chalk-preview-controls">
-        {chalk && <>
-          <button type="button" onClick={() => { if (!playing) setTime(0); setPlaying(v => !v) }} aria-label={playing ? '暂停书写预览' : '播放书写预览'}>{playing ? <Pause size={14} /> : <Play size={14} />}</button>
-          <input aria-label="书写预览进度" type="range" min={0} max={total} step={0.01} value={Math.min(total, time)} onChange={e => { setPlaying(false); setTime(Number(e.target.value)) }} />
+        {(chalk || dynamic) && <>
+          <button type="button" data-testid="fancy-play" onClick={() => { if (time >= total) setTime(0); setPlaying(v => !v) }} aria-label={playing ? '暂停动画预览' : '播放动画预览'}>{playing ? <Pause size={14} /> : <Play size={14} />}</button>
+          <input aria-label="动画预览进度" data-testid="fancy-seek" type="range" min={0} max={total} step={0.01} value={Math.min(total, time)} onChange={e => { setPlaying(false); setTime(Number(e.target.value)) }} />
+          <button type="button" aria-label="重新播放" onClick={() => { setTime(0); setPlaying(true); setPlayCycle(n => n + 1) }}>重播</button>
         </>}
         <button type="button" className="ml-auto" onClick={() => setBoard(v => !v)} title="仅切换预览底色，导出始终透明">{board ? '透明底' : '深色底'}</button>
       </div>
     </div>
+    {dynamic && <div className="flex flex-col gap-1" data-testid="dynamic-controls">
+      <button type="button" className="btn" data-testid="dynamic-shuffle" onClick={() => {
+        const seed = new Uint32Array(1); crypto.getRandomValues(seed)
+        setDynamic({ seed: seed[0] }); setTime(0); setPlaying(true)
+      }}><Shuffle size={13} />换一版</button>
+      <NumInput label="动画时长" unit="s" value={dynamic.duration} min={0.5} max={12} step={0.1} defaultValue={3} testId="dynamic-duration" onChange={duration => setDynamic({ duration })} />
+      <NumInput label="运动强度" value={dynamic.motion} min={0} max={1} step={0.05} defaultValue={0.7} testId="dynamic-motion" onChange={motion => setDynamic({ motion })} />
+      <label className="editor-inline">强调色 <input aria-label="强调色" type="color" value={dynamic.accent} onChange={e => setDynamic({ accent: e.target.value })} /></label>
+      {clip && dynamic.duration > clip.duration && <p className="editor-hint">动画时长超过片段长度，尾部动画会被截断。</p>}
+    </div>}
+    {isDynamic && dynamicTextWarning(text) && <p className="editor-hint" data-testid="dynamic-warning">{dynamicTextWarning(text)}</p>}
     <textarea className="input fancy-content" rows={2} maxLength={300} value={text.content} placeholder="输入文字…" aria-label="文字内容" data-testid="fancy-content" onChange={e => patch({ content: e.target.value })} />
     <div className="fancy-preset-grid">
       {FANCY_PRESETS.filter(p => p.category === category).map(p => <button type="button" key={p.id} title={p.name} className={style.preset === p.id ? 'is-selected' : ''} data-testid={`fancy-preset-${p.id}`} onClick={() => applyPreset(p)}>
@@ -158,7 +196,7 @@ export function FancyTextPanel() {
         <input aria-label="文字颜色" title="文字颜色" type="color" value={hex(style.fill[0], '#ffffff')} onChange={e => patch({ fancy: { ...style, fill: [e.target.value] }, color: e.target.value })} />
       </div>
       <NumInput label="字号" value={text.fontSize} min={12} max={300} defaultValue={96} showSlider={false} onChange={fontSize => patch({ fontSize })} />
-      <NumInput label="字距" value={text.letterSpacing} min={-10} max={40} defaultValue={0} showSlider={false} onChange={letterSpacing => patch({ letterSpacing })} />
+      {!isDynamic && <NumInput label="字距" value={text.letterSpacing} min={-10} max={40} defaultValue={0} showSlider={false} onChange={letterSpacing => patch({ letterSpacing })} />}
       {outer && <div className="editor-inline">
         <span>描边</span>
         <input aria-label="描边颜色" type="color" value={hex(outer.color, '#000000')} onChange={e => setOuter({ color: e.target.value })} />
@@ -167,7 +205,7 @@ export function FancyTextPanel() {
       {style.glow && <NumInput label="发光" value={style.glow.blur} min={0} max={60} defaultValue={24} onChange={blur => setFancy({ glow: { ...style.glow!, blur } })} />}
       {style.extrude && <NumInput label="立体厚度" value={style.extrude.depth} min={0} max={30} defaultValue={10} onChange={depth => setFancy({ extrude: { ...style.extrude!, depth } })} />}
       {style.bg && <div className="editor-inline"><label>底色 <input aria-label="底色" type="color" value={hex(style.bg.color, '#000000')} onChange={e => setFancy({ bg: { ...style.bg!, color: e.target.value } })} /></label></div>}
-      {!chalk && <div className="editor-inline"><label><input type="checkbox" checked={!!style.shadow} onChange={e => setFancy({ shadow: e.target.checked ? { color: '#000000a0', blur: 10, x: 0, y: 4 } : undefined })} /> 投影</label></div>}
+      {!chalk && !isDynamic && <div className="editor-inline"><label><input type="checkbox" checked={!!style.shadow} onChange={e => setFancy({ shadow: e.target.checked ? { color: '#000000a0', blur: 10, x: 0, y: 4 } : undefined })} /> 投影</label></div>}
       {chalk && <>
         <NumInput label="书写时长" unit="s" value={chalk.duration} min={0.2} max={12} step={0.1} defaultValue={2} onChange={duration => setChalk({ duration })} />
         {clip && chalk.duration > clip.duration && <p className="editor-hint">书写时长超过片段长度，尾部笔迹会被截断。</p>}
