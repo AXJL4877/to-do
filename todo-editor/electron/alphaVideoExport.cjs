@@ -26,10 +26,11 @@ function run(ffmpeg, args) {
 async function prepareAlphaVideos(sequence, { ffmpeg, onProgress }) {
   if (sequence.audioOnly) return sequence
   const videoTracks = new Set((sequence.tracks || []).filter((t) => t.kind === 'video').map((t) => t.id))
-  const clips = (sequence.clips || []).filter((c) => c.enabled !== false && videoTracks.has(c.trackId)
+  const inRange = (c) => !sequence.rangeOnly
+    || (c.start < Number(sequence.workOut) && c.start + c.duration > Number(sequence.workIn))
+  const clips = (sequence.clips || []).filter((c) => c.enabled !== false && videoTracks.has(c.trackId) && inRange(c)
     && typeof c.mediaPath === 'string' && /\.webm$/i.test(c.mediaPath) && fs.existsSync(c.mediaPath))
   const paths = [...new Set(clips.map((c) => c.mediaPath))]
-  if (!paths.length) return sequence
   fs.mkdirSync(CACHE_DIR, { recursive: true })
   const swap = new Map()
   for (let i = 0; i < paths.length; i++) {
@@ -41,6 +42,7 @@ async function prepareAlphaVideos(sequence, { ffmpeg, onProgress }) {
       swap.set(src, out)
       continue
     }
+    onProgress?.(1 + (i / paths.length) * 9, `透明素材转码 ${i + 1}/${paths.length}`)
     const probe = await run(ffmpeg, ['-hide_banner', '-i', src])
     if (!/alpha_mode\s*:\s*1/i.test(probe.stderr)) continue
     const tmp = `${out}.partial.mov`
@@ -48,13 +50,47 @@ async function prepareAlphaVideos(sequence, { ffmpeg, onProgress }) {
     if (r.code !== 0) throw new Error(`透明视频转码失败：${path.basename(src)} ${r.stderr.trim().slice(-300)}`)
     fs.renameSync(tmp, out)
     swap.set(src, out)
-    onProgress?.(Math.round(((i + 1) / paths.length) * 10))
   }
-  if (!swap.size) return sequence
+  const holds = await matchHoldStills(sequence, { ffmpeg, videoTracks, inRange, swap })
+  if (!swap.size && !holds.size) return sequence
   return {
     ...sequence,
-    clips: sequence.clips.map((c) => (videoTracks.has(c.trackId) && swap.has(c.mediaPath) ? { ...c, mediaPath: swap.get(c.mediaPath) } : c)),
+    clips: sequence.clips.map((c) => {
+      if (!videoTracks.has(c.trackId)) return c
+      const to = swap.get(c.mediaPath) || holds.get(c.mediaPath)
+      return to ? { ...c, mediaPath: to } : c
+    }),
   }
+}
+
+/**
+ * 黑板书写的定格图 xxx_hold.png 是无损原图，前面的 xxx.webm 却是 yuv420 有损编码，
+ * 视频切到定格图那一帧颜色 / 纹理会跳一下。导出时改用视频真正的最后一帧当定格图；
+ * 取帧必须来自引擎实际读的那份（转码后的 MOV），换条解码路径颜色又会差一点。
+ */
+async function matchHoldStills(sequence, { ffmpeg, videoTracks, inRange, swap }) {
+  const holds = new Map()
+  const stills = [...new Set((sequence.clips || [])
+    .filter((c) => c.enabled !== false && videoTracks.has(c.trackId) && inRange(c)
+      && typeof c.mediaPath === 'string' && /_hold\.png$/i.test(c.mediaPath))
+    .map((c) => c.mediaPath))]
+  for (const still of stills) {
+    const webm = still.replace(/_hold\.png$/i, '.webm')
+    const src = swap.get(webm)
+    if (!src || !fs.existsSync(still)) continue
+    const st = fs.statSync(src)
+    const key = crypto.createHash('sha1').update(`${path.normalize(src)}|${st.size}|${st.mtimeMs}|last`).digest('hex').slice(0, 16)
+    const out = path.join(CACHE_DIR, `${key}_last.png`)
+    if (!fs.existsSync(out)) {
+      const tmp = path.join(CACHE_DIR, `${key}_last.partial.png`)
+      const r = await run(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-sseof', '-1', '-i', src,
+        '-an', '-pix_fmt', 'rgba', '-f', 'image2', '-update', '1', tmp])
+      if (r.code !== 0 || !fs.existsSync(tmp)) continue
+      fs.renameSync(tmp, out)
+    }
+    holds.set(still, out)
+  }
+  return holds
 }
 
 module.exports = { prepareAlphaVideos }

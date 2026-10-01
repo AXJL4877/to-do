@@ -47,6 +47,7 @@
 - `plan`：可选。给了就跳过 AI 规划（格式见 §3.1）；元素数须与 `params.elements` 一致（`elements=0` 时不限）。
 - `images`：可选，与 `plan.elements` 对齐的 dataUrl 数组（png/jpg/webp，可含 `null`）；给了的元素不再生图。必须同时给 `plan`。
 - `autoTimeline`：前端完成后自动放上时间线。
+- `placement`：可选，自动入轨位置。`"playhead"` 从 `placeAt`（秒，提交时的播放头）开始，那里被占的层换到空轨、整组不挪；`"end"` 接在整条时间线最后一个片段后面。省略时沿用旧规则：播放头处这组要占的轨都空就从播放头放，否则接在这几条轨末尾。
 
 ### 1.2 CLI（每条命令 stdout 一行 JSON）
 

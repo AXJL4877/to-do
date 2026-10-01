@@ -127,6 +127,16 @@ def open_sink(path: Path, W: int, H: int, fps: int, alpha: bool, crf: int, ffmpe
     return subprocess.Popen(args, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
 
 
+def last_frame_png(video: Path, out: Path, ffmpeg: str) -> bool:
+    """定格图取视频自己的最后一帧：原图无损、视频是 yuv420，直接存原图会在切换那帧跳色。"""
+    r = subprocess.run(
+        [ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-c:v", "libvpx-vp9", "-sseof", "-1", "-i", str(video),
+         "-an", "-pix_fmt", "rgba", "-f", "image2", "-update", "1", str(out)],
+        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+    )
+    return r.returncode == 0 and out.exists() and out.stat().st_size > 0
+
+
 def to_straight_rgba(bgr: np.ndarray, tone: str = "chalk") -> tuple[np.ndarray, np.ndarray]:
     """黑底粉笔 → 直通 alpha：亮度即不透明度，颜色反预乘，叠到任意底上仍是粉笔。
     tone=ink：压掉灰度分量只留色相，白粉笔变深色墨线，适合叠在浅色画面上。"""
@@ -605,7 +615,8 @@ def render_scene_clips(req: dict, progress: Progress) -> dict:
                 hand = save_hand(out_dir / f"{prefix}_hand.png", r.tip)
             stage.run(r, du + DRAW_TAIL_MS, work)
             stage.close()
-            stage.save_still(out_dir / hold, r.drawn, crop)
+            if not last_frame_png(out_dir / video, out_dir / hold, ffmpeg):
+                stage.save_still(out_dir / hold, r.drawn, crop)
             clips.append({
                 "id": e["id"], "label": e["label"], "role": e["role"], "box": e["box"],
                 "crop": [crop[0], crop[1], crop[2] - crop[0], crop[3] - crop[1]],

@@ -142,6 +142,7 @@ export type DesktopApi = {
     jobId: string
     progress: number
     status: 'running' | 'done' | 'error'
+    stage?: string
     error?: string
     path?: string
   }) => void) => () => void
@@ -179,6 +180,101 @@ export type DesktopApi = {
     duration?: number
     error?: string
   }>
+  /** 量一段媒体的综合响度（LUFS），给一键调音用 */
+  analyzeLoudness?: (
+    filePath: string,
+    opts?: { inPoint?: number; duration?: number },
+  ) => Promise<{ ok: boolean; lufs?: number; error?: string }>
+  /** 把 PNG dataURL 落到项目素材目录，返回本机 path/url */
+  saveMediaAsset?: (name: string, dataUrl: string) => Promise<{
+    ok: boolean
+    path?: string
+    url?: string
+    error?: string
+  }>
+  pickImageFile?: () => Promise<{ ok: boolean; canceled?: boolean; path?: string; url?: string }>
+  pickVideoFile?: () => Promise<{ ok: boolean; canceled?: boolean; path?: string; url?: string }>
+  douyinStatus?: (root?: string) => Promise<{
+    ok: boolean
+    root?: string
+    inbox?: string
+    publishOk?: boolean
+    selectedSlug?: string
+    draft?: Record<string, unknown>
+    assetCount?: number
+    desk?: { ok: boolean; error?: string }
+    archive?: { ok: boolean; error?: string }
+    deskUrl?: string
+    error?: string
+  }>
+  douyinOpenDesk?: (root?: string) => Promise<{ ok: boolean; deskUrl?: string; inbox?: string; error?: string }>
+  douyinRevealInbox?: (root?: string) => Promise<{ ok: boolean; inbox?: string }>
+  douyinListAssets?: (root?: string) => Promise<{
+    ok: boolean
+    assets?: Array<{
+      id: string
+      slug: string
+      title: string
+      caption?: string
+      tags?: string[]
+      kind?: string
+      video_path?: string
+      cover_path?: string
+      cover_url?: string
+      folder?: string
+      updated_at?: number
+    }>
+    drop?: string
+    builtin?: boolean
+    error?: string
+  }>
+  douyinUseAsset?: (slug: string, root?: string) => Promise<{
+    ok: boolean
+    slug?: string
+    draft?: Record<string, unknown>
+    asset?: Record<string, unknown>
+    error?: string
+  }>
+  douyinStageAsset?: (payload: {
+    videoPath?: string
+    coverPath?: string
+    coverLandscapePath?: string
+    slug?: string
+    meta?: {
+      title?: string
+      caption?: string
+      tags?: string[]
+      board?: string
+      trade_date?: string
+    }
+    root?: string
+    openDesk?: boolean
+    useAsset?: boolean
+  }) => Promise<{
+    ok: boolean
+    slug?: string
+    dir?: string
+    wrote?: string[]
+    meta?: unknown
+    deskUrl?: string
+    note?: string
+    error?: string
+  }>
+  douyinAttachCover?: (payload: { slug: string; coverPath: string; root?: string }) => Promise<{
+    ok: boolean
+    path?: string
+    error?: string
+  }>
+  douyinSaveMeta?: (payload: {
+    slug: string
+    meta?: { title?: string; caption?: string; tags?: string[]; board?: string; trade_date?: string }
+    root?: string
+  }) => Promise<{ ok: boolean; slug?: string; meta?: unknown; error?: string }>
+  douyinPublish?: (payload: {
+    action: 'phones' | 'status' | 'stage' | 'fill' | 'push'
+    serial?: string
+    root?: string
+  }) => Promise<{ ok: boolean; error?: string; phones?: Array<{ serial?: string; state?: string; model?: string; product?: string; douyin?: boolean }>; [k: string]: unknown }>
   /** B2 native program preview */
   previewInit?: (opts?: { fps?: number; budgetMB?: number; adapterLuid?: string | null }) => Promise<{ ok: boolean; error?: string; pid?: number }>
   previewStop?: () => Promise<{ ok: boolean }>

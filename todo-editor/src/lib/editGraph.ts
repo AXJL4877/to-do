@@ -86,6 +86,9 @@ export type EditGraphClip = {
   chromaKey?: { color: string; tolerance: number; enabled: boolean }
   transitionIn?: { type: string; duration: number }
   transitionOut?: { type: string; duration: number }
+  /** 音频增益 dB；导出时写入 volume 滤镜 */
+  gainDb?: number
+  mute?: boolean
   keyframes?: {
     x?: EditGraphKeyframe[]
     y?: EditGraphKeyframe[]
@@ -146,6 +149,7 @@ type ClipIn = {
   chromaKey?: { color: string; tolerance: number; enabled: boolean }
   transitionIn?: { type: string; duration: number }
   transitionOut?: { type: string; duration: number }
+  audio?: { gainDb?: number; mute?: boolean }
   keyframes?: Record<string, Array<{
     t: number
     value: number
@@ -165,6 +169,8 @@ export function buildEditGraph(input: {
   rangeOnly?: boolean
   audioOnly?: boolean
   preset?: string
+  /** 导出画幅（比例须和工程一致）；不给就按工程 */
+  size?: { width: number; height: number }
 }): EditGraph {
   // 「粉笔手书写」入场动画在这里展开成手图层，导出 / 原生预览和画布预览一致
   input = { ...input, ...withChalkHands(input.clips, input.tracks, input.media, input.settings) }
@@ -172,7 +178,7 @@ export function buildEditGraph(input: {
   const settings =
     input.preset === '9x16'
       ? { width: 1080, height: 1920, fps: input.settings.fps }
-      : { width: input.settings.width, height: input.settings.height, fps: input.settings.fps }
+      : { width: input.size?.width ?? input.settings.width, height: input.size?.height ?? input.settings.height, fps: input.settings.fps }
 
   return {
     version: EDIT_GRAPH_VERSION,
@@ -190,7 +196,9 @@ export function buildEditGraph(input: {
           if (k.ih) out.ih = { x: k.ih.x, y: k.ih.y }
           return out
         })
-      const kind = c.text ? 'text' : c.solid ? 'solid' : (m?.kind || undefined)
+      const rawKind = c.text ? 'text' : c.solid ? 'solid' : (m?.kind || undefined)
+      // 导出与预览对齐：sticker（水印/贴图）按静图叠层
+      const kind = rawKind === 'sticker' ? 'image' : rawKind
       return {
         ...(c.id ? { id: c.id } : {}),
         mediaPath: m?.path || '',
@@ -253,6 +261,8 @@ export function buildEditGraph(input: {
         transitionOut: c.transitionOut?.duration
           ? { type: c.transitionOut.type, duration: c.transitionOut.duration }
           : undefined,
+        gainDb: c.audio?.gainDb ?? 0,
+        mute: !!c.audio?.mute,
         keyframes: kf
           ? {
               x: mapKf('x'),

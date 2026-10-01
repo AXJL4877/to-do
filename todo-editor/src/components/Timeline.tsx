@@ -2,7 +2,7 @@ import { useMemo, useRef, useEffect, useLayoutEffect, useCallback, useState, use
 import { flushSync } from 'react-dom'
 import {
   Lock, VolumeX, EyeOff, Magnet, Scissors, Trash2, ZoomIn, ZoomOut,
-  MousePointer2, Hand, Gauge, Undo2, Redo2, Save, FolderOpen, Download, MoreHorizontal, ListCollapse,
+  MousePointer2, Hand, Gauge, Undo2, Redo2, Save, FolderOpen, Download, MoreHorizontal, ListCollapse, AudioLines, Stamp,
 } from 'lucide-react'
 import { useApp, formatTime } from '../store'
 import { clampZoom, fmtRulerTime, fmtZoom, rulerStep, stepZoom, wheelZoom } from '../lib/timelineZoom'
@@ -72,6 +72,7 @@ export function Timeline({
   const undo = useApp((s) => s.undo)
   const redo = useApp((s) => s.redo)
   const tidyTimeline = useApp((s) => s.tidyTimeline)
+  const levelAudioLoudness = useApp((s) => s.levelAudioLoudness)
   const clipsByTrack = useMemo(() => indexClips(seq.clips).byTrack, [seq.clips])
   const canUndo = useApp((s) => s.history.length > 0)
   const canRedo = useApp((s) => s.future.length > 0)
@@ -965,6 +966,30 @@ export function Timeline({
         <button className="btn shrink-0 text-[10px] flex items-center gap-1" data-testid="btn-tidy-timeline" onClick={tidyTimeline}
           title="将可合并的片段整理到更少轨道，保持时间与上下层关系；跳过锁定、隐藏、静音和独奏轨道，可撤销">
           <ListCollapse size={12} />一键整理
+        </button>
+        <button
+          className="btn shrink-0 text-[10px] flex items-center gap-1"
+          data-testid="btn-loudness"
+          onClick={() => { void levelAudioLoudness() }}
+          title="一键调音：把音频响度统一到约 -16 LUFS。有选中则只调选中，否则整条时间线；可撤销"
+        >
+          <AudioLines size={12} />一键调音
+        </button>
+        <button
+          className="btn shrink-0 text-[10px] flex items-center gap-1"
+          data-testid="btn-watermark"
+          onClick={() => setModal('watermark')}
+          title="设计水印：改文案、字号、排版，应用到时间线或存进媒体库"
+        >
+          <Stamp size={12} />水印
+        </button>
+        <button
+          className="btn shrink-0 text-[10px] flex items-center gap-1"
+          data-testid="btn-douyin"
+          onClick={() => setModal('douyin')}
+          title="投放到抖音发布台（inbox），打开发布页填稿；不点发作品"
+        >
+          抖音
         </button>
         <div className="w-px h-4 shrink-0" style={{ background: 'var(--border)' }} />
         <button

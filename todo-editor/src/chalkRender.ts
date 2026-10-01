@@ -1,4 +1,5 @@
 import { drawTextClip } from './lib/monitorDraw'
+import { fontStack } from './lib/fancyText'
 import { defaultText, type Clip } from './types'
 
 const canvas = document.createElement('canvas')
@@ -12,5 +13,11 @@ Object.assign(window, {
     drawTextClip(ctx, { text: { ...defaultText(), ...text }, keyframes: keyframes ?? {}, start: 0, duration } as Clip, width, height, time)
     ctx.restore()
     return canvas.toDataURL('image/png').split(',')[1]
+  },
+  /** 先把要用到的字体载入，否则第一帧会用回退字体画 */
+  async loadTextFonts(families: string[]) {
+    await Promise.all(families.flatMap((f) => ['400', '600'].map((wt) => document.fonts.load(`${wt} 48px ${fontStack(f)}`, '字Ab').catch(() => []))))
+    await document.fonts.ready
+    return true
   },
 })

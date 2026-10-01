@@ -1,6 +1,6 @@
 /**
  * 口播类技能（narrated 管线）的流式入轨：任务跑着的时候就按阶段产物往时间轴上放。
- *   配音一出来 → 放到播放头处（被占着就接在音频轨末尾），之后所有片段都链接它、按它的时间戳换算位置；
+ *   配音一出来 → 按提交时选的位置放：提交那一刻的播放头，或整条时间线末尾，之后所有片段都链接它、按它的时间戳换算位置；
  *   元素优先复用这段时间空着的已有视频轨，不每个任务叠一组新轨
  *   每块黑板渲好 → 每个元素一份裁到自身框的透明素材：书写视频（起笔 → 写完）+ 定格图（写完 → 换板），
  *   放回默认排版位置，同一元素位同一条轨；技能参数要手时给书写片段开「粉笔手书写」入场动画（不占时间轴）
@@ -8,10 +8,11 @@
  * 没来得及存就刷新的会重新补上，用户删掉的也不会被放回来。
  * 以后的扩展按同一个约定出阶段产物（params.partial）就能直接复用。
  */
-import { appendGroupSlot, useApp, type GroupLanes } from '../store'
+import { useApp, type GroupLanes } from '../store'
 import type { MediaItem } from '../types'
 import { aiFetch, aiUrl } from './aiFetch'
-import { importAiJob, isSameAiMedia, shouldImport } from './aiJobImport'
+import { importAiJob, isSameAiMedia, jobGroupSlot, shouldImport } from './aiJobImport'
+import type { TimelinePlacement } from './aiSkills'
 import { elementTransform, setChalkHand } from './chalkHand'
 import { isStoreAuthority } from './storeSync'
 
@@ -55,6 +56,8 @@ export type NarratedJob = {
   status: string
   params: {
     autoTimeline?: boolean
+    placement?: TimelinePlacement | null
+    placeAt?: number | null
     size?: string
     skill?: { name?: string; pipeline?: string } | null
     request?: { params?: Record<string, unknown> } | null
@@ -83,12 +86,12 @@ type JobState = { t0: number; placed: Set<string> }
 const firstSeen = new Map<string, number>()
 
 /** 每次现读：本机记录 + 工程里已有的片段（比如换机器打开工程） */
-function stateOf(jobId: string, stage: NarratedStage & { voice: NonNullable<NarratedStage['voice']> }): JobState {
+function stateOf(j: NarratedJob, stage: NarratedStage & { voice: NonNullable<NarratedStage['voice']> }): JobState {
+  const jobId = j.id
   if (!firstSeen.has(jobId)) {
-    // 配音 + 各层元素按一整组接：它要占的轨在播放头处都空就从播放头开始，否则接在这些轨最晚的切口后面
-    const st = useApp.getState()
+    // 配音 + 各层元素按一整组接：从提交时的播放头开始，或接在时间线末尾（老任务：播放头处空就放，否则接末尾）
     const lanes = stage.lanes ?? { audio: 1, video: Math.max(1, ...(stage.scenes ?? []).map((s) => s.elements.length)) }
-    firstSeen.set(jobId, appendGroupSlot(st.seq(), lanes, st.playhead, stage.voice.duration + (stage.tail ?? 0)).start)
+    firstSeen.set(jobId, jobGroupSlot(j, lanes, stage.voice.duration + (stage.tail ?? 0)).start)
   }
   const placed = loadPlaced(jobId)
   for (const c of useApp.getState().seq().clips) {
@@ -129,7 +132,7 @@ export function syncNarratedJob(j: NarratedJob) {
   if (!isStoreAuthority() || !useApp.getState().started) return
   const stage = narratedStage(j)
   if (!stage?.voice) return
-  const s = stateOf(j.id, { ...stage, voice: stage.voice })
+  const s = stateOf(j, { ...stage, voice: stage.voice })
   const placedBefore = s.placed.size
   try {
     placeStage(j, { ...stage, voice: stage.voice }, s)

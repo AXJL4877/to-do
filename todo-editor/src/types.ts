@@ -256,6 +256,10 @@ export interface Prefs {
 export interface ExportJob {
   id: string; name: string; status: 'queued' | 'running' | 'done' | 'error'
   progress: number; preset: string; rangeOnly: boolean; audioOnly: boolean
+  /** 实际导出的画幅，如 3840×2160 */
+  size?: string
+  /** 当前阶段说明：透明素材转码 / 合成画面 / 编码 */
+  stage?: string
   path?: string
   error?: string
 }

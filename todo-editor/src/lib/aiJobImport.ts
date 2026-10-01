@@ -1,9 +1,6 @@
-import { appendGroupSlot, useApp } from '../store'
-import type { ClipMeta } from '../types'
-
-type ClipSource = NonNullable<ClipMeta['source']>
+import { appendGroupSlot, useApp, type GroupLanes } from '../store'
 import { aiFetch, aiUrl } from './aiFetch'
-import { subtitleClipStyle, type SkillOutput, type SkillParams, type TtsOutput } from './aiSkills'
+import { subtitleClipStyle, type SkillOutput, type SkillParams, type TimelinePlacement, type TtsOutput } from './aiSkills'
 import { isNarratedJob, syncNarratedJob, type NarratedJob } from './narratedTimeline'
 import { isStoreAuthority } from './storeSync'
 import { narrationJobId } from '../../shared/ttsNarration.mjs'
@@ -15,6 +12,8 @@ export type ImportableAiJob = {
     size?: string
     duration?: number
     autoTimeline?: boolean
+    placement?: TimelinePlacement | null
+    placeAt?: number | null
     anchorClipId?: string | null
     width?: number | null
     height?: number | null
@@ -75,17 +74,24 @@ export function placeTtsVoice(j: ImportableAiJob): boolean {
   const out = ttsOutput(j)
   const mediaId = out && ensureVoiceMedia(j, out)
   if (!mediaId) return false
-  placeAppended(mediaId, 'audio', out.duration, { type: 'ai', jobId: j.id, kind: j.kind })
+  placeAppended(j, mediaId, 'audio', out.duration)
   return true
 }
 
-/** 单个产物也按整组接：视频连同拆出来的链接音频一起算，画面和声音从同一时刻开始 */
-function placeAppended(mediaId: string, kind: 'audio' | 'video' | 'image', duration: number, source: ClipSource) {
+/** 任务整组入轨的起点：按提交时选的位置（播放头取提交那一刻的）；没选过的老任务照旧「播放头空就放、否则接末尾」 */
+export function jobGroupSlot(j: { params: { placement?: TimelinePlacement | null; placeAt?: number | null } }, lanes: GroupLanes, duration: number) {
   const st = useApp.getState()
+  const { placement, placeAt } = j.params
+  const at = placement === 'playhead' && placeAt != null && Number.isFinite(placeAt) ? placeAt : st.playhead
+  return appendGroupSlot(st.seq(), lanes, at, duration, placement ?? 'auto')
+}
+
+/** 单个产物也按整组接：视频连同拆出来的链接音频一起算，画面和声音从同一时刻开始 */
+function placeAppended(j: ImportableAiJob, mediaId: string, kind: 'audio' | 'video' | 'image', duration: number) {
   const lanes = kind === 'audio' ? { audio: 1 } : kind === 'video' ? { video: 1, audio: 1 } : { video: 1 }
-  const slot = appendGroupSlot(st.seq(), lanes, st.playhead, duration)
+  const slot = jobGroupSlot(j, lanes, duration)
   const trackId = (kind === 'audio' ? slot.tracks.audio : slot.tracks.video)[0]
-  st.addClipFromMedia(mediaId, trackId, slot.start, { preferFreeTrack: true, source })
+  useApp.getState().addClipFromMedia(mediaId, trackId, slot.start, { preferFreeTrack: true, source: { type: 'ai', jobId: j.id, kind: j.kind } })
 }
 
 /**
@@ -207,7 +213,7 @@ async function importClaimed(j: ImportableAiJob, narrated: boolean): Promise<str
   if (j.params.autoTimeline) {
     const m = useApp.getState().media.find((x) => x.id === addedId)
     const dur = kind === 'image' ? st0.settings.stillDuration : (m?.duration || j.duration || j.params.duration || 5)
-    placeAppended(addedId, kind, dur, { type: 'ai', jobId: j.id, kind: j.kind })
+    placeAppended(j, addedId, kind, dur)
   }
   useApp.getState().setToast(`AI ${label ?? (kind === 'video' ? '视频' : '图片')}已入库`)
   return addedId

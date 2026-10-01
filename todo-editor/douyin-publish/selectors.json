@@ -1,0 +1,39 @@
+{
+  "pick_video": {
+    "cancel": { "desc": "取消", "id": "back_btn" },
+    "album_title": { "text": "所有照片", "id": "tv_title" },
+    "tab_all": { "text": "全部" },
+    "tab_video": { "text": "视频" },
+    "tab_image": { "text": "图片" },
+    "empty": { "text": "暂无相应的内容" },
+    "next": { "text": "下一步", "id": "1j6" },
+    "one_click": { "text": "一键成片", "id": "0mp" },
+    "selected_mark": { "text": "1", "id": "miy" }
+  },
+  "effects": {
+    "note": "选完视频后的特效页，直接点下一步跳过",
+    "next": { "text": "下一步" }
+  },
+  "publish": {
+    "cover_thumb": { "desc": "图片", "id": "mjp" },
+    "cover_edit": { "text": "编辑封面", "id": "mjr" },
+    "cover_ai": { "desc": "AI智能封面", "id": "ear" },
+    "title": { "text": "添加标题", "id": "il=", "class": "EditText" },
+    "caption": { "text": "添加作品描述..", "id": "h_s", "class": "EditText" },
+    "topic": { "text": "话题", "desc": "#添加话题，按钮", "id": "bmn" },
+    "tag": { "text": "添加标签" },
+    "visibility": { "text": "公开 · 所有人可见" },
+    "post": { "desc": "发作品", "id": "t6p" }
+  },
+  "cover_pick": {
+    "cancel": { "desc": "取消", "id": "back_btn" },
+    "album_title": { "text": "所有照片", "id": "tv_title" },
+    "first_thumb": { "bounds": "[0,280][238,518]", "id": "r28" }
+  },
+  "cover_edit": {
+    "cancel": { "text": "取消", "id": "am9" },
+    "save": { "text": "保存", "id": "yo=" },
+    "album": { "text": "相册" },
+    "preview": { "text": "预览", "id": "u4y" }
+  }
+}

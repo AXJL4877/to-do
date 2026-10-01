@@ -1,0 +1,8 @@
+{
+  "title": "示例标题",
+  "caption": "简介正文。仅供参考，不构成投资建议。",
+  "tags": ["A股", "财经"],
+  "board": "manual",
+  "trade_date": "2026-09-30",
+  "session": "close"
+}

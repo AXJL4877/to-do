@@ -313,6 +313,9 @@ function enqueueSkillJob(body) {
     quality: '',
     duration: compiled.params.duration,
     autoTimeline: !!body.autoTimeline,
+    // 自动入轨位置：playhead 从提交时的播放头 placeAt 开始，end 接在时间线末尾（前端自用，服务端只透传）
+    placement: body.placement === 'playhead' || body.placement === 'end' ? body.placement : null,
+    placeAt: body.placement === 'playhead' && body.placeAt != null && Number.isFinite(Number(body.placeAt)) && Number(body.placeAt) >= 0 ? Number(body.placeAt) : null,
     // 字幕要对齐的时间线片段（前端自用，服务端只透传）
     anchorClipId: typeof body.anchorClipId === 'string' ? body.anchorClipId.slice(0, 64) : null,
     width: w || null,

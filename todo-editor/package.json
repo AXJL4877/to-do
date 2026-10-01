@@ -54,7 +54,8 @@
       "package.json"
     ],
     "asarUnpack": [
-      "server/**/*"
+      "server/**/*",
+      "douyin-publish/**/*"
     ],
     "extraResources": [
       {
@@ -62,6 +63,16 @@
         "to": "native",
         "filter": [
           "**/*"
+        ]
+      },
+      {
+        "from": "douyin-publish",
+        "to": "douyin-publish",
+        "filter": [
+          "**/*",
+          "!archive/inbox/**",
+          "archive/inbox/_template/**",
+          "archive/inbox/README.txt"
         ]
       }
     ],

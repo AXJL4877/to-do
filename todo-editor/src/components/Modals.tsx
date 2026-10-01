@@ -1,9 +1,14 @@
-import { useEffect, useSyncExternalStore } from 'react'
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { useApp } from '../store'
+import { EXPORT_RESOLUTIONS, exportSize, mainSourceShortEdge, type ExportResolution } from '../lib/exportResolution'
+
+const EXPORT_RES_KEY = 'todo.exportResolution'
 import { getPreviewCacheRev, previewCacheUsage, subscribePreviewCache } from '../lib/previewCache'
 import { desktop, isDesktopApp } from '../lib/desktop'
 import { SHORTCUTS } from '../lib/shortcuts'
 import { usePreviewSuspend } from '../hooks/usePreviewSuspend'
+import { WatermarkDesigner } from './WatermarkDesigner'
+import { DouyinPublishPanel } from './DouyinPublishPanel'
 
 function MoreActions() {
   const setModal = useApp((s) => s.setModal)
@@ -24,6 +29,9 @@ function MoreActions() {
     {
       title: '工具',
       items: [
+        { id: 'loudness', label: '一键调音', testid: 'btn-loudness-more', run: () => { void useApp.getState().levelAudioLoudness(); setModal(null) } },
+        { id: 'watermark', label: '水印设计…', testid: 'btn-watermark-more', run: () => setModal('watermark') },
+        { id: 'douyin', label: '抖音发布台…', testid: 'btn-douyin-more', run: () => setModal('douyin') },
         { id: 'trim', label: '修剪', run: () => { useApp.getState().setTool('trim'); setModal(null) } },
         { id: 'slip', label: '滑动', run: () => { useApp.getState().setTool('slip'); setModal(null) } },
         { id: 'magnetic', label: magnetic ? '关闭磁性' : '开启磁性', run: () => { useApp.getState().setMagnetic(!magnetic); setModal(null) } },
@@ -111,6 +119,20 @@ export function Modals() {
   const removeRecentProject = useApp((s) => s.removeRecentProject)
   const refreshRecentProjects = useApp((s) => s.refreshRecentProjects)
   const isDesktop = isDesktopApp()
+  const [exportRes, setExportRes] = useState<ExportResolution>(() => {
+    const v = localStorage.getItem(EXPORT_RES_KEY)
+    return EXPORT_RESOLUTIONS.some((r) => r.value === v) ? (v as ExportResolution) : 'project'
+  })
+  const pickExportRes = (v: ExportResolution) => {
+    setExportRes(v)
+    try { localStorage.setItem(EXPORT_RES_KEY, v) } catch { /* */ }
+  }
+  const seqForExport = useApp((s) => (modal === 'export' ? s.seq() : null))
+  const mediaForExport = useApp((s) => s.media)
+  const sourceShort = useMemo(
+    () => (seqForExport ? mainSourceShortEdge(seqForExport, mediaForExport) : null),
+    [seqForExport, mediaForExport],
+  )
 
   useEffect(() => {
     if (modal === 'drafts') void refreshRecentProjects()
@@ -120,15 +142,24 @@ export function Modals() {
 
   return (
     <div className="modal-backdrop" data-testid={`modal-${modal}`} onClick={() => setModal(null)}>
-      <div className="modal" style={modal === 'more' ? { width: 'min(360px, 100%)' } : undefined} onClick={(e) => e.stopPropagation()}>
+      <div className="modal" style={modal === 'more' ? { width: 'min(360px, 100%)' } : modal === 'watermark' ? { width: 'min(560px, 100%)' } : modal === 'douyin' ? { width: 'min(860px, 96vw)', maxHeight: '90vh' } : undefined} onClick={(e) => e.stopPropagation()}>
         <div className="px-4 py-3 border-b flex justify-between items-center" style={{ borderColor: 'var(--border)' }}>
           <span className="font-medium" style={{ fontFamily: 'var(--font-display)' }}>
-            {modal === 'drafts' ? '项目' : modal === 'settings' ? '工程设置' : modal === 'prefs' ? '偏好设置' : modal === 'shortcuts' ? '快捷键' : modal === 'more' ? '更多' : '导出'}
+            {modal === 'drafts' ? '项目'
+              : modal === 'settings' ? '工程设置'
+              : modal === 'prefs' ? '偏好设置'
+              : modal === 'shortcuts' ? '快捷键'
+              : modal === 'more' ? '更多'
+              : modal === 'watermark' ? '水印设计'
+              : modal === 'douyin' ? '抖音发布台'
+              : '导出'}
           </span>
           <button className="icon-btn" onClick={() => setModal(null)}>×</button>
         </div>
         <div className="p-4 overflow-y-auto flex-1 grid gap-3">
           {modal === 'more' && <MoreActions />}
+          {modal === 'watermark' && <WatermarkDesigner />}
+          {modal === 'douyin' && <DouyinPublishPanel />}
           {modal === 'drafts' && (
             <>
               <div className="text-[12px] grid gap-0.5" data-testid="project-current">
@@ -309,8 +340,18 @@ export function Modals() {
 
           {modal === 'export' && (
             <>
+              <div className="field" data-testid="export-resolution">
+                <label>分辨率（画面比例跟工程一致）</label>
+                <select value={exportRes} onChange={(e) => pickExportRes(e.target.value as ExportResolution)}>
+                  {EXPORT_RESOLUTIONS.map((r) => {
+                    const s = exportSize(r.value, settings, sourceShort)
+                    const hint = r.value === 'source' && sourceShort == null ? '（无视频素材，同工程）' : ''
+                    return <option key={r.value} value={r.value}>{r.label} · {s.width}×{s.height}{hint}</option>
+                  })}
+                </select>
+              </div>
               {[
-                { id: '1080p', label: '横屏 1080p H.264' },
+                { id: '1080p', label: '导出 MP4 H.264' },
                 { id: '9x16', label: '竖屏 9:16' },
                 { id: 'audio', label: '仅音频 MP3' },
                 { id: 'range', label: '工作区区间' },
@@ -324,6 +365,7 @@ export function Modals() {
                     preset: p.id,
                     audioOnly: p.id === 'audio',
                     rangeOnly: p.id === 'range',
+                    resolution: exportRes,
                   })}
                 >
                   {p.label}
@@ -331,10 +373,23 @@ export function Modals() {
               ))}
               {exportQueue.map((j) => (
                 <div key={j.id} className="text-[12px]" data-testid={`export-job-${j.id}`}>
-                  {j.name} — {j.status} {Math.round(j.progress)}%
+                  {j.name}{j.size ? ` · ${j.size}` : ''} — {j.status} {Math.round(j.progress)}%
+                  {j.status === 'running' && j.stage ? <div style={{ color: 'var(--text-muted)' }}>{j.stage}</div> : null}
                   {j.error ? <div style={{ color: 'var(--danger, #c44)' }}>{j.error}</div> : null}
                   {j.path && j.status === 'done' ? (
-                    <div className="truncate" style={{ color: 'var(--text-muted)' }} title={j.path}>{j.path}</div>
+                    <div className="grid gap-1 mt-1">
+                      <div className="truncate" style={{ color: 'var(--text-muted)' }} title={j.path}>{j.path}</div>
+                      {!j.audioOnly && j.preset !== 'frame' ? (
+                        <button
+                          type="button"
+                          className="btn btn-ghost justify-start text-[11px]"
+                          data-testid={`export-douyin-${j.id}`}
+                          onClick={() => useApp.getState().setModal('douyin')}
+                        >
+                          投放到抖音发布台…
+                        </button>
+                      ) : null}
+                    </div>
                   ) : null}
                   <div className="h-1.5 rounded-full mt-1" style={{ background: 'var(--surface-2)' }}>
                     <div className="h-full rounded-full" style={{ width: `${j.progress}%`, background: 'var(--accent)' }} />

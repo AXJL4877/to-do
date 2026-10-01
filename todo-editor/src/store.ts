@@ -17,6 +17,7 @@ import { setLivePlayhead } from './lib/livePlayhead'
 import { reviveMediaList, parseDesktopMedia, pathToFileUrl } from './lib/importFiles'
 import { buildEditGraph } from './lib/editGraph'
 import { tidyTimeline } from './lib/timelineTidy'
+import { exportSize, mainSourceShortEdge, type ExportResolution } from './lib/exportResolution'
 
 function sampleAt(c: Clip, prop: string, localT: number): number {
   const tr = c.transform
@@ -171,18 +172,27 @@ function pruneEmptyTracks(seq: Sequence): Sequence {
 /** 一次生成要占的轨：每类几条，从同类第一条轨往下数（音频第 1 层 = 第一条音频轨，画面第 k 层 = 从上往下第 k 条视频轨） */
 export type GroupLanes = { audio?: number; video?: number }
 
+/** 整组入轨位置：auto 播放头处空就放、否则接到末尾；playhead 固定从 at 开始（被占的层换到空轨）；end 接在整条时间线最后 */
+export type GroupPlacement = 'auto' | 'playhead' | 'end'
+
 /**
  * 一次 AI 生成（可能是配音 + 好几层画面）整组入轨的起点：
- * 它要占的那几条轨在播放头处都空着就从播放头放；有一条被占，整组接在这几条轨里最晚的切口后面。
- * 整组各层从同一时刻开始、组内相对时间不变；不占的轨（比如整条背景音乐）不影响位置，也不另起一组新轨。
+ * auto 时它要占的那几条轨在播放头处都空着就从播放头放；有一条被占，整组接在这几条轨里最晚的切口后面。
+ * 整组各层从同一时刻开始、组内相对时间不变；不占的轨（比如整条背景音乐）不影响 auto 的位置，也不另起一组新轨。
  */
-export function appendGroupSlot(seq: Sequence, lanes: GroupLanes, at: number, duration: number) {
+export function appendGroupSlot(seq: Sequence, lanes: GroupLanes, at: number, duration: number, placement: GroupPlacement = 'auto') {
   const pick = (kind: TrackKind, n = 0) => seq.tracks.filter((t) => t.kind === kind && !t.locked).slice(0, Math.max(0, n))
   const tracks = { audio: pick('audio', lanes.audio), video: pick('video', lanes.video) }
   const ids = new Set([...tracks.audio, ...tracks.video].map((t) => t.id))
   const used = seq.clips.filter((c) => ids.has(c.trackId))
-  const free = !used.some((c) => rangeOverlap(at, duration, c.start, c.duration))
-  const start = free || !used.length ? at : Math.max(...used.map((c) => c.start + c.duration))
+  const clipEnd = (c: Clip) => c.start + c.duration
+  let start: number
+  if (placement === 'playhead') start = at
+  else if (placement === 'end') start = Math.max(0, ...seq.clips.map(clipEnd))
+  else {
+    const free = !used.some((c) => rangeOverlap(at, duration, c.start, c.duration))
+    start = free || !used.length ? at : Math.max(...used.map(clipEnd))
+  }
   return { start, tracks: { audio: tracks.audio.map((t) => t.id), video: tracks.video.map((t) => t.id) } }
 }
 
@@ -663,7 +673,7 @@ export type AppStore = {
   history: Snap[]
   future: Snap[]
   multiCam: boolean
-  modal: null | 'drafts' | 'settings' | 'prefs' | 'export' | 'shortcuts' | 'more'
+  modal: null | 'drafts' | 'settings' | 'prefs' | 'export' | 'shortcuts' | 'more' | 'watermark' | 'douyin'
   layout: {
     sidebarW: number
     propsW: number
@@ -836,6 +846,15 @@ export type AppStore = {
   setWorkArea: (a: number, b: number) => void
   toggleTrack: (id: string, key: 'locked' | 'muted' | 'solo' | 'hidden') => void
   tidyTimeline: () => void
+  /** 一键调音：把片段响度统一到约 -16 LUFS（有选中则只调选中，否则整条时间线） */
+  levelAudioLoudness: () => Promise<void>
+  /** 把选中图层合成透明底 PNG（水印设计器里的「从选中层合成」） */
+  saveSelectionAsWatermark: (opts?: { placeOnTimeline?: boolean }) => Promise<void>
+  /** 按自定义设计生成文字水印并可选铺满时间线 */
+  applyWatermarkDesign: (
+    design: import('./lib/watermarkDesign').WatermarkDesign,
+    opts?: { placeOnTimeline?: boolean },
+  ) => Promise<void>
   setTrackHeight: (id: string, height: number) => void
   addTrack: (kind: TrackKind) => void
   matchFrame: () => void
@@ -871,7 +890,7 @@ export type AppStore = {
   addSequence: () => void
   setActiveSequence: (id: string) => void
   toggleMultiCam: () => void
-  enqueueExport: (opts: { preset: string; name?: string; rangeOnly?: boolean; audioOnly?: boolean }) => void
+  enqueueExport: (opts: { preset: string; name?: string; rangeOnly?: boolean; audioOnly?: boolean; resolution?: ExportResolution }) => void
   savePreset: (name: string, kind: EffectPreset['kind'], payload: unknown) => void
   applyPreset: (id: string) => void
   /** 动效预设：写成关键帧。循环类 range='playhead' 时从播放头起 seconds 秒；入场 / 出场 / 强调从播放头处开始 */
@@ -1286,6 +1305,50 @@ export const useApp = create<AppStore>((set, get) => {
   const patchSelected = (fn: (c: Clip) => Clip) => {
     const ids = new Set(get().selectedClipIds)
     patchSeq((s) => ({ ...s, clips: s.clips.map((c) => (ids.has(c.id) ? fn(c) : c)) }))
+  }
+
+  /**
+   * 粘贴 = 在播放头插入，和 Ctrl+←/→ 同一套规则：播放头之后（未锁轨）的片段整体后移让位，
+   * 粘贴的一组落回原来的轨、组内相对位置不变，不往别的轨乱挤。播放头压在目标轨某段中间时插入点顺延到那段结尾，不切开它。
+   * 组内的链接指向新副本，指向组外的链接断开（副本不跟着原片段动）。播放头停在粘贴段结尾，连按可以接着往后贴。
+   */
+  const pasteInsert = (src: Clip[]) => {
+    const s0 = get().seq()
+    const media = get().media
+    const eps = 0.25 / (get().settings.fps || 30)
+    const locked = new Set(s0.tracks.filter((t) => t.locked).map((t) => t.id))
+    const destOf = (c: Clip) => {
+      const t = s0.tracks.find((x) => x.id === c.trackId)
+      if (t && !t.locked) return t.id
+      const kind: TrackKind = t?.kind ?? (media.find((m) => m.id === c.mediaId)?.kind === 'audio' ? 'audio' : 'video')
+      return s0.tracks.find((x) => x.kind === kind && !x.locked)?.id ?? c.trackId
+    }
+    const base = Math.min(...src.map((c) => c.start))
+    const span = Math.max(...src.map((c) => c.start + c.duration)) - base
+    const dests = new Set(src.map(destOf))
+    let at = get().playhead
+    for (let moved = true; moved;) {
+      moved = false
+      for (const c of s0.clips) {
+        const end = c.start + c.duration
+        if (dests.has(c.trackId) && c.start < at - eps && end > at + eps) { at = end; moved = true }
+      }
+    }
+    const shifting = new Set(s0.clips.filter((c) => !locked.has(c.trackId) && c.start >= at - eps).map((c) => c.id))
+    const ids = new Map(src.map((c) => [c.id, uid('clip')]))
+    const copies = src.map((c) => ({
+      ...(JSON.parse(JSON.stringify(c)) as Clip),
+      id: ids.get(c.id)!,
+      trackId: destOf(c),
+      start: at + (c.start - base),
+      linkedId: c.linkedId ? ids.get(c.linkedId) : undefined,
+    }))
+    get().pushHistory()
+    const clips = [...s0.clips.map((c) => (shifting.has(c.id) ? { ...c, start: c.start + span } : c)), ...copies]
+    const end = Math.max(...clips.map((c) => c.start + c.duration))
+    patchSeq((sq) => (sq.id === s0.id ? enforceNoOverlap({ ...sq, clips, workOut: Math.max(sq.workOut, end) }) : sq))
+    set({ selectedClipIds: copies.map((c) => c.id), playhead: at + span, playing: false })
+    notify(shifting.size ? `已粘贴 ${copies.length} 个，后面片段后移 ${span.toFixed(2)}s` : `已粘贴 ${copies.length} 个`)
   }
 
   const first = makeSeq()
@@ -2606,14 +2669,7 @@ export const useApp = create<AppStore>((set, get) => {
         notify(`已复制 ${clipboard.length} 个`)
         return
       }
-      get().pushHistory()
-      const base = Math.min(...clipboard.map((c) => c.start))
-      const copies = clipboard.map((c) => ({
-        ...(JSON.parse(JSON.stringify(c)) as Clip),
-        id: uid('clip'), start: get().playhead + (c.start - base),
-      }))
-      patchSeq((s) => enforceNoOverlap({ ...s, clips: [...s.clips, ...copies] }))
-      set({ selectedClipIds: copies.map((c) => c.id) })
+      pasteInsert(clipboard)
     },
     copySelected() {
       clipboard = get().seq().clips
@@ -2627,14 +2683,7 @@ export const useApp = create<AppStore>((set, get) => {
     },
     pasteClipboard() {
       if (!clipboard.length) { notify('剪贴板为空'); return }
-      get().pushHistory()
-      const base = Math.min(...clipboard.map((c) => c.start))
-      const copies = clipboard.map((c) => ({
-        ...(JSON.parse(JSON.stringify(c)) as Clip),
-        id: uid('clip'), start: get().playhead + (c.start - base),
-      }))
-      patchSeq((s) => enforceNoOverlap({ ...s, clips: [...s.clips, ...copies] }))
-      set({ selectedClipIds: copies.map((c) => c.id) })
+      pasteInsert(clipboard)
     },
     selectAllClips() {
       set({ selectedClipIds: get().seq().clips.map((c) => c.id) })
@@ -3033,6 +3082,235 @@ export const useApp = create<AppStore>((set, get) => {
       patchSeq(() => next)
       const moved = next.clips.filter((c, i) => c.trackId !== current.clips[i].trackId).length
       notify(`已整理：移动 ${moved} 个片段，减少 ${current.tracks.length - next.tracks.length} 条轨道，可撤销`)
+    },
+
+    async levelAudioLoudness() {
+      const api = desktop()
+      if (!api?.analyzeLoudness) {
+        notify('一键调音需在桌面版中运行')
+        return
+      }
+      const seq = get().seq()
+      const mediaById = new Map(get().media.map((m) => [m.id, m]))
+      const tracks = new Map(seq.tracks.map((t) => [t.id, t]))
+      const selected = new Set(get().selectedClipIds)
+      if (selected.size) {
+        for (const c of seq.clips) {
+          if (selected.has(c.id) && c.linkedId) selected.add(c.linkedId)
+        }
+      }
+      const candidates = seq.clips.filter((c) => {
+        if (!c.enabled || c.audio.mute || !c.mediaId) return false
+        const t = tracks.get(c.trackId)
+        if (!t || t.kind !== 'audio' || t.muted) return false
+        if (selected.size && !selected.has(c.id)) return false
+        const m = mediaById.get(c.mediaId)
+        return !!(m?.path && !m.offline)
+      })
+      if (!candidates.length) {
+        notify(selected.size ? '选中的片段没有可调的声音' : '时间线上没有可调的音频片段')
+        return
+      }
+      notify(`正在分析 ${candidates.length} 段声音…`)
+      const TARGET_LUFS = -16
+      const patches: Record<string, Partial<Clip>> = {}
+      let okN = 0
+      let skipN = 0
+      for (const c of candidates) {
+        const m = mediaById.get(c.mediaId!)!
+        const r = await api.analyzeLoudness!(m.path!, {
+          inPoint: Math.max(0, c.inPoint),
+          duration: Math.max(0.05, c.duration),
+        })
+        if (!r.ok || r.lufs == null || r.lufs < -55) {
+          skipN++
+          continue
+        }
+        const gainDb = Math.max(-60, Math.min(12, Math.round((TARGET_LUFS - r.lufs) * 10) / 10))
+        patches[c.id] = {
+          audio: { ...c.audio, gainDb },
+          keyframes: c.keyframes.volume?.length
+            ? { ...c.keyframes, volume: [] }
+            : c.keyframes,
+        }
+        okN++
+      }
+      if (!okN) {
+        notify(skipN ? '这些片段太静或测不到响度，未改动' : '响度分析失败')
+        return
+      }
+      get().pushHistory()
+      get().patchClipsQuiet(patches)
+      notify(`已统一 ${okN} 段响度到约 ${TARGET_LUFS} LUFS${skipN ? `（跳过 ${skipN}）` : ''}，可撤销`)
+    },
+
+    async saveSelectionAsWatermark(opts) {
+      const seq = get().seq()
+      const ids = get().selectedClipIds
+      if (!ids.length) {
+        notify('请先选中要做成水印的图层')
+        return
+      }
+      let composed
+      try {
+        const { composeWatermarkPng } = await import('./lib/watermarkCompose')
+        composed = await composeWatermarkPng({
+          clips: seq.clips,
+          tracks: seq.tracks,
+          media: get().media,
+          settings: get().settings,
+          selectedIds: ids,
+          playhead: get().playhead,
+        })
+      } catch (e) {
+        notify(e instanceof Error ? e.message : String(e))
+        return
+      }
+      const name = `watermark_${Date.now()}.png`
+      const api = desktop()
+      let path: string | undefined
+      let url = composed.dataUrl
+      if (api?.saveMediaAsset) {
+        const r = await api.saveMediaAsset(name, composed.dataUrl)
+        if (!r.ok || !r.url) {
+          notify(r.error || '保存水印失败')
+          return
+        }
+        path = r.path
+        url = r.url
+      }
+      const [mediaId] = get().importMedia([{
+        name,
+        url,
+        path,
+        kind: 'sticker',
+        duration: get().settings.stillDuration,
+        width: composed.width,
+        height: composed.height,
+        hasAudio: false,
+        alpha: true,
+      }], { silent: true })
+      if (!mediaId) {
+        notify('水印已生成，但导入媒体库失败')
+        return
+      }
+      if (opts?.placeOnTimeline !== false) {
+        get().addClipFromMedia(mediaId)
+      }
+      notify(opts?.placeOnTimeline === false
+        ? `已存入媒体库：${name}（透明底）`
+        : `水印已存入媒体库并放到时间线：${name}`)
+    },
+
+    async applyWatermarkDesign(design, opts) {
+      const settings = get().settings
+      const { renderWatermarkPng, saveWatermarkDesign } = await import('./lib/watermarkDesign')
+      saveWatermarkDesign(design)
+      const png = renderWatermarkPng(design, settings.width, settings.height)
+      const name = (design.name || '水印').trim() || '水印'
+      const fileName = `watermark_${Date.now()}.png`
+      const api = desktop()
+      let path: string | undefined
+      let url = png.dataUrl
+      if (api?.saveMediaAsset) {
+        const r = await api.saveMediaAsset(fileName, png.dataUrl)
+        if (!r.ok || !r.url) throw new Error(r.error || '保存水印失败')
+        path = r.path
+        url = r.url
+      }
+
+      const existing = get().media.find((m) => m.name === name && m.kind === 'sticker')
+      let mediaId = existing?.id
+      if (!mediaId) {
+        ;[mediaId] = get().importMedia([{
+          name,
+          url,
+          path,
+          kind: 'sticker',
+          duration: get().settings.stillDuration,
+          width: png.width,
+          height: png.height,
+          hasAudio: false,
+          alpha: true,
+          folderId: 'f_sticker',
+        }], { silent: true })
+      } else {
+        get().relinkMedia(mediaId, url, path)
+      }
+      if (!mediaId) throw new Error('水印导入媒体库失败')
+
+      if (opts?.placeOnTimeline === false) {
+        notify(`已存入媒体库：${name}（透明底）`)
+        return
+      }
+
+      const seq = get().seq()
+      let end = 0
+      for (const c of seq.clips) end = Math.max(end, c.start + c.duration)
+      end = Math.max(end, seq.workOut || 0, 5)
+      const duration = Math.max(0.2, end)
+      const opacity = Math.max(0.2, Math.min(1, design.opacity))
+
+      get().pushHistory()
+      let sequence = get().seq()
+      const old = sequence.clips.filter((c) => c.name === name)
+      if (old.length) {
+        const keepId = old[0].id
+        const drop = new Set(old.slice(1).map((c) => c.id))
+        patchSeq((s) => enforceNoOverlap({
+          ...s,
+          clips: s.clips
+            .filter((c) => !drop.has(c.id))
+            .map((c) => c.id === keepId
+              ? {
+                  ...c,
+                  mediaId,
+                  start: 0,
+                  duration,
+                  inPoint: 0,
+                  outPoint: duration,
+                  enabled: true,
+                  transform: { ...c.transform, opacity },
+                }
+              : c),
+          workOut: Math.max(s.workOut, duration),
+        }))
+        set({ selectedClipIds: [keepId] })
+        notify('已更新水印（铺满时间线，可撤销）')
+        return
+      }
+
+      const track = newTrackOfKind(sequence, 'video')
+      track.name = '水印'
+      sequence = { ...sequence, tracks: [track, ...sequence.tracks] }
+      const clip: Clip = {
+        id: uid('clip'),
+        trackId: track.id,
+        mediaId,
+        name,
+        start: 0,
+        duration,
+        inPoint: 0,
+        outPoint: duration,
+        enabled: true,
+        speed: 1,
+        reverse: false,
+        speedKeyframes: [],
+        transform: { ...defaultTransform(), opacity },
+        color: defaultColor(),
+        audio: defaultAudio(),
+        effects: [],
+        blend: 'normal',
+        keyframes: {},
+      }
+      clip.meta = buildClipMeta(clip, track, { type: 'manual' })
+      patchSeq(() => enforceNoOverlap({
+        ...sequence,
+        clips: [...sequence.clips, clip],
+        workOut: Math.max(sequence.workOut, duration),
+      }))
+      set({ selectedClipIds: [clip.id] })
+      notify('已添加水印（铺满时间线，可撤销）')
     },
 
     toggleTrack(id, key) {
@@ -3459,6 +3737,9 @@ export const useApp = create<AppStore>((set, get) => {
       }
 
       const seq = get().seq()
+      const res = opts.resolution ?? 'project'
+      const sourceShort = res === 'source' ? mainSourceShortEdge(seq, get().media) : null
+      if (res === 'source' && sourceShort == null) notify('时间线上没有不透明的视频素材，按工程分辨率导出')
       const graph = buildEditGraph({
         clips: seq.clips,
         tracks: seq.tracks,
@@ -3469,7 +3750,9 @@ export const useApp = create<AppStore>((set, get) => {
         rangeOnly: opts.rangeOnly ?? false,
         audioOnly: opts.audioOnly ?? false,
         preset: opts.preset,
+        size: exportSize(res, get().settings, sourceShort),
       })
+      if (!opts.audioOnly) patchJob({ size: `${graph.settings.width}×${graph.settings.height}` })
 
       notify(get().monitorCompose === '3d'
         ? '3D 合成简化导出（平面叠层，无摄像机）已加入队列'
@@ -3479,7 +3762,7 @@ export const useApp = create<AppStore>((set, get) => {
       const unsub = api.onExportProgress?.((msg) => {
         if (msg.jobId !== job.id) return
         if (msg.status === 'running') {
-          patchJob({ status: 'running', progress: msg.progress })
+          patchJob({ status: 'running', progress: msg.progress, ...(msg.stage ? { stage: msg.stage } : {}) })
         } else if (msg.status === 'done') {
           patchJob({ status: 'done', progress: 100, path: msg.path })
         } else if (msg.status === 'error') {

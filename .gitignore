@@ -43,3 +43,7 @@ Thumbs.db
 *.dmg
 *.AppImage
 C:/todo-editor-release/
+
+# Local export media
+exports/
+

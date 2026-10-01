@@ -78,6 +78,8 @@ for (const name of readdirSync(resolve(sdk, 'bin'))) {
 for (const name of readdirSync(sdk)) {
   if (/license|copying/i.test(name)) copyFileSync(resolve(sdk, name), resolve(out, name))
 }
+// 硬件编码备用：SDK 自带的 ffmpeg 用同目录这套 dll；主 ffmpeg 的 NVENC 要求驱动太新时导出改走它
+if (existsSync(resolve(sdk, 'bin', 'ffmpeg.exe'))) copyFileSync(resolve(sdk, 'bin', 'ffmpeg.exe'), resolve(out, 'ffmpeg-hw.exe'))
 
 /** Optional: copy host ffmpeg/ffprobe next to engine for packaged export. */
 function findHostTool(envKey, exeName) {

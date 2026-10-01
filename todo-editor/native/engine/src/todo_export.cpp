@@ -12,9 +12,23 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
+#include <atomic>
 #include <cstring>
+#include <functional>
+#include <map>
+#include <memory>
 #include <string>
+#include <type_traits>
 #include <vector>
+
+extern "C" {
+#include <libavcodec/avcodec.h>
+#include <libavformat/avformat.h>
+#include <libavutil/imgutils.h>
+#include <libavutil/pixdesc.h>
+#include <libswscale/swscale.h>
+}
 
 #include "todo_engine.h"
 #include "editgraph.h"
@@ -23,6 +37,415 @@
 #include "layers.h"
 
 namespace {
+
+/**
+ * 导出用的顺序读帧：解码器一直开着，时间往前走就接着解，只有倒退或跳远才 seek。
+ * 取帧规则和 todo_decode_rgb24 一致：第一帧 pts >= t - 1ms。
+ */
+class FrameSource {
+ public:
+  ~FrameSource() { close(); }
+
+  bool open(const std::string &path_utf8) {
+    if (avformat_open_input(&fmt_, path_utf8.c_str(), nullptr, nullptr) < 0) return false;
+    if (avformat_find_stream_info(fmt_, nullptr) < 0) return false;
+    vi_ = av_find_best_stream(fmt_, AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
+    if (vi_ < 0) return false;
+    AVStream *st = fmt_->streams[vi_];
+    const AVCodec *codec = avcodec_find_decoder(st->codecpar->codec_id);
+    if (!codec) return false;
+    dec_ = avcodec_alloc_context3(codec);
+    if (!dec_ || avcodec_parameters_to_context(dec_, st->codecpar) < 0) return false;
+    dec_->thread_count = 0;
+    if (avcodec_open2(dec_, codec, nullptr) < 0) return false;
+    w_ = st->codecpar->width;
+    h_ = st->codecpar->height;
+    tb_ = av_q2d(st->time_base);
+    const double rate = av_q2d(av_guess_frame_rate(fmt_, st, nullptr));
+    frame_dur_ = rate > 0 && std::isfinite(rate) ? 1.0 / rate : 1.0 / 30;
+    pkt_ = av_packet_alloc();
+    frame_ = av_frame_alloc();
+    return w_ > 0 && h_ > 0 && pkt_ && frame_;
+  }
+
+  /** 返回 RGB24；素材带透明通道时 *alpha 指向同尺寸的 8 位透明度，否则为 nullptr */
+  const uint8_t *at(double t, int *out_w, int *out_h, const uint8_t **alpha = nullptr) {
+    const double eps = 1e-3;
+    const bool current_ok = have_ && cur_pts_ + eps >= t && prev_pts_ + eps < t;
+    if (!current_ok) {
+      const bool forward = have_ && !eof_ && cur_pts_ + eps < t && t - cur_pts_ < 3.0;
+      if (!forward && !seek(t)) return nullptr;
+      if (!advance_to(t)) return nullptr;
+    }
+    *out_w = w_;
+    *out_h = h_;
+    if (alpha) *alpha = has_alpha_ ? alpha_.data() : nullptr;
+    return rgb_.data();
+  }
+
+ private:
+  AVFormatContext *fmt_ = nullptr;
+  AVCodecContext *dec_ = nullptr;
+  SwsContext *sws_ = nullptr;
+  AVPacket *pkt_ = nullptr;
+  AVFrame *frame_ = nullptr;
+  int vi_ = -1;
+  int w_ = 0, h_ = 0;
+  double tb_ = 0;
+  double frame_dur_ = 1.0 / 30;
+  AVPixelFormat sws_src_ = AV_PIX_FMT_NONE;
+  std::vector<uint8_t> rgb_, alpha_, rgba_;
+  bool has_alpha_ = false;
+  double cur_pts_ = 0;
+  double prev_pts_ = -1e18;
+  bool have_ = false;
+  bool eof_ = false;
+  bool draining_ = false;
+
+  bool seek(double t) {
+    const int64_t ts = static_cast<int64_t>(t / tb_);
+    if (av_seek_frame(fmt_, vi_, ts, AVSEEK_FLAG_BACKWARD) < 0) return false;
+    avcodec_flush_buffers(dec_);
+    have_ = eof_ = draining_ = false;
+    prev_pts_ = -1e18;
+    return true;
+  }
+
+  bool next(double *pts) {
+    for (;;) {
+      const int r = avcodec_receive_frame(dec_, frame_);
+      if (r >= 0) {
+        const int64_t p = frame_->best_effort_timestamp != AV_NOPTS_VALUE ? frame_->best_effort_timestamp : frame_->pts;
+        *pts = p != AV_NOPTS_VALUE ? p * tb_ : (have_ ? cur_pts_ + frame_dur_ : 0.0);
+        return true;
+      }
+      if (r != AVERROR(EAGAIN) || draining_) return false;
+      if (av_read_frame(fmt_, pkt_) < 0) {
+        draining_ = true;
+        avcodec_send_packet(dec_, nullptr);
+        continue;
+      }
+      if (pkt_->stream_index == vi_) avcodec_send_packet(dec_, pkt_);
+      av_packet_unref(pkt_);
+    }
+  }
+
+  bool advance_to(double t) {
+    double last = have_ ? cur_pts_ : prev_pts_;
+    for (;;) {
+      double pts = 0;
+      if (!next(&pts)) {
+        eof_ = true;
+        return false;
+      }
+      if (pts + 1e-3 >= t) {
+        prev_pts_ = last;
+        cur_pts_ = pts;
+        have_ = convert();
+        return have_;
+      }
+      last = pts;
+    }
+  }
+
+  bool convert() {
+    const AVPixelFormat src = static_cast<AVPixelFormat>(frame_->format);
+    if (!sws_ || src != sws_src_) {
+      if (sws_) sws_freeContext(sws_);
+      const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(src);
+      has_alpha_ = desc && (desc->flags & AV_PIX_FMT_FLAG_ALPHA);
+      sws_ = sws_getContext(w_, h_, src, w_, h_, has_alpha_ ? AV_PIX_FMT_RGBA : AV_PIX_FMT_RGB24, SWS_BILINEAR, nullptr, nullptr, nullptr);
+      sws_src_ = src;
+      if (!sws_) return false;
+    }
+    const size_t n = static_cast<size_t>(w_) * h_;
+    rgb_.resize(n * 3);
+    if (!has_alpha_) {
+      uint8_t *dst[4] = { rgb_.data(), nullptr, nullptr, nullptr };
+      int dst_ls[4] = { w_ * 3, 0, 0, 0 };
+      sws_scale(sws_, frame_->data, frame_->linesize, 0, h_, dst, dst_ls);
+      return true;
+    }
+    rgba_.resize(n * 4);
+    alpha_.resize(n);
+    uint8_t *dst[4] = { rgba_.data(), nullptr, nullptr, nullptr };
+    int dst_ls[4] = { w_ * 4, 0, 0, 0 };
+    sws_scale(sws_, frame_->data, frame_->linesize, 0, h_, dst, dst_ls);
+    for (size_t i = 0; i < n; ++i) {
+      rgb_[i * 3] = rgba_[i * 4];
+      rgb_[i * 3 + 1] = rgba_[i * 4 + 1];
+      rgb_[i * 3 + 2] = rgba_[i * 4 + 2];
+      alpha_[i] = rgba_[i * 4 + 3];
+    }
+    return true;
+  }
+
+  void close() {
+    if (sws_) sws_freeContext(sws_);
+    av_frame_free(&frame_);
+    av_packet_free(&pkt_);
+    avcodec_free_context(&dec_);
+    if (fmt_) avformat_close_input(&fmt_);
+  }
+};
+
+struct StillImage {
+  std::vector<uint8_t> rgb, alpha;
+  int w = 0, h = 0;
+  bool ok = false;
+  int64_t used = 0;
+};
+
+/** 常驻工作线程：导出每帧要并行好几次，不能每次现建线程 */
+class WorkerPool {
+ public:
+  void run(size_t n, const std::function<void(size_t)> &fn) {
+    if (tl_worker_ || n <= 1) {
+      for (size_t i = 0; i < n; ++i) fn(i);
+      return;
+    }
+    ensure();
+    job_ = &fn;
+    count_ = n;
+    next_ = 0;
+    const int k = static_cast<int>((std::min)(threads_.size(), n - 1));
+    active_ = k;
+    if (k > 0) {
+      ResetEvent(done_);
+      ReleaseSemaphore(go_, k, nullptr);
+    }
+    drain();
+    if (k > 0) WaitForSingleObject(done_, INFINITE);
+  }
+
+ private:
+  static thread_local bool tl_worker_;
+  std::vector<HANDLE> threads_;
+  HANDLE go_ = nullptr, done_ = nullptr;
+  const std::function<void(size_t)> *job_ = nullptr;
+  size_t count_ = 0;
+  std::atomic<size_t> next_{0};
+  std::atomic<int> active_{0};
+
+  void drain() {
+    for (size_t i; (i = next_.fetch_add(1)) < count_;) (*job_)(i);
+  }
+
+  void ensure() {
+    if (go_) return;
+    SYSTEM_INFO si{};
+    GetSystemInfo(&si);
+    const int n = static_cast<int>((std::min)(32ul, (std::max)(1ul, si.dwNumberOfProcessors))) - 1;
+    go_ = CreateSemaphoreW(nullptr, 0, 64, nullptr);
+    done_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    for (int i = 0; i < n; ++i) {
+      HANDLE t = CreateThread(nullptr, 0, [](LPVOID p) -> DWORD {
+        auto *self = static_cast<WorkerPool *>(p);
+        tl_worker_ = true;
+        for (;;) {
+          WaitForSingleObject(self->go_, INFINITE);
+          self->drain();
+          if (--self->active_ == 0) SetEvent(self->done_);
+        }
+      }, this, 0, nullptr);
+      if (t) threads_.push_back(t);
+    }
+  }
+};
+thread_local bool WorkerPool::tl_worker_ = false;
+WorkerPool g_pool;
+
+/** fn(0..n-1) 分到各核跑完再返回；在工作线程里再调用就原地串行 */
+template <class F>
+void parallel_for(size_t n, F &&fn) {
+  g_pool.run(n, std::function<void(size_t)>(std::ref(fn)));
+}
+
+/** 把 [0,h) 行切块并行，fn(y0, y1) */
+template <class F>
+void for_row_chunks(int h, F &&fn) {
+  const int chunks = (std::min)(h, 32);
+  parallel_for(static_cast<size_t>(chunks), [&](size_t i) {
+    fn(static_cast<int>(h * i / chunks), static_cast<int>(h * (i + 1) / chunks));
+  });
+}
+
+/** 一次导出内复用：每个片段一个顺序读帧器，静帧图只解一次；不再出现的及时释放 */
+struct ComposeCache {
+  std::map<std::string, std::unique_ptr<FrameSource>> videos;
+  std::map<std::string, int64_t> video_used;
+  std::map<std::string, StillImage> stills;
+  int64_t tick = 0;
+
+  /** 后台线程提前打开并定位到首帧的读帧器 */
+  struct Pending {
+    HANDLE thread = nullptr;
+    std::unique_ptr<FrameSource> src;
+    std::string path;
+    double media_t = 0, start = 0;
+    bool ok = false;
+  };
+  std::map<std::string, std::unique_ptr<Pending>> pending;
+
+  struct PendingStill {
+    HANDLE thread = nullptr;
+    std::string path;
+    StillImage img;
+    double start = 0;
+  };
+  std::map<std::string, std::unique_ptr<PendingStill>> pending_stills;
+
+  ~ComposeCache() {
+    for (auto &kv : pending) join(*kv.second);
+    for (auto &kv : pending_stills) join(*kv.second);
+  }
+
+  static std::string key_of(const Clip &c) {
+    return c.id.empty() ? c.media_path + "@" + std::to_string(c.start) : c.id;
+  }
+
+  template <class P>
+  static void join(P &p) {
+    if (!p.thread) return;
+    WaitForSingleObject(p.thread, INFINITE);
+    CloseHandle(p.thread);
+    p.thread = nullptr;
+  }
+
+  /** 片段自己的读帧器（打不开为 nullptr）；只在主线程调，取帧可以各层并行 */
+  FrameSource *source(const Clip &c) {
+    const std::string key = key_of(c);
+    auto it = videos.find(key);
+    if (it == videos.end()) {
+      std::unique_ptr<FrameSource> src;
+      auto pit = pending.find(key);
+      if (pit != pending.end()) {
+        join(*pit->second);
+        if (pit->second->ok) src = std::move(pit->second->src);
+        pending.erase(pit);
+      } else {
+        src = std::make_unique<FrameSource>();
+        if (!src->open(c.media_path)) src.reset();
+      }
+      it = videos.emplace(key, std::move(src)).first;
+    }
+    video_used[key] = tick;
+    return it->second.get();
+  }
+
+  /** 接下来 horizon 秒内要出场的视频片段，先在后台打开并解到首帧，出场那帧不用停下来等 */
+  void prefetch(const EditGraph &g, double t, double horizon) {
+    for (auto it = pending.begin(); it != pending.end();) {
+      if (it->second->start + 1.0 < t) {
+        join(*it->second);
+        it = pending.erase(it);
+      } else {
+        ++it;
+      }
+    }
+    for (auto it = pending_stills.begin(); it != pending_stills.end();) {
+      if (it->second->start + 1.0 < t) {
+        join(*it->second);
+        it = pending_stills.erase(it);
+      } else {
+        ++it;
+      }
+    }
+    for (const Clip &c : g.clips) {
+      if (!c.enabled || c.start <= t || c.start > t + horizon) continue;
+      if (c.kind == "text" || !c.text_content.empty() || c.kind == "solid") continue;
+      if (c.media_path.empty()) continue;
+      if (is_still_image(c.kind, c.media_path)) {
+        if (stills.count(c.media_path) || pending_stills.count(c.media_path)) continue;
+        auto p = std::make_unique<PendingStill>();
+        p->path = c.media_path;
+        p->start = c.start;
+        p->thread = CreateThread(nullptr, 0, [](LPVOID arg) -> DWORD {
+          auto *pd = static_cast<PendingStill *>(arg);
+          decode_still(pd->path, pd->img);
+          return 0;
+        }, p.get(), 0, nullptr);
+        if (p->thread) pending_stills.emplace(c.media_path, std::move(p));
+        continue;
+      }
+      const std::string key = key_of(c);
+      if (videos.count(key) || pending.count(key)) continue;
+      auto p = std::make_unique<Pending>();
+      p->src = std::make_unique<FrameSource>();
+      p->path = c.media_path;
+      p->start = c.start;
+      p->media_t = clip_media_time(c, c.start + 1e-4);
+      p->thread = CreateThread(nullptr, 0, [](LPVOID arg) -> DWORD {
+        auto *pd = static_cast<Pending *>(arg);
+        int w = 0, h = 0;
+        pd->ok = pd->src->open(pd->path);
+        if (pd->ok) pd->src->at(pd->media_t, &w, &h);
+        return 0;
+      }, p.get(), 0, nullptr);
+      if (!p->thread) continue;
+      pending.emplace(key, std::move(p));
+    }
+  }
+
+  static void decode_still(const std::string &path, StillImage &s) {
+    FrameSource src;
+    const uint8_t *a = nullptr;
+    const uint8_t *rgb = src.open(path) ? src.at(0.0, &s.w, &s.h, &a) : nullptr;
+    if (rgb && s.w > 0 && s.h > 0) {
+      const size_t n = static_cast<size_t>(s.w) * s.h;
+      s.rgb.assign(rgb, rgb + n * 3);
+      if (a) s.alpha.assign(a, a + n);
+      s.ok = true;
+      return;
+    }
+    const std::wstring pw = utf8_to_wide(path);
+    TodoProbeInfo info{};
+    if (todo_probe(pw.c_str(), 8000, &info) == TODO_OK && info.has_video && info.width > 0) {
+      s.rgb.resize(static_cast<size_t>(info.width) * info.height * 3);
+      s.ok = todo_decode_rgb24(pw.c_str(), 0.0, 12000, s.rgb.data(), static_cast<int>(s.rgb.size()), &s.w, &s.h) == TODO_OK;
+    }
+  }
+
+  const uint8_t *still(const std::string &path, int *w, int *h, const uint8_t **alpha) {
+    auto sit = stills.find(path);
+    if (sit == stills.end()) {
+      StillImage img;
+      auto pit = pending_stills.find(path);
+      if (pit != pending_stills.end()) {
+        join(*pit->second);
+        img = std::move(pit->second->img);
+        pending_stills.erase(pit);
+      } else {
+        decode_still(path, img);
+      }
+      sit = stills.emplace(path, std::move(img)).first;
+    }
+    StillImage &s = sit->second;
+    s.used = tick;
+    if (!s.ok) return nullptr;
+    *w = s.w;
+    *h = s.h;
+    *alpha = s.alpha.empty() ? nullptr : s.alpha.data();
+    return s.rgb.data();
+  }
+
+  /** 每帧合成完调用：这一帧没用到的视频关掉，几秒没用的静帧图扔掉 */
+  void end_frame(int64_t still_keep) {
+    for (auto it = video_used.begin(); it != video_used.end();) {
+      if (it->second < tick) {
+        videos.erase(it->first);
+        it = video_used.erase(it);
+      } else {
+        ++it;
+      }
+    }
+    for (auto it = stills.begin(); it != stills.end();) {
+      if (it->second.used + still_keep < tick) it = stills.erase(it);
+      else ++it;
+    }
+    ++tick;
+  }
+};
 
 void json_escape_out(const char *s) {
   std::fputc('"', stdout);
@@ -153,6 +576,167 @@ int run_ffmpeg(const std::wstring &ffmpeg, const std::vector<std::wstring> &args
   return static_cast<int>(code);
 }
 
+/** 成片视频编码：优先显卡硬件编码，都不可用时用 libx264 */
+struct VideoEncoder {
+  std::wstring ffmpeg;
+  std::vector<std::wstring> args;
+  std::string name;
+};
+
+static VideoEncoder pick_video_encoder(const std::wstring &primary) {
+  VideoEncoder x264{primary, {L"-c:v", L"libx264", L"-pix_fmt", L"yuv420p", L"-preset", L"fast", L"-crf", L"18"}, "libx264"};
+  wchar_t env[64];
+  const DWORD n = GetEnvironmentVariableW(L"TODO_EXPORT_ENCODER", env, 64);
+  const std::wstring force = n > 0 && n < 64 ? std::wstring(env, n) : L"";
+  if (force == L"x264" || force == L"libx264" || force == L"cpu") return x264;
+
+  std::vector<std::wstring> ffmpegs{primary};
+  wchar_t mod[MAX_PATH];
+  const DWORD m = GetModuleFileNameW(nullptr, mod, MAX_PATH);
+  if (m > 0 && m < MAX_PATH) {
+    std::wstring dir(mod, mod + m);
+    const auto slash = dir.find_last_of(L"\\/");
+    if (slash != std::wstring::npos) {
+      const std::wstring hw = dir.substr(0, slash + 1) + L"ffmpeg-hw.exe";
+      if (file_exists_w(hw.c_str())) ffmpegs.push_back(hw);
+    }
+  }
+
+  const std::vector<VideoEncoder> hw = {
+    {L"", {L"-c:v", L"h264_nvenc", L"-pix_fmt", L"yuv420p", L"-preset", L"p4", L"-tune", L"hq", L"-rc", L"vbr",
+           L"-cq", L"19", L"-b:v", L"0", L"-spatial-aq", L"1", L"-profile:v", L"high"}, "h264_nvenc"},
+    {L"", {L"-c:v", L"h264_amf", L"-pix_fmt", L"yuv420p", L"-quality", L"quality", L"-rc", L"cqp",
+           L"-qp_i", L"18", L"-qp_p", L"20", L"-qp_b", L"22"}, "h264_amf"},
+    {L"", {L"-c:v", L"h264_qsv", L"-pix_fmt", L"nv12", L"-preset", L"medium", L"-global_quality", L"20"}, "h264_qsv"},
+  };
+  for (const auto &enc : hw) {
+    if (!force.empty() && force != utf8_to_wide(enc.name)) continue;
+    for (const auto &ff : ffmpegs) {
+      std::vector<std::wstring> probe{L"-hide_banner", L"-v", L"error", L"-f", L"lavfi", L"-i", L"color=black:s=640x360:r=30:d=0.2"};
+      probe.insert(probe.end(), enc.args.begin(), enc.args.end());
+      probe.insert(probe.end(), {L"-f", L"null", L"-"});
+      if (run_ffmpeg(ff, probe) == 0) return {ff, enc.args, enc.name};
+    }
+  }
+  return x264;
+}
+
+/** ffmpeg 从 stdin 收原始帧：合成好一帧写一帧，不落盘 */
+struct FfmpegPipe {
+  HANDLE proc = nullptr;
+  HANDLE in = nullptr;
+
+  bool start(const std::wstring &ffmpeg, const std::vector<std::wstring> &args) {
+    std::wstring cmd = quote_arg(ffmpeg);
+    for (const auto &a : args) {
+      cmd.push_back(L' ');
+      cmd += quote_arg(a);
+    }
+    SECURITY_ATTRIBUTES sa{};
+    sa.nLength = sizeof(sa);
+    sa.bInheritHandle = TRUE;
+    HANDLE rd = nullptr;
+    if (!CreatePipe(&rd, &in, &sa, 8 << 20)) return false;
+    SetHandleInformation(in, HANDLE_FLAG_INHERIT, 0);
+    HANDLE nul = CreateFileW(L"NUL", GENERIC_READ | GENERIC_WRITE,
+      FILE_SHARE_READ | FILE_SHARE_WRITE, &sa, OPEN_EXISTING, 0, nullptr);
+    STARTUPINFOW si{};
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdInput = rd;
+    si.hStdOutput = nul;
+    si.hStdError = nul;
+    PROCESS_INFORMATION pi{};
+    std::vector<wchar_t> buf(cmd.begin(), cmd.end());
+    buf.push_back(L'\0');
+    const BOOL ok = CreateProcessW(nullptr, buf.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi);
+    CloseHandle(rd);
+    if (nul != INVALID_HANDLE_VALUE) CloseHandle(nul);
+    if (!ok) {
+      CloseHandle(in);
+      in = nullptr;
+      return false;
+    }
+    CloseHandle(pi.hThread);
+    proc = pi.hProcess;
+    return true;
+  }
+
+  bool write(const uint8_t *data, size_t n) {
+    while (n > 0) {
+      DWORD wrote = 0;
+      const DWORD chunk = static_cast<DWORD>((std::min)(n, static_cast<size_t>(1) << 24));
+      if (!WriteFile(in, data, chunk, &wrote, nullptr) || wrote == 0) return false;
+      data += wrote;
+      n -= wrote;
+    }
+    return true;
+  }
+
+  int finish() {
+    if (in) CloseHandle(in);
+    in = nullptr;
+    if (!proc) return -1;
+    WaitForSingleObject(proc, INFINITE);
+    DWORD code = 1;
+    GetExitCodeProcess(proc, &code);
+    CloseHandle(proc);
+    proc = nullptr;
+    return static_cast<int>(code);
+  }
+};
+
+/** 后台线程往 ffmpeg 写帧：写上一帧的同时合成下一帧 */
+class PipeWriter {
+ public:
+  explicit PipeWriter(FfmpegPipe *pipe) : pipe_(pipe) {
+    ready_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    idle_ = CreateEventW(nullptr, FALSE, TRUE, nullptr);
+    thread_ = CreateThread(nullptr, 0, [](LPVOID p) -> DWORD {
+      auto *self = static_cast<PipeWriter *>(p);
+      for (;;) {
+        WaitForSingleObject(self->ready_, INFINITE);
+        if (self->quit_) return 0;
+        if (!self->pipe_->write(self->buf_.data(), self->buf_.size())) self->ok_ = false;
+        SetEvent(self->idle_);
+      }
+    }, this, 0, nullptr);
+  }
+
+  ~PipeWriter() { finish(); }
+
+  /** 交出这一帧（和内部缓冲交换，调用方拿回一块可复用的内存）；上一帧写失败返回 false */
+  bool push(std::vector<uint8_t> *frame) {
+    if (!thread_) return pipe_->write(frame->data(), frame->size());
+    WaitForSingleObject(idle_, INFINITE);
+    if (!ok_) return false;
+    buf_.swap(*frame);
+    SetEvent(ready_);
+    return true;
+  }
+
+  bool finish() {
+    if (thread_) {
+      WaitForSingleObject(idle_, INFINITE);
+      quit_ = true;
+      SetEvent(ready_);
+      WaitForSingleObject(thread_, INFINITE);
+      CloseHandle(thread_);
+      thread_ = nullptr;
+    }
+    if (ready_) { CloseHandle(ready_); ready_ = nullptr; }
+    if (idle_) { CloseHandle(idle_); idle_ = nullptr; }
+    return ok_;
+  }
+
+ private:
+  FfmpegPipe *pipe_;
+  std::vector<uint8_t> buf_;
+  HANDLE thread_ = nullptr, ready_ = nullptr, idle_ = nullptr;
+  volatile bool quit_ = false;
+  volatile bool ok_ = true;
+};
+
 std::string fmt_num(double v) {
   char buf[64];
   std::snprintf(buf, sizeof(buf), "%.6g", v);
@@ -161,7 +745,30 @@ std::string fmt_num(double v) {
 
 }  // namespace
 
-static int compose_graph_rgb(const EditGraph &g, double time_sec, std::vector<uint8_t> *canvas, int *out_w, int *out_h, int *out_layers);
+static int compose_graph_rgb(const EditGraph &g, double time_sec, std::vector<uint8_t> *canvas, int *out_w, int *out_h, int *out_layers, ComposeCache *cache = nullptr);
+
+static int64_t prof_now() {
+  LARGE_INTEGER c;
+  QueryPerformanceCounter(&c);
+  return c.QuadPart;
+}
+/** TODO_EXPORT_PROFILE=1 时导出结束在 stderr 打各阶段耗时 */
+struct ExportProfile {
+  std::atomic<int64_t> decode{0}, layer{0}, parallel{0}, gpu{0}, pipe{0}, open{0}, compose{0}, endf{0};
+  std::atomic<int64_t> layers{0};
+  std::atomic<int64_t> stage[10]{};
+  void report(int frames) const {
+    if (!std::getenv("TODO_EXPORT_PROFILE")) return;
+    LARGE_INTEGER f;
+    QueryPerformanceFrequency(&f);
+    auto s = [&](int64_t v) { return static_cast<double>(v) / f.QuadPart; };
+    std::fprintf(stderr, "profile frames=%d layers/frame=%.1f open=%.2fs decode(sum)=%.2fs layer(sum)=%.2fs parallel(wall)=%.2fs gpu=%.2fs compose=%.2fs end_frame=%.2fs pipe=%.2fs\n",
+      frames, static_cast<double>(layers) / (std::max)(1, frames), s(open), s(decode), s(layer), s(parallel), s(gpu), s(compose), s(endf), s(pipe));
+    static const char *names[10] = {"collect", "alloc", "text", "solid", "letterbox", "look", "chroma", "crop", "mask", "transform+transition"};
+    for (int i = 0; i < 10; ++i) std::fprintf(stderr, "  %s=%.2fs\n", names[i], s(stage[i]));
+  }
+};
+static ExportProfile g_prof;
 static bool write_bmp_file(const wchar_t *path, int w, int h, const uint8_t *rgb);
 
 int todo_cmd_export(const wchar_t *graph_path, const wchar_t *out_path) {
@@ -211,6 +818,7 @@ int todo_cmd_export(const wchar_t *graph_path, const wchar_t *out_path) {
     if (!t || t->kind != "video") continue;
     if (synthetic(c)) continue;
     std::string k = c.kind;
+    if (k == "sticker") k = "image";
     if (k.empty()) k = is_still_image(c.kind, c.media_path) ? "image" : "video";
     if (k == "video" || k == "image") video_clips.push_back(c);
   }
@@ -227,6 +835,7 @@ int todo_cmd_export(const wchar_t *graph_path, const wchar_t *out_path) {
   for (const auto &c : clips) {
     const Track *t = track_of(c.track_id);
     if (!t || t->kind != "audio" || t->muted) continue;
+    if (c.mute) continue;
     if (synthetic(c)) continue;
     if (is_still_image(c.kind, c.media_path) || c.kind == "image") continue;
     audio_clips.push_back(c);
@@ -246,30 +855,12 @@ int todo_cmd_export(const wchar_t *graph_path, const wchar_t *out_path) {
     const double t1 = range_only ? work_out : out_dur;
     const int nframes = (std::max)(1, static_cast<int>(std::ceil((t1 - t0) * fps)));
 
-    wchar_t tmp_root[MAX_PATH];
-    GetTempPathW(MAX_PATH, tmp_root);
-    std::wstring frame_dir = std::wstring(tmp_root) + L"todo-compose-export-" + std::to_wstring(GetCurrentProcessId());
-    CreateDirectoryW(frame_dir.c_str(), nullptr);
-
-    std::vector<uint8_t> canvas;
-    for (int fi = 0; fi < nframes; ++fi) {
-      const double t = t0 + (fi + 0.0) / fps;
-      int cw = 0, ch = 0, layers = 0;
-      compose_graph_rgb(g, t, &canvas, &cw, &ch, &layers);
-      wchar_t name[64];
-      std::swprintf(name, 64, L"\\%06d.bmp", fi);
-      const std::wstring fp = frame_dir + name;
-      if (!write_bmp_file(fp.c_str(), cw, ch, canvas.data())) {
-        return fail_json("compose frame write failed");
-      }
-    }
-
     std::vector<InputMeta> inputs;
     std::vector<std::string> filters;
     std::vector<std::string> audio_labs;
     for (size_t i = 0; i < audio_clips.size(); ++i) {
       const Clip &c = audio_clips[i];
-      /* input 0 = BMP 序列；音频从 1 起 */
+      /* input 0 = stdin 原始帧；音频从 1 起 */
       const int idx = static_cast<int>(i + 1);
       inputs.push_back({c.media_path, false, 0});
       const double start = (std::max)(0.0, c.start);
@@ -277,9 +868,11 @@ int todo_cmd_export(const wchar_t *graph_path, const wchar_t *out_path) {
       const double in_point = (std::max)(0.0, c.in_point);
       const int delay_ms = static_cast<int>(std::lround(start * 1000.0));
       const std::string lab = "a" + std::to_string(i);
+      std::string vol;
+      if (std::fabs(c.gain_db) > 1e-6) vol = ",volume=" + fmt_num(c.gain_db) + "dB";
       filters.push_back(
         "[" + std::to_string(idx) + ":a]atrim=start=" + fmt_num(in_point) + ":duration=" + fmt_num(dur) +
-        ",asetpts=PTS-STARTPTS,adelay=" + std::to_string(delay_ms) + "|" + std::to_string(delay_ms) +
+        ",asetpts=PTS-STARTPTS" + vol + ",adelay=" + std::to_string(delay_ms) + "|" + std::to_string(delay_ms) +
         ":all=1[" + lab + "]");
       audio_labs.push_back("[" + lab + "]");
     }
@@ -296,12 +889,16 @@ int todo_cmd_export(const wchar_t *graph_path, const wchar_t *out_path) {
     args.push_back(L"-hide_banner");
     args.push_back(L"-loglevel");
     args.push_back(L"error");
+    args.push_back(L"-f");
+    args.push_back(L"rawvideo");
+    args.push_back(L"-pix_fmt");
+    args.push_back(L"rgb24");
+    args.push_back(L"-s");
+    args.push_back(std::to_wstring(w) + L"x" + std::to_wstring(h));
     args.push_back(L"-framerate");
     args.push_back(utf8_to_wide(fmt_num(fps)));
-    args.push_back(L"-f");
-    args.push_back(L"image2");
     args.push_back(L"-i");
-    args.push_back(frame_dir + L"\\%06d.bmp");
+    args.push_back(L"-");
     for (const auto &inp : inputs) {
       args.push_back(L"-i");
       args.push_back(utf8_to_wide(inp.path));
@@ -315,14 +912,13 @@ int todo_cmd_export(const wchar_t *graph_path, const wchar_t *out_path) {
       args.push_back(L"-filter_complex");
       args.push_back(utf8_to_wide(fc));
     }
+    const std::wstring primary_ffmpeg = find_ffmpeg();
+    if (primary_ffmpeg.empty()) return fail_json("找不到 ffmpeg（PATH / WinGet Links / native/bin / FFMPEG）");
+    const VideoEncoder encoder = pick_video_encoder(primary_ffmpeg);
+    std::fprintf(stderr, "encoder %s\n", encoder.name.c_str());
     args.push_back(L"-map");
     args.push_back(L"0:v");
-    args.push_back(L"-c:v");
-    args.push_back(L"libx264");
-    args.push_back(L"-pix_fmt");
-    args.push_back(L"yuv420p");
-    args.push_back(L"-preset");
-    args.push_back(L"veryfast");
+    args.insert(args.end(), encoder.args.begin(), encoder.args.end());
     if (!audio_labs.empty()) {
       args.push_back(L"-map");
       args.push_back(L"[aout]");
@@ -340,29 +936,47 @@ int todo_cmd_export(const wchar_t *graph_path, const wchar_t *out_path) {
     args.push_back(std::wstring(out_path));
 
     ensure_parent_dirs(out_path);
-    const std::wstring ffmpeg = find_ffmpeg();
-    if (ffmpeg.empty()) return fail_json("找不到 ffmpeg（PATH / WinGet Links / native/bin / FFMPEG）");
-    const int code = run_ffmpeg(ffmpeg, args);
+    FfmpegPipe pipe;
+    if (!pipe.start(encoder.ffmpeg, args)) return fail_json("无法启动 ffmpeg");
 
-    /* cleanup frames */
-    WIN32_FIND_DATAW fd;
-    const std::wstring glob = frame_dir + L"\\*.bmp";
-    HANDLE h = FindFirstFileW(glob.c_str(), &fd);
-    if (h != INVALID_HANDLE_VALUE) {
-      do {
-        DeleteFileW((frame_dir + L"\\" + fd.cFileName).c_str());
-      } while (FindNextFileW(h, &fd));
-      FindClose(h);
+    /* 进度走 stderr：每帧一行「progress 已合成 总帧数」 */
+    ComposeCache cache;
+    const int64_t still_keep = static_cast<int64_t>(fps * 5);
+    std::vector<uint8_t> canvas;
+    bool piped = true;
+    PipeWriter writer(&pipe);
+    for (int fi = 0; fi < nframes && piped; ++fi) {
+      const double t = t0 + (fi + 0.0) / fps;
+      int cw = 0, ch = 0, layers = 0;
+      if (fi % 5 == 0) cache.prefetch(g, t, 1.0);
+      const int64_t c0 = prof_now();
+      compose_graph_rgb(g, t, &canvas, &cw, &ch, &layers, &cache);
+      const int64_t e0 = prof_now();
+      cache.end_frame(still_keep);
+      g_prof.compose += e0 - c0;
+      g_prof.endf += prof_now() - e0;
+      g_prof.layers += layers;
+      const int64_t p0 = prof_now();
+      piped = cw == w && ch == h && writer.push(&canvas);
+      g_prof.pipe += prof_now() - p0;
+      std::fprintf(stderr, "progress %d %d\n", fi + 1, nframes);
+      std::fflush(stderr);
     }
-    RemoveDirectoryW(frame_dir.c_str());
+    piped = writer.finish() && piped;
+    g_prof.report(nframes);
+    const int code = pipe.finish();
 
-    if (code < 0) return fail_json("无法启动 ffmpeg");
-    if (code != 0 || !file_exists_w(out_path)) {
+    if (!piped || code != 0 || !file_exists_w(out_path)) {
+      if (encoder.name != "libx264") {
+        std::fprintf(stderr, "encoder %s failed (code %d), retry with libx264\n", encoder.name.c_str(), code);
+        SetEnvironmentVariableW(L"TODO_EXPORT_ENCODER", L"x264");
+        return todo_cmd_export(graph_path, out_path);
+      }
       char msg[128];
-      std::snprintf(msg, sizeof(msg), "ffmpeg 退出码 %d", code);
+      std::snprintf(msg, sizeof(msg), piped ? "ffmpeg 退出码 %d" : "ffmpeg 提前退出（退出码 %d）", code);
       return fail_json(msg);
     }
-    std::printf("{\"ok\":true,\"backend\":\"todo-cpp-compose-ffmpeg\",\"path\":");
+    std::printf("{\"ok\":true,\"backend\":\"todo-cpp-compose-ffmpeg\",\"encoder\":\"%s\",\"path\":", encoder.name.c_str());
     json_escape_out(wide_to_utf8(out_path).c_str());
     std::puts("}");
     return 0;
@@ -435,9 +1049,11 @@ int todo_cmd_export(const wchar_t *graph_path, const wchar_t *out_path) {
     const double in_point = (std::max)(0.0, c.in_point);
     const int delay_ms = static_cast<int>(std::lround(start * 1000.0));
     const std::string lab = "a" + std::to_string(i);
+    std::string vol;
+    if (std::fabs(c.gain_db) > 1e-6) vol = ",volume=" + fmt_num(c.gain_db) + "dB";
     filters.push_back(
       "[" + std::to_string(idx) + ":a]atrim=start=" + fmt_num(in_point) + ":duration=" + fmt_num(dur) +
-      ",asetpts=PTS-STARTPTS,adelay=" + std::to_string(delay_ms) + "|" + std::to_string(delay_ms) +
+      ",asetpts=PTS-STARTPTS" + vol + ",adelay=" + std::to_string(delay_ms) + "|" + std::to_string(delay_ms) +
       ":all=1[" + lab + "]");
     audio_labs.push_back("[" + lab + "]");
   }
@@ -503,7 +1119,9 @@ int todo_cmd_export(const wchar_t *graph_path, const wchar_t *out_path) {
     args.push_back(L"-pix_fmt");
     args.push_back(L"yuv420p");
     args.push_back(L"-preset");
-    args.push_back(L"veryfast");
+    args.push_back(L"fast");
+    args.push_back(L"-crf");
+    args.push_back(L"18");
     if (!audio_labs.empty()) {
       args.push_back(L"-map");
       args.push_back(L"[aout]");
@@ -584,30 +1202,50 @@ static bool write_bmp_file(const wchar_t *path, int w, int h, const uint8_t *rgb
 /** Letterbox src into layer WxH, then affine blit onto dst with monitor-matched transform. */
 static void letterbox_onto(
   uint8_t *dst, int dw, int dh,
-  const uint8_t *src, int sw, int sh) {
+  const uint8_t *src, int sw, int sh,
+  const uint8_t *src_alpha = nullptr, uint8_t *dst_alpha = nullptr) {
   if (sw <= 0 || sh <= 0 || dw <= 0 || dh <= 0) return;
   const double s = (std::min)(static_cast<double>(dw) / sw, static_cast<double>(dh) / sh);
   const int nw = (std::max)(1, static_cast<int>(std::lround(sw * s)));
   const int nh = (std::max)(1, static_cast<int>(std::lround(sh * s)));
   const int ox = (dw - nw) / 2;
   const int oy = (dh - nh) / 2;
+  const bool same_w = nw == sw;
+  std::vector<int> sxs;
+  if (!same_w) {
+    sxs.resize(static_cast<size_t>(nw));
+    for (int x = 0; x < nw; ++x)
+      sxs[x] = 3 * (std::min)(sw - 1, static_cast<int>(std::lround((x + 0.5) * sw / nw - 0.5)));
+  }
   for (int y = 0; y < nh; ++y) {
     const int sy = (std::min)(sh - 1, static_cast<int>(std::lround((y + 0.5) * sh / nh - 0.5)));
-    uint8_t *drow = dst + static_cast<size_t>(oy + y) * dw * 3;
+    uint8_t *drow = dst + static_cast<size_t>(oy + y) * dw * 3 + static_cast<size_t>(ox) * 3;
     const uint8_t *srow = src + static_cast<size_t>(sy) * sw * 3;
+    if (src_alpha && dst_alpha) {
+      uint8_t *darow = dst_alpha + static_cast<size_t>(oy + y) * dw + ox;
+      const uint8_t *sarow = src_alpha + static_cast<size_t>(sy) * sw;
+      if (same_w) std::memcpy(darow, sarow, static_cast<size_t>(nw));
+      else for (int x = 0; x < nw; ++x) darow[x] = sarow[sxs[x] / 3];
+    }
+    if (same_w) {
+      std::memcpy(drow, srow, static_cast<size_t>(nw) * 3);
+      continue;
+    }
     for (int x = 0; x < nw; ++x) {
-      const int sx = (std::min)(sw - 1, static_cast<int>(std::lround((x + 0.5) * sw / nw - 0.5)));
-      const int di = (ox + x) * 3;
-      const int si = sx * 3;
-      drow[di] = srow[si];
-      drow[di + 1] = srow[si + 1];
-      drow[di + 2] = srow[si + 2];
+      const uint8_t *s3 = srow + sxs[x];
+      drow[0] = s3[0];
+      drow[1] = s3[1];
+      drow[2] = s3[2];
+      drow += 3;
     }
   }
 }
 
 static void apply_color_grade(uint8_t *rgb, int n_pixels,
   double exposure, double contrast, double saturation, double temperature, double tint) {
+  const double e = 1e-6;
+  if (std::fabs(exposure) < e && std::fabs(contrast) < e && std::fabs(saturation) < e
+      && std::fabs(temperature) < e && std::fabs(tint) < e) return;
   const double brightness = 1.0 + exposure * 0.22;
   const double cont = 1.0 + contrast * 0.35;
   const double sat = 1.0 + saturation * 0.45;
@@ -802,12 +1440,17 @@ static double mask_alpha_uv(const Clip &c, double u, double v) {
   return (std::max)(0.0, (std::min)(1.0, a));
 }
 
-static void apply_mask(uint8_t *rgb, int w, int h, const Clip &c) {
+static void apply_mask(uint8_t *rgb, uint8_t *alpha, int w, int h, const Clip &c) {
   if (c.mask_type.empty()) return;
   for (int y = 0; y < h; ++y) {
     for (int x = 0; x < w; ++x) {
       const double a = mask_alpha_uv(c, (x + 0.5) / w, (y + 0.5) / h);
       if (a >= 0.999) continue;
+      if (alpha) {
+        uint8_t &av = alpha[static_cast<size_t>(y) * w + x];
+        av = static_cast<uint8_t>(av * a + 0.5);
+        continue;
+      }
       const size_t i = (static_cast<size_t>(y) * w + x) * 3;
       rgb[i] = static_cast<uint8_t>(rgb[i] * a + 0.5);
       rgb[i + 1] = static_cast<uint8_t>(rgb[i + 1] * a + 0.5);
@@ -836,7 +1479,32 @@ static void apply_chroma(uint8_t *rgb, int n_pixels, const Clip &c) {
   }
 }
 
-/** 片内转场：入/出段调透明度、闪黑白、擦除、推移（与时间线 transitionIn/Out 同字段）。 */
+/** 转场类型里要逐像素改画面的（其余只调透明度 / 位置） */
+static bool is_pixel_transition(const std::string &type) {
+  return type == "fadeBlack" || type == "fadeWhite" || type == "wipe";
+}
+
+/** time_sec 时这个片段有没有正在进行的逐像素转场 */
+static bool pixel_transition_active(const Clip &c, double time_sec) {
+  const double local = (std::max)(0.0, time_sec - c.start);
+  const double dur = (std::max)(0.04, c.duration);
+  return (c.trans_in_dur > 1e-4 && local < c.trans_in_dur && is_pixel_transition(c.trans_in_type))
+    || (c.trans_out_dur > 1e-4 && local > dur - c.trans_out_dur && is_pixel_transition(c.trans_out_type));
+}
+
+/** 素材层这一帧要不要在 CPU 上逐像素处理（调色、模糊、抠像、裁切、遮罩、闪黑白/擦除） */
+static bool media_needs_cpu(const Clip &c, double time_sec) {
+  const double e = 1e-6;
+  const double contrast = c.contrast + c.fx_sharpen * 0.35 + c.fx_filter * 0.12;
+  const double saturation = c.saturation + c.fx_filter * 0.22;
+  if (std::fabs(c.exposure) > e || std::fabs(contrast) > e || std::fabs(saturation) > e
+      || std::fabs(c.temperature) > e || std::fabs(c.tint) > e) return true;
+  if (c.fx_blur > 0.02 || c.chroma_on || !c.mask_type.empty()) return true;
+  if ((std::max)(0.0, c.crop_l) + (std::max)(0.0, c.crop_r) + (std::max)(0.0, c.crop_t) + (std::max)(0.0, c.crop_b) >= 1e-6) return true;
+  return pixel_transition_active(c, time_sec);
+}
+
+/** 片内转场：入/出段调透明度、闪黑白、擦除、推移（与时间线 transitionIn/Out 同字段）。layer 为空时只算透明度和位置 */
 static void apply_transition(
   uint8_t *layer, int w, int h, const Clip &c, double time_sec,
   double *x, double *op) {
@@ -845,6 +1513,7 @@ static void apply_transition(
   auto run = [&](const std::string &type, double u, bool is_out) {
     u = (std::max)(0.0, (std::min)(1.0, u));
     const std::string t = type.empty() ? "dissolve" : type;
+    if (!layer && is_pixel_transition(t)) return;
     if (t == "dissolve") {
       *op *= is_out ? (1.0 - u) : u;
     } else if (t == "fadeBlack") {
@@ -1012,9 +1681,52 @@ static void blit_layer_transformed(
 
 struct PreparedLayer {
   std::vector<uint8_t> rgb;
+  /** 空 = 旧规则：纯黑透明、其余不透明；否则逐像素透明度（纯黑仍算透明，裁切/遮罩靠置黑生效） */
+  std::vector<uint8_t> alpha;
   float x = 0, y = 0, sx = 1, sy = 1, rot = 0, op = 1;
   int blend = 0; // 0 normal 1 multiply 2 screen 3 add
+  /**
+   * 不需要逐像素处理的层直接给原始素材（rgb 为空）：GPU 按 fit 矩形把素材放进画布再变换，
+   * 省掉整幅画布的分配、缩放和上传。tex_key 相同的素材共用纹理，persistent 的只传一次。
+   */
+  const uint8_t *src = nullptr, *src_alpha = nullptr;
+  int sw = 0, sh = 0;
+  int fit_x = 0, fit_y = 0, fit_w = 0, fit_h = 0;
+  std::string tex_key;
+  bool persistent = false;
 };
+
+/** 与 letterbox_onto 同一套取整：素材等比放进 dw×dh 后占的矩形 */
+static void letterbox_rect(int dw, int dh, int sw, int sh, int *ox, int *oy, int *nw, int *nh) {
+  const double s = (std::min)(static_cast<double>(dw) / sw, static_cast<double>(dh) / sh);
+  *nw = (std::max)(1, static_cast<int>(std::lround(sw * s)));
+  *nh = (std::max)(1, static_cast<int>(std::lround(sh * s)));
+  *ox = (dw - *nw) / 2;
+  *oy = (dh - *nh) / 2;
+}
+
+/** RGB(+透明度) → 预乘 RGBA 写进映射好的纹理；纯黑一律透明 */
+static void write_premultiplied_rgba(uint8_t *dst, size_t pitch, const uint8_t *rgb, const uint8_t *alpha, int w, int h) {
+  for_row_chunks(h, [&](int y0, int y1) {
+    for (int y = y0; y < y1; ++y) {
+      auto *row = reinterpret_cast<uint32_t *>(dst + static_cast<size_t>(y) * pitch);
+      const uint8_t *src = rgb + static_cast<size_t>(y) * w * 3;
+      if (!alpha) {
+        for (int x = 0; x < w; ++x, src += 3) {
+          const uint32_t a = (src[0] | src[1] | src[2]) ? 0xFF000000u : 0u;
+          row[x] = a | (static_cast<uint32_t>(src[2]) << 16) | (static_cast<uint32_t>(src[1]) << 8) | src[0];
+        }
+        continue;
+      }
+      const uint8_t *arow = alpha + static_cast<size_t>(y) * w;
+      for (int x = 0; x < w; ++x, src += 3) {
+        const uint32_t a = (src[0] | src[1] | src[2]) ? arow[x] : 0u;
+        auto pm = [a](uint32_t v) { return (v * a + 127) / 255; };
+        row[x] = (a << 24) | (pm(src[2]) << 16) | (pm(src[1]) << 8) | pm(src[0]);
+      }
+    }
+  });
+}
 
 static int blend_code(const std::string &b) {
   if (b == "multiply") return 1;
@@ -1023,284 +1735,428 @@ static int blend_code(const std::string &b) {
   return 0;
 }
 
-/** D3D11 真合成：层纹理 + 逆变换采样 + 混合，读回 RGB。失败返回 false。 */
-static bool gpu_composite_layers(int w, int h, const std::vector<PreparedLayer> &layers, std::vector<uint8_t> *out) {
-  if (layers.empty()) {
-    out->assign(static_cast<size_t>(w) * h * 3, 0);
-    return true;
-  }
-  ID3D11Device *device = nullptr;
-  ID3D11DeviceContext *ctx = nullptr;
-  D3D_FEATURE_LEVEL level;
-  const D3D_FEATURE_LEVEL levels[] = { D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_0 };
-  if (FAILED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, levels, 2, D3D11_SDK_VERSION, &device, &level, &ctx))
-      || !device || !ctx) {
-    return false;
-  }
-
-  const char *vs_src =
-    "struct VSIn{float2 p:POSITION;float2 u:TEXCOORD0;};"
-    "struct VSOut{float4 p:SV_POSITION;float2 u:TEXCOORD0;};"
-    "VSOut main(VSIn i){VSOut o;o.p=float4(i.p,0,1);o.u=i.u;return o;}";
-  const char *ps_src =
-    "cbuffer CB:register(b0){float2 center;float2 invScale;float cosR;float sinR;float opacity;int blendMode;float2 invSize;float2 pad;};"
-    "Texture2D srcTex:register(t0);Texture2D dstTex:register(t1);SamplerState samp:register(s0);"
-    "float4 main(float4 p:SV_POSITION,float2 u:TEXCOORD0):SV_TARGET{"
-    "float2 pix=float2(p.x,p.y);"
-    "float2 d=pix-center;"
-    "float2 loc=float2(cosR*d.x+sinR*d.y,-sinR*d.x+cosR*d.y);"
-    "loc=loc*invScale+float2(0.5/invSize.x,0.5/invSize.y);"
-    "float2 uv=loc*invSize;"
-    "float3 dest=dstTex.Sample(samp,u).rgb;"
-    "if(uv.x<0||uv.y<0||uv.x>1||uv.y>1) return float4(dest,1);"
-    "float3 s=srcTex.Sample(samp,uv).rgb;"
-    "if(dot(s,s)<1e-6) return float4(dest,1);"
-    "float3 o=s;"
-    "if(blendMode==1) o=dest*s;"
-    "else if(blendMode==2) o=1-(1-dest)*(1-s);"
-    "else if(blendMode==3) o=saturate(dest+s);"
-    "o=lerp(dest,o,saturate(opacity));"
-    "return float4(o,1);}";
-
-  ID3DBlob *vsb = nullptr, *psb = nullptr, *err = nullptr;
-  if (FAILED(D3DCompile(vs_src, std::strlen(vs_src), nullptr, nullptr, nullptr, "main", "vs_4_0", 0, 0, &vsb, &err))) {
-    if (err) err->Release();
-    ctx->Release(); device->Release();
-    return false;
-  }
-  if (FAILED(D3DCompile(ps_src, std::strlen(ps_src), nullptr, nullptr, nullptr, "main", "ps_4_0", 0, 0, &psb, &err))) {
-    if (err) err->Release();
-    vsb->Release();
-    ctx->Release(); device->Release();
-    return false;
-  }
-  ID3D11VertexShader *vs = nullptr;
-  ID3D11PixelShader *ps = nullptr;
-  device->CreateVertexShader(vsb->GetBufferPointer(), vsb->GetBufferSize(), nullptr, &vs);
-  device->CreatePixelShader(psb->GetBufferPointer(), psb->GetBufferSize(), nullptr, &ps);
-  D3D11_INPUT_ELEMENT_DESC ied[] = {
-    { "POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-    { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 8, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-  };
-  ID3D11InputLayout *layout = nullptr;
-  device->CreateInputLayout(ied, 2, vsb->GetBufferPointer(), vsb->GetBufferSize(), &layout);
-  vsb->Release();
-  psb->Release();
-  if (!vs || !ps || !layout) {
-    if (vs) vs->Release(); if (ps) ps->Release(); if (layout) layout->Release();
-    ctx->Release(); device->Release();
-    return false;
-  }
-
-  // 顺时针：D3D11 默认剔除逆时针三角形，逆时针的全屏四边形一个像素都画不出
-  const float quad[] = {
-    -1, -1, 0, 1,
-    -1,  1, 0, 0,
-     1, -1, 1, 1,
-    -1,  1, 0, 0,
-     1,  1, 1, 0,
-     1, -1, 1, 1,
-  };
-  D3D11_BUFFER_DESC vbd{};
-  vbd.ByteWidth = sizeof(quad);
-  vbd.Usage = D3D11_USAGE_IMMUTABLE;
-  vbd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
-  D3D11_SUBRESOURCE_DATA vinit{ quad, 0, 0 };
-  ID3D11Buffer *vb = nullptr;
-  device->CreateBuffer(&vbd, &vinit, &vb);
-
+/** D3D11 合成的常驻状态：设备、着色器、渲染目标按画幅建一次，整次导出复用（逐帧重建设备和编译着色器极慢） */
+struct GpuCompositor {
   struct CBData {
     float center[2];
     float invScale[2];
     float cosR, sinR, opacity;
     int blendMode;
     float invSize[2];
+    float fitOrigin[2];
+    float fitInv[2];
     float pad[2];
   };
-  D3D11_BUFFER_DESC cbd{};
-  cbd.ByteWidth = (sizeof(CBData) + 15) & ~15;
-  cbd.Usage = D3D11_USAGE_DYNAMIC;
-  cbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-  cbd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-  ID3D11Buffer *cb = nullptr;
-  device->CreateBuffer(&cbd, nullptr, &cb);
 
-  D3D11_SAMPLER_DESC sd{};
-  sd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
-  sd.AddressU = sd.AddressV = sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
-  ID3D11SamplerState *samp = nullptr;
-  device->CreateSamplerState(&sd, &samp);
-
-  auto make_rt = [&](ID3D11Texture2D **tex, ID3D11RenderTargetView **rtv, ID3D11ShaderResourceView **srv) -> bool {
-    D3D11_TEXTURE2D_DESC td{};
-    td.Width = w; td.Height = h; td.MipLevels = 1; td.ArraySize = 1;
-    td.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-    td.SampleDesc.Count = 1;
-    td.Usage = D3D11_USAGE_DEFAULT;
-    td.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
-    if (FAILED(device->CreateTexture2D(&td, nullptr, tex)) || !*tex) return false;
-    if (FAILED(device->CreateRenderTargetView(*tex, nullptr, rtv))) return false;
-    if (FAILED(device->CreateShaderResourceView(*tex, nullptr, srv))) return false;
-    return true;
+  /** 原始尺寸素材的纹理；persistent 的（静帧）内容只写一次 */
+  struct SourceTex {
+    ID3D11Texture2D *tex = nullptr;
+    ID3D11ShaderResourceView *srv = nullptr;
+    int w = 0, h = 0;
+    bool filled = false;
+    int64_t used = 0;
   };
+  std::map<std::string, SourceTex> sources;
+  int64_t frame_no = 0;
 
-  ID3D11Texture2D *rtA = nullptr, *rtB = nullptr;
+  bool failed = false;
+  int w = 0, h = 0;
+  ID3D11Device *device = nullptr;
+  ID3D11DeviceContext *ctx = nullptr;
+  ID3D11VertexShader *vs = nullptr;
+  ID3D11PixelShader *ps = nullptr;
+  ID3D11InputLayout *layout = nullptr;
+  ID3D11Buffer *vb = nullptr, *cb = nullptr;
+  ID3D11SamplerState *samp = nullptr;
+  ID3D11Texture2D *rtA = nullptr, *rtB = nullptr, *layerTex = nullptr, *staging = nullptr;
   ID3D11RenderTargetView *rtvA = nullptr, *rtvB = nullptr;
-  ID3D11ShaderResourceView *srvA = nullptr, *srvB = nullptr;
-  if (!make_rt(&rtA, &rtvA, &srvA) || !make_rt(&rtB, &rtvB, &srvB) || !vb || !cb || !samp) {
-    if (vb) vb->Release(); if (cb) cb->Release(); if (samp) samp->Release();
-    if (rtA) rtA->Release(); if (rtB) rtB->Release();
-    if (rtvA) rtvA->Release(); if (rtvB) rtvB->Release();
-    if (srvA) srvA->Release(); if (srvB) srvB->Release();
-    vs->Release(); ps->Release(); layout->Release();
-    ctx->Release(); device->Release();
-    return false;
+  ID3D11ShaderResourceView *srvA = nullptr, *srvB = nullptr, *layerSrv = nullptr;
+
+  template <class T> static void rel(T *&p) { if (p) { p->Release(); p = nullptr; } }
+
+  void release_source(SourceTex &t) { rel(t.srv); rel(t.tex); }
+
+  void release_targets() {
+    for (auto &kv : sources) release_source(kv.second);
+    sources.clear();
+    rel(layerSrv); rel(layerTex); rel(staging);
+    rel(srvA); rel(srvB); rel(rtvA); rel(rtvB); rel(rtA); rel(rtB);
+    w = h = 0;
   }
 
-  const float clear[4] = { 0, 0, 0, 1 };
-  ctx->ClearRenderTargetView(rtvA, clear);
-  ctx->ClearRenderTargetView(rtvB, clear);
-  bool useA = true;
+  void release_all() {
+    release_targets();
+    rel(samp); rel(cb); rel(vb); rel(layout); rel(ps); rel(vs); rel(ctx); rel(device);
+  }
 
-  D3D11_VIEWPORT vp{};
-  vp.Width = static_cast<float>(w);
-  vp.Height = static_cast<float>(h);
-  vp.MaxDepth = 1;
-  ctx->RSSetViewports(1, &vp);
-  ctx->IASetInputLayout(layout);
-  ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-  UINT stride = 16, offset = 0;
-  ctx->IASetVertexBuffers(0, 1, &vb, &stride, &offset);
-  ctx->VSSetShader(vs, nullptr, 0);
-  ctx->PSSetShader(ps, nullptr, 0);
-  ctx->PSSetSamplers(0, 1, &samp);
-  ctx->PSSetConstantBuffers(0, 1, &cb);
+  ~GpuCompositor() { release_all(); }
 
-  D3D11_TEXTURE2D_DESC ltd{};
-  ltd.Width = w; ltd.Height = h; ltd.MipLevels = 1; ltd.ArraySize = 1;
-  ltd.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-  ltd.SampleDesc.Count = 1;
-  ltd.Usage = D3D11_USAGE_DYNAMIC;
-  ltd.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-  ltd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-
-  for (const auto &L : layers) {
-    ID3D11Texture2D *srcTex = nullptr;
-    if (FAILED(device->CreateTexture2D(&ltd, nullptr, &srcTex)) || !srcTex) continue;
-    D3D11_MAPPED_SUBRESOURCE mapped{};
-    if (FAILED(ctx->Map(srcTex, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
-      srcTex->Release();
-      continue;
+  bool init_device() {
+    const D3D_FEATURE_LEVEL levels[] = { D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_0 };
+    D3D_FEATURE_LEVEL level;
+    if (FAILED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, levels, 2, D3D11_SDK_VERSION, &device, &level, &ctx))
+        || !device || !ctx) return false;
+    const char *vs_src =
+      "struct VSIn{float2 p:POSITION;float2 u:TEXCOORD0;};"
+      "struct VSOut{float4 p:SV_POSITION;float2 u:TEXCOORD0;};"
+      "VSOut main(VSIn i){VSOut o;o.p=float4(i.p,0,1);o.u=i.u;return o;}";
+    const char *ps_src =
+      "cbuffer CB:register(b0){float2 center;float2 invScale;float cosR;float sinR;float opacity;int blendMode;float2 invSize;float2 fitOrigin;float2 fitInv;float2 pad;};"
+      "Texture2D srcTex:register(t0);Texture2D dstTex:register(t1);SamplerState samp:register(s0);"
+      "float4 main(float4 p:SV_POSITION,float2 u:TEXCOORD0):SV_TARGET{"
+      "float2 pix=float2(p.x,p.y);"
+      "float2 d=pix-center;"
+      "float2 loc=float2(cosR*d.x+sinR*d.y,-sinR*d.x+cosR*d.y);"
+      "loc=loc*invScale+float2(0.5/invSize.x,0.5/invSize.y);"
+      "float2 uv=(loc-fitOrigin)*fitInv;"
+      "float3 dest=dstTex.Sample(samp,u).rgb;"
+      "if(uv.x<0||uv.y<0||uv.x>1||uv.y>1) return float4(dest,1);"
+      "float4 s4=srcTex.Sample(samp,uv);"
+      "if(s4.a<1e-4) return float4(dest,1);"
+      "float3 s=saturate(s4.rgb/s4.a);"
+      "float3 o=s;"
+      "if(blendMode==1) o=dest*s;"
+      "else if(blendMode==2) o=1-(1-dest)*(1-s);"
+      "else if(blendMode==3) o=saturate(dest+s);"
+      "o=lerp(dest,o,saturate(opacity)*s4.a);"
+      "return float4(o,1);}";
+    ID3DBlob *vsb = nullptr, *psb = nullptr, *err = nullptr;
+    if (FAILED(D3DCompile(vs_src, std::strlen(vs_src), nullptr, nullptr, nullptr, "main", "vs_4_0", 0, 0, &vsb, &err))) {
+      rel(err);
+      return false;
     }
-    auto *dstp = static_cast<uint8_t *>(mapped.pData);
-    for (int y = 0; y < h; ++y) {
-      uint8_t *row = dstp + y * mapped.RowPitch;
-      const uint8_t *src = L.rgb.data() + static_cast<size_t>(y) * w * 3;
-      for (int x = 0; x < w; ++x) {
-        row[x * 4 + 0] = src[x * 3 + 0];
-        row[x * 4 + 1] = src[x * 3 + 1];
-        row[x * 4 + 2] = src[x * 3 + 2];
-        row[x * 4 + 3] = 255;
+    if (FAILED(D3DCompile(ps_src, std::strlen(ps_src), nullptr, nullptr, nullptr, "main", "ps_4_0", 0, 0, &psb, &err))) {
+      rel(err);
+      rel(vsb);
+      return false;
+    }
+    device->CreateVertexShader(vsb->GetBufferPointer(), vsb->GetBufferSize(), nullptr, &vs);
+    device->CreatePixelShader(psb->GetBufferPointer(), psb->GetBufferSize(), nullptr, &ps);
+    D3D11_INPUT_ELEMENT_DESC ied[] = {
+      { "POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+      { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 8, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+    };
+    device->CreateInputLayout(ied, 2, vsb->GetBufferPointer(), vsb->GetBufferSize(), &layout);
+    rel(vsb);
+    rel(psb);
+    if (!vs || !ps || !layout) return false;
+
+    // 顺时针：D3D11 默认剔除逆时针三角形，逆时针的全屏四边形一个像素都画不出
+    const float quad[] = {
+      -1, -1, 0, 1,
+      -1,  1, 0, 0,
+       1, -1, 1, 1,
+      -1,  1, 0, 0,
+       1,  1, 1, 0,
+       1, -1, 1, 1,
+    };
+    D3D11_BUFFER_DESC vbd{};
+    vbd.ByteWidth = sizeof(quad);
+    vbd.Usage = D3D11_USAGE_IMMUTABLE;
+    vbd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+    D3D11_SUBRESOURCE_DATA vinit{ quad, 0, 0 };
+    device->CreateBuffer(&vbd, &vinit, &vb);
+
+    D3D11_BUFFER_DESC cbd{};
+    cbd.ByteWidth = (sizeof(CBData) + 15) & ~15;
+    cbd.Usage = D3D11_USAGE_DYNAMIC;
+    cbd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    cbd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+    device->CreateBuffer(&cbd, nullptr, &cb);
+
+    D3D11_SAMPLER_DESC sd{};
+    sd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+    sd.AddressU = sd.AddressV = sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+    device->CreateSamplerState(&sd, &samp);
+    return vb && cb && samp;
+  }
+
+  bool init_targets(int nw, int nh) {
+    auto make_rt = [&](ID3D11Texture2D **tex, ID3D11RenderTargetView **rtv, ID3D11ShaderResourceView **srv) -> bool {
+      D3D11_TEXTURE2D_DESC td{};
+      td.Width = nw; td.Height = nh; td.MipLevels = 1; td.ArraySize = 1;
+      td.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+      td.SampleDesc.Count = 1;
+      td.Usage = D3D11_USAGE_DEFAULT;
+      td.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+      return SUCCEEDED(device->CreateTexture2D(&td, nullptr, tex)) && *tex
+        && SUCCEEDED(device->CreateRenderTargetView(*tex, nullptr, rtv))
+        && SUCCEEDED(device->CreateShaderResourceView(*tex, nullptr, srv));
+    };
+    if (!make_rt(&rtA, &rtvA, &srvA) || !make_rt(&rtB, &rtvB, &srvB)) return false;
+
+    D3D11_TEXTURE2D_DESC ltd{};
+    ltd.Width = nw; ltd.Height = nh; ltd.MipLevels = 1; ltd.ArraySize = 1;
+    ltd.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    ltd.SampleDesc.Count = 1;
+    ltd.Usage = D3D11_USAGE_DYNAMIC;
+    ltd.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    ltd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+    if (FAILED(device->CreateTexture2D(&ltd, nullptr, &layerTex)) || !layerTex) return false;
+    if (FAILED(device->CreateShaderResourceView(layerTex, nullptr, &layerSrv))) return false;
+
+    D3D11_TEXTURE2D_DESC stad{};
+    stad.Width = nw; stad.Height = nh; stad.MipLevels = 1; stad.ArraySize = 1;
+    stad.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    stad.SampleDesc.Count = 1;
+    stad.Usage = D3D11_USAGE_STAGING;
+    stad.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    if (FAILED(device->CreateTexture2D(&stad, nullptr, &staging)) || !staging) return false;
+    w = nw;
+    h = nh;
+    return true;
+  }
+
+  bool ensure(int nw, int nh) {
+    if (failed) return false;
+    if (!device && !init_device()) {
+      release_all();
+      failed = true;
+      return false;
+    }
+    if (w == nw && h == nh) return true;
+    release_targets();
+    if (!init_targets(nw, nh)) {
+      release_all();
+      failed = true;
+      return false;
+    }
+    return true;
+  }
+
+  SourceTex *source_tex(const std::string &key, int tw, int th) {
+    SourceTex &t = sources[key];
+    if (t.tex && (t.w != tw || t.h != th)) {
+      release_source(t);
+      t = SourceTex{};
+    }
+    if (!t.tex) {
+      D3D11_TEXTURE2D_DESC td{};
+      td.Width = tw; td.Height = th; td.MipLevels = 1; td.ArraySize = 1;
+      td.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+      td.SampleDesc.Count = 1;
+      td.Usage = D3D11_USAGE_DYNAMIC;
+      td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+      td.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+      if (FAILED(device->CreateTexture2D(&td, nullptr, &t.tex)) || !t.tex
+          || FAILED(device->CreateShaderResourceView(t.tex, nullptr, &t.srv))) {
+        release_source(t);
+        sources.erase(key);
+        return nullptr;
+      }
+      t.w = tw;
+      t.h = th;
+    }
+    return &t;
+  }
+
+  /** 视频纹理这帧没用就放掉；静帧留 5 秒（≈150 帧）以免来回切时重传 */
+  void evict_sources() {
+    for (auto it = sources.begin(); it != sources.end();) {
+      const bool still = it->first.rfind("still:", 0) == 0;
+      if (it->second.used + (still ? 150 : 1) < frame_no) {
+        release_source(it->second);
+        it = sources.erase(it);
+      } else {
+        ++it;
       }
     }
-    ctx->Unmap(srcTex, 0);
-    ID3D11ShaderResourceView *srcSrv = nullptr;
-    device->CreateShaderResourceView(srcTex, nullptr, &srcSrv);
-
-    ID3D11RenderTargetView *outRtv = useA ? rtvB : rtvA;
-    ID3D11ShaderResourceView *dstSrv = useA ? srvA : srvB;
-    ctx->OMSetRenderTargets(1, &outRtv, nullptr);
-
-    D3D11_MAPPED_SUBRESOURCE cmb{};
-    ctx->Map(cb, 0, D3D11_MAP_WRITE_DISCARD, 0, &cmb);
-    auto *c = static_cast<CBData *>(cmb.pData);
-    c->center[0] = static_cast<float>(w) * 0.5f + L.x * static_cast<float>(w) * 0.5f;
-    c->center[1] = static_cast<float>(h) * 0.5f + L.y * static_cast<float>(h) * 0.5f;
-    c->invScale[0] = L.sx != 0 ? 1.0f / L.sx : 0;
-    c->invScale[1] = L.sy != 0 ? 1.0f / L.sy : 0;
-    const float rad = L.rot * 3.14159265f / 180.0f;
-    c->cosR = std::cos(rad);
-    c->sinR = std::sin(rad);
-    c->opacity = L.op;
-    c->blendMode = L.blend;
-    c->invSize[0] = 1.0f / static_cast<float>(w);
-    c->invSize[1] = 1.0f / static_cast<float>(h);
-    c->pad[0] = c->pad[1] = 0;
-    ctx->Unmap(cb, 0);
-
-    ID3D11ShaderResourceView *srvs[2] = { srcSrv, dstSrv };
-    ctx->PSSetShaderResources(0, 2, srvs);
-    ctx->Draw(6, 0);
-    ID3D11ShaderResourceView *nulls[2] = { nullptr, nullptr };
-    ctx->PSSetShaderResources(0, 2, nulls);
-    if (srcSrv) srcSrv->Release();
-    srcTex->Release();
-    useA = !useA;
   }
 
-  ID3D11Texture2D *finalTex = useA ? rtA : rtB;
-  D3D11_TEXTURE2D_DESC stad{};
-  stad.Width = w; stad.Height = h; stad.MipLevels = 1; stad.ArraySize = 1;
-  stad.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-  stad.SampleDesc.Count = 1;
-  stad.Usage = D3D11_USAGE_STAGING;
-  stad.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-  ID3D11Texture2D *staging = nullptr;
-  device->CreateTexture2D(&stad, nullptr, &staging);
-  if (!staging) {
-    vb->Release(); cb->Release(); samp->Release();
-    rtA->Release(); rtB->Release(); rtvA->Release(); rtvB->Release(); srvA->Release(); srvB->Release();
-    vs->Release(); ps->Release(); layout->Release();
-    ctx->Release(); device->Release();
-    return false;
-  }
-  ctx->CopyResource(staging, finalTex);
-  D3D11_MAPPED_SUBRESOURCE mapped{};
-  if (FAILED(ctx->Map(staging, 0, D3D11_MAP_READ, 0, &mapped))) {
-    staging->Release();
-    vb->Release(); cb->Release(); samp->Release();
-    rtA->Release(); rtB->Release(); rtvA->Release(); rtvB->Release(); srvA->Release(); srvB->Release();
-    vs->Release(); ps->Release(); layout->Release();
-    ctx->Release(); device->Release();
-    return false;
-  }
-  out->assign(static_cast<size_t>(w) * h * 3, 0);
-  const auto *src = static_cast<const uint8_t *>(mapped.pData);
-  for (int y = 0; y < h; ++y) {
-    const uint8_t *row = src + y * mapped.RowPitch;
-    uint8_t *dst = out->data() + static_cast<size_t>(y) * w * 3;
-    for (int x = 0; x < w; ++x) {
-      dst[x * 3 + 0] = row[x * 4 + 0];
-      dst[x * 3 + 1] = row[x * 4 + 1];
-      dst[x * 3 + 2] = row[x * 4 + 2];
+  bool composite(const std::vector<PreparedLayer> &layers, std::vector<uint8_t> *out) {
+    const float clear[4] = { 0, 0, 0, 1 };
+    ctx->ClearRenderTargetView(rtvA, clear);
+    ctx->ClearRenderTargetView(rtvB, clear);
+    D3D11_VIEWPORT vp{};
+    vp.Width = static_cast<float>(w);
+    vp.Height = static_cast<float>(h);
+    vp.MaxDepth = 1;
+    ctx->RSSetViewports(1, &vp);
+    ctx->IASetInputLayout(layout);
+    ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    UINT stride = 16, offset = 0;
+    ctx->IASetVertexBuffers(0, 1, &vb, &stride, &offset);
+    ctx->VSSetShader(vs, nullptr, 0);
+    ctx->PSSetShader(ps, nullptr, 0);
+    ctx->PSSetSamplers(0, 1, &samp);
+    ctx->PSSetConstantBuffers(0, 1, &cb);
+
+    ++frame_no;
+    bool useA = true;
+    for (const auto &L : layers) {
+      // 预乘透明度上传，采样插值时透明像素不会把黑色混进边缘
+      ID3D11ShaderResourceView *layerView = nullptr;
+      float fit_origin[2] = { 0, 0 }, fit_inv[2] = { 1.0f / w, 1.0f / h };
+      if (L.src) {
+        SourceTex *st = source_tex(L.tex_key, L.sw, L.sh);
+        if (!st) continue;
+        if (!(L.persistent && st->filled)) {
+          D3D11_MAPPED_SUBRESOURCE mapped{};
+          if (FAILED(ctx->Map(st->tex, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) continue;
+          write_premultiplied_rgba(static_cast<uint8_t *>(mapped.pData), mapped.RowPitch, L.src, L.src_alpha, L.sw, L.sh);
+          ctx->Unmap(st->tex, 0);
+          st->filled = true;
+        }
+        st->used = frame_no;
+        layerView = st->srv;
+        fit_origin[0] = static_cast<float>(L.fit_x);
+        fit_origin[1] = static_cast<float>(L.fit_y);
+        fit_inv[0] = 1.0f / static_cast<float>(L.fit_w);
+        fit_inv[1] = 1.0f / static_cast<float>(L.fit_h);
+      } else {
+        D3D11_MAPPED_SUBRESOURCE mapped{};
+        if (FAILED(ctx->Map(layerTex, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) continue;
+        write_premultiplied_rgba(static_cast<uint8_t *>(mapped.pData), mapped.RowPitch, L.rgb.data(), L.alpha.empty() ? nullptr : L.alpha.data(), w, h);
+        ctx->Unmap(layerTex, 0);
+        layerView = layerSrv;
+      }
+
+      ID3D11RenderTargetView *outRtv = useA ? rtvB : rtvA;
+      ID3D11ShaderResourceView *dstSrv = useA ? srvA : srvB;
+      ctx->OMSetRenderTargets(1, &outRtv, nullptr);
+
+      D3D11_MAPPED_SUBRESOURCE cmb{};
+      ctx->Map(cb, 0, D3D11_MAP_WRITE_DISCARD, 0, &cmb);
+      auto *c = static_cast<CBData *>(cmb.pData);
+      c->center[0] = static_cast<float>(w) * 0.5f + L.x * static_cast<float>(w) * 0.5f;
+      c->center[1] = static_cast<float>(h) * 0.5f + L.y * static_cast<float>(h) * 0.5f;
+      c->invScale[0] = L.sx != 0 ? 1.0f / L.sx : 0;
+      c->invScale[1] = L.sy != 0 ? 1.0f / L.sy : 0;
+      const float rad = L.rot * 3.14159265f / 180.0f;
+      c->cosR = std::cos(rad);
+      c->sinR = std::sin(rad);
+      c->opacity = L.op;
+      c->blendMode = L.blend;
+      c->invSize[0] = 1.0f / static_cast<float>(w);
+      c->invSize[1] = 1.0f / static_cast<float>(h);
+      c->fitOrigin[0] = fit_origin[0];
+      c->fitOrigin[1] = fit_origin[1];
+      c->fitInv[0] = fit_inv[0];
+      c->fitInv[1] = fit_inv[1];
+      c->pad[0] = c->pad[1] = 0;
+      ctx->Unmap(cb, 0);
+
+      ID3D11ShaderResourceView *srvs[2] = { layerView, dstSrv };
+      ctx->PSSetShaderResources(0, 2, srvs);
+      ctx->Draw(6, 0);
+      ID3D11ShaderResourceView *nulls[2] = { nullptr, nullptr };
+      ctx->PSSetShaderResources(0, 2, nulls);
+      ID3D11RenderTargetView *noRtv = nullptr;
+      ctx->OMSetRenderTargets(1, &noRtv, nullptr);
+      useA = !useA;
     }
+
+    evict_sources();
+    ctx->CopyResource(staging, useA ? rtA : rtB);
+    D3D11_MAPPED_SUBRESOURCE mapped{};
+    if (FAILED(ctx->Map(staging, 0, D3D11_MAP_READ, 0, &mapped))) return false;
+    out->resize(static_cast<size_t>(w) * h * 3);
+    const auto *src = static_cast<const uint8_t *>(mapped.pData);
+    const UINT pitch = mapped.RowPitch;
+    for_row_chunks(h, [&](int y0, int y1) {
+      for (int y = y0; y < y1; ++y) {
+        const auto *row = reinterpret_cast<const uint32_t *>(src + static_cast<size_t>(y) * pitch);
+        uint8_t *dst = out->data() + static_cast<size_t>(y) * w * 3;
+        for (int x = 0; x < w; ++x, dst += 3) {
+          const uint32_t p = row[x];
+          dst[0] = static_cast<uint8_t>(p);
+          dst[1] = static_cast<uint8_t>(p >> 8);
+          dst[2] = static_cast<uint8_t>(p >> 16);
+        }
+      }
+    });
+    ctx->Unmap(staging, 0);
+    return true;
   }
-  ctx->Unmap(staging, 0);
-  staging->Release();
-  vb->Release(); cb->Release(); samp->Release();
-  rtA->Release(); rtB->Release(); rtvA->Release(); rtvB->Release(); srvA->Release(); srvB->Release();
-  vs->Release(); ps->Release(); layout->Release();
-  ctx->Release(); device->Release();
-  return true;
+};
+
+static GpuCompositor g_gpu;
+
+static bool gpu_composite_cached(int w, int h, const std::vector<PreparedLayer> &layers, std::vector<uint8_t> *out) {
+  if (layers.empty()) {
+    out->assign(static_cast<size_t>(w) * h * 3, 0);
+    return true;
+  }
+  return g_gpu.ensure(w, h) && g_gpu.composite(layers, out);
 }
 
 static bool g_compose_used_gpu = false;
 
-static int compose_graph_rgb(const EditGraph &g, double time_sec, std::vector<uint8_t> *canvas, int *out_w, int *out_h, int *out_layers) {
+static int compose_graph_rgb(const EditGraph &g, double time_sec, std::vector<uint8_t> *canvas, int *out_w, int *out_h, int *out_layers, ComposeCache *cache) {
   g_compose_used_gpu = false;
   const int w = (std::max)(16, static_cast<int>(std::lround(g.width)) & ~1);
   const int h = (std::max)(16, static_cast<int>(std::lround(g.height)) & ~1);
-  const std::vector<LayerRef> visible = collect_visible_layers(g, time_sec);
+#define PROF_STAGE(i, ...) do { const int64_t pt0_ = prof_now(); __VA_ARGS__; g_prof.stage[i] += prof_now() - pt0_; } while (0)
+  std::vector<LayerRef> visible;
+  PROF_STAGE(0, visible = collect_visible_layers(g, time_sec));
 
-  std::vector<PreparedLayer> prepared;
-  std::vector<uint8_t> layer(static_cast<size_t>(w) * h * 3, 0);
-  for (const LayerRef &lr : visible) {
-    const Clip &c = *lr.clip;
+  // 取素材要动缓存表，串行做；解码和逐像素处理各层互不相干，并行做
+  struct Source { FrameSource *video = nullptr; const uint8_t *still = nullptr, *still_alpha = nullptr; int sw = 0, sh = 0; };
+  std::vector<Source> sources(visible.size());
+  if (cache) {
+    const int64_t o0 = prof_now();
+    struct AddOpen { int64_t t; ~AddOpen() { g_prof.open += prof_now() - t; } } add_open{o0};
+    for (size_t i = 0; i < visible.size(); ++i) {
+      const Clip &c = *visible[i].clip;
+      if (c.kind == "text" || !c.text_content.empty() || c.kind == "solid") continue;
+      if (is_still_image(c.kind, c.media_path)) PROF_STAGE(3, sources[i].still = cache->still(c.media_path, &sources[i].sw, &sources[i].sh, &sources[i].still_alpha));
+      else sources[i].video = cache->source(c);
+    }
+  }
 
-    std::fill(layer.begin(), layer.end(), 0);
+  std::vector<PreparedLayer> slots(visible.size());
+  std::vector<char> filled(visible.size(), 0);
+  const bool gpu_ready = cache && g_gpu.ensure(w, h);
+  const int64_t par0 = prof_now();
+  parallel_for(visible.size(), [&](size_t li) {
+    const int64_t lt0 = prof_now();
+    const Clip &c = *visible[li].clip;
+    PreparedLayer &pl = slots[li];
+    auto finish = [&](double x, double y, double sx, double sy, double rot, double op) {
+      pl.x = static_cast<float>(x);
+      pl.y = static_cast<float>(y);
+      pl.sx = static_cast<float>(sx);
+      pl.sy = static_cast<float>(sy);
+      pl.rot = static_cast<float>(rot);
+      pl.op = static_cast<float>((std::max)(0.0, (std::min)(1.0, op)));
+      pl.blend = blend_code(c.blend);
+      filled[li] = 1;
+      g_prof.layer += prof_now() - lt0;
+    };
     const bool is_text = (c.kind == "text") || !c.text_content.empty();
+
+    // 快速路径：素材原样交给 GPU，不在 CPU 上铺整幅画布
+    if (gpu_ready && !is_text && c.kind != "solid" && !media_needs_cpu(c, time_sec)) {
+      const Source &s = sources[li];
+      const uint8_t *src = nullptr, *src_alpha = nullptr;
+      int rw = 0, rh = 0;
+      if (s.still) {
+        src = s.still; src_alpha = s.still_alpha; rw = s.sw; rh = s.sh;
+        pl.tex_key = "still:" + c.media_path;
+        pl.persistent = true;
+      } else if (s.video) {
+        const int64_t d0 = prof_now();
+        src = s.video->at(clip_media_time(c, time_sec), &rw, &rh, &src_alpha);
+        g_prof.decode += prof_now() - d0;
+        pl.tex_key = "video:" + (c.id.empty() ? c.media_path + "@" + std::to_string(c.start) : c.id);
+      }
+      if (!src || rw <= 0 || rh <= 0) return;
+      pl.src = src;
+      pl.src_alpha = src_alpha;
+      pl.sw = rw;
+      pl.sh = rh;
+      letterbox_rect(w, h, rw, rh, &pl.fit_x, &pl.fit_y, &pl.fit_w, &pl.fit_h);
+      double x, y, sx, sy, rot, op;
+      clip_transform_at(c, time_sec, &x, &y, &sx, &sy, &rot, &op);
+      apply_transition(nullptr, w, h, c, time_sec, &x, &op);
+      finish(x, y, sx, sy, rot, op);
+      return;
+    }
+
+    std::vector<uint8_t> layer, layer_alpha;
+    PROF_STAGE(1, layer.assign(static_cast<size_t>(w) * h * 3, 0));
     if (is_text) {
-      paint_text_layer(layer.data(), w, h, c);
+      PROF_STAGE(2, paint_text_layer(layer.data(), w, h, c));
     } else if (c.kind == "solid") {
       int r = 0, gr = 0, b = 0;
       hex_rgb(c.solid_color, &r, &gr, &b);
@@ -1315,41 +2171,58 @@ static int compose_graph_rgb(const EditGraph &g, double time_sec, std::vector<ui
     } else {
       const bool still = is_still_image(c.kind, c.media_path);
       const double media_t = still ? 0.0 : clip_media_time(c, time_sec);
-      const std::wstring path_w = utf8_to_wide(c.media_path);
-      TodoProbeInfo info{};
-      if (todo_probe(path_w.c_str(), 8000, &info) != TODO_OK || !info.has_video || info.width <= 0) continue;
-      const int need = info.width * info.height * 3;
-      std::vector<uint8_t> rgb(static_cast<size_t>(need));
       int rw = 0, rh = 0;
-      if (todo_decode_rgb24(path_w.c_str(), media_t, 12000, rgb.data(), need, &rw, &rh) != TODO_OK) continue;
-      letterbox_onto(layer.data(), w, h, rgb.data(), rw, rh);
-      apply_clip_look(layer.data(), w * h, w, h, c);
-      apply_chroma(layer.data(), w * h, c);
+      const uint8_t *src = nullptr, *src_alpha = nullptr;
+      std::vector<uint8_t> rgb;
+      if (cache) {
+        const Source &s = sources[li];
+        if (s.still) { src = s.still; src_alpha = s.still_alpha; rw = s.sw; rh = s.sh; }
+        else if (s.video) {
+          const int64_t d0 = prof_now();
+          src = s.video->at(media_t, &rw, &rh, &src_alpha);
+          g_prof.decode += prof_now() - d0;
+        }
+      } else {
+        const std::wstring path_w = utf8_to_wide(c.media_path);
+        TodoProbeInfo info{};
+        if (todo_probe(path_w.c_str(), 8000, &info) != TODO_OK || !info.has_video || info.width <= 0) return;
+        const int need = info.width * info.height * 3;
+        rgb.resize(static_cast<size_t>(need));
+        if (todo_decode_rgb24(path_w.c_str(), media_t, 12000, rgb.data(), need, &rw, &rh) == TODO_OK) src = rgb.data();
+      }
+      if (!src) return;
+      if (src_alpha) layer_alpha.assign(static_cast<size_t>(w) * h, 0);
+      PROF_STAGE(4, letterbox_onto(layer.data(), w, h, src, rw, rh, src_alpha, src_alpha ? layer_alpha.data() : nullptr));
+      PROF_STAGE(5, apply_clip_look(layer.data(), w * h, w, h, c));
+      PROF_STAGE(6, apply_chroma(layer.data(), w * h, c));
     }
-    apply_crop(layer.data(), w, h, c);
-    apply_mask(layer.data(), w, h, c);
+    PROF_STAGE(7, apply_crop(layer.data(), w, h, c));
+    PROF_STAGE(8, apply_mask(layer.data(), layer_alpha.empty() ? nullptr : layer_alpha.data(), w, h, c));
 
     double x, y, sx, sy, rot, op;
-    clip_transform_at(c, time_sec, &x, &y, &sx, &sy, &rot, &op);
-    apply_transition(layer.data(), w, h, c, time_sec, &x, &op);
+    PROF_STAGE(9, clip_transform_at(c, time_sec, &x, &y, &sx, &sy, &rot, &op); apply_transition(layer.data(), w, h, c, time_sec, &x, &op));
 
-    PreparedLayer pl;
-    pl.rgb = layer;
-    pl.x = static_cast<float>(x);
-    pl.y = static_cast<float>(y);
-    pl.sx = static_cast<float>(sx);
-    pl.sy = static_cast<float>(sy);
-    pl.rot = static_cast<float>(rot);
-    pl.op = static_cast<float>((std::max)(0.0, (std::min)(1.0, op)));
-    pl.blend = blend_code(c.blend);
-    prepared.push_back(std::move(pl));
-  }
+    pl.rgb = std::move(layer);
+    pl.alpha = std::move(layer_alpha);
+    finish(x, y, sx, sy, rot, op);
+  });
+  g_prof.parallel += prof_now() - par0;
+  std::vector<PreparedLayer> prepared;
+  prepared.reserve(slots.size());
+  for (size_t i = 0; i < slots.size(); ++i) if (filled[i]) prepared.push_back(std::move(slots[i]));
 
-  if (gpu_composite_layers(w, h, prepared, canvas)) {
+  const int64_t gpu0 = prof_now();
+  const bool on_gpu = gpu_composite_cached(w, h, prepared, canvas);
+  g_prof.gpu += prof_now() - gpu0;
+  if (on_gpu) {
     g_compose_used_gpu = true;
   } else {
     canvas->assign(static_cast<size_t>(w) * h * 3, 0);
-    for (const auto &pl : prepared) {
+    for (auto &pl : prepared) {
+      if (pl.src && pl.rgb.empty()) {
+        pl.rgb.assign(static_cast<size_t>(w) * h * 3, 0);
+        letterbox_onto(pl.rgb.data(), w, h, pl.src, pl.sw, pl.sh);
+      }
       blit_layer_transformed(
         canvas->data(), w, h, pl.rgb.data(),
         pl.x, pl.y, pl.sx, pl.sy, pl.rot, pl.op,
@@ -1376,7 +2249,8 @@ int todo_cmd_compose(const wchar_t *graph_path, double time_sec, const wchar_t *
 
   std::vector<uint8_t> canvas;
   int w = 0, h = 0, layers = 0;
-  compose_graph_rgb(g, time_sec, &canvas, &w, &h, &layers);
+  ComposeCache cache;
+  compose_graph_rgb(g, time_sec, &canvas, &w, &h, &layers, &cache);
   if (!g_compose_used_gpu) return fail_json("d3d11 gpu composite failed");
 
   ensure_parent_dirs(out_bmp);

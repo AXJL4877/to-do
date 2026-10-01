@@ -33,3 +33,13 @@ tests/golden/out/
 *.njsproj
 *.sln
 *.sw?
+
+# 抖音发布台运行时产物（保留脚本与 _template）
+douyin-publish/archive/inbox/*
+!douyin-publish/archive/inbox/_template/
+!douyin-publish/archive/inbox/_template/**
+!douyin-publish/archive/inbox/README.txt
+douyin-publish/dumps/
+douyin-publish/out/
+douyin-publish/config.json
+douyin-publish/__pycache__/

@@ -6,10 +6,10 @@ import { aiFetch, aiUrl } from '../lib/aiFetch'
 import { importAiJob, isSameAiMedia, shouldImport } from '../lib/aiJobImport'
 import {
   CHALK_SKILL_ID, defaultSkillParams, enqueueSkill, fetchSkills, optionLabel, paramVisible, phasePercent, phaseText,
-  type SkillJob, type SkillPack, type SkillParams, type SkillPlan,
+  type SkillJob, type SkillPack, type SkillParams, type SkillPlan, type TimelinePlacement,
 } from '../lib/aiSkills'
 import { isNarratedJob, narratedStage, type NarratedJob } from '../lib/narratedTimeline'
-import { SkillParamControl, SkillStudio } from './SkillStudio'
+import { PlacementControl, SkillParamControl, SkillStudio } from './SkillStudio'
 
 const QUICK_FALLBACK = 4
 
@@ -21,6 +21,11 @@ const isVideoSkillJob = (j: SkillJob) =>
 const jobSkillId = (j: SkillJob) => j.params.skill?.id ?? CHALK_SKILL_ID
 
 type Draft = { prompt: string; params: SkillParams; plan: SkillPlan | null }
+
+const PLACEMENT_KEY = 'todo.skillPlacement'
+const loadPlacement = (): TimelinePlacement => {
+  try { return localStorage.getItem(PLACEMENT_KEY) === 'end' ? 'end' : 'playhead' } catch { return 'playhead' }
+}
 
 const SkillJobCard = memo(function SkillJobCard({ j, onRetry, onRemove }: { j: SkillJob; onRetry: (id: string) => void; onRemove: (id: string) => void }) {
   const media = useApp((s) => s.media)
@@ -114,6 +119,11 @@ export function SkillsPanel() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [drafts, setDrafts] = useState<Record<string, Draft>>({})
   const [autoTimeline, setAutoTimeline] = useState(true)
+  const [placement, setPlacementState] = useState<TimelinePlacement>(loadPlacement)
+  const setPlacement = useCallback((v: TimelinePlacement) => {
+    setPlacementState(v)
+    try { localStorage.setItem(PLACEMENT_KEY, v) } catch { /* */ }
+  }, [])
   const [paramsOpen, setParamsOpen] = useState(false)
   const [studioOpen, setStudioOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
@@ -179,8 +189,13 @@ export function SkillsPanel() {
     setSubmitting(true)
     setError(null)
     try {
-      await enqueueSkill({ skillId: pack.id, prompt: prompt.trim(), params, plan, autoTimeline })
-      useApp.getState().setToast(`${pack.name}已入队${active ? ` · 前面还有 ${active} 个` : ''}`)
+      const placeAt = useApp.getState().playhead
+      await enqueueSkill({
+        skillId: pack.id, prompt: prompt.trim(), params, plan, autoTimeline,
+        ...(autoTimeline ? { placement, ...(placement === 'playhead' ? { placeAt } : {}) } : {}),
+      })
+      const where = !autoTimeline ? '' : placement === 'end' ? '，完成后接到时间线末尾' : `，从 ${placeAt.toFixed(1)}s 开始入轨`
+      useApp.getState().setToast(`${pack.name}已入队${where}${active ? ` · 前面还有 ${active} 个` : ''}`)
       const countParam = pack.planner?.countParam
       patchDraft({ plan: null, ...(countParam ? { params: { ...params, [countParam]: 0 } } : {}) })
       void refreshJobs()
@@ -282,6 +297,7 @@ export function SkillsPanel() {
         <input type="checkbox" checked={autoTimeline} data-testid="skill-auto-timeline" onChange={(e) => setAutoTimeline(e.target.checked)} />
         自动入轨
       </label>
+      {autoTimeline && <PlacementControl value={placement} onChange={setPlacement} />}
 
       <div className="flex gap-1.5">
         <button
@@ -322,6 +338,8 @@ export function SkillsPanel() {
           setPlan={setPlan}
           autoTimeline={autoTimeline}
           setAutoTimeline={setAutoTimeline}
+          placement={placement}
+          setPlacement={setPlacement}
           onSubmit={submit}
           onClose={() => setStudioOpen(false)}
         />

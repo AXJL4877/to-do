@@ -68,7 +68,7 @@ const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif', '.t
 
 /** @param {{ kind?: string, mediaPath?: string }} c */
 function isStillImage(c) {
-  if (c.kind === 'image') return true
+  if (c.kind === 'image' || c.kind === 'sticker') return true
   const ext = path.extname(c.mediaPath || '').toLowerCase()
   return IMAGE_EXT.has(ext)
 }
@@ -84,14 +84,22 @@ async function exportSequence(seq, outPath, opts = {}) {
     const { prepareAlphaVideos } = require('./alphaVideoExport.cjs')
     seq = await prepareAlphaVideos(seq, { ffmpeg: resolveFfmpeg(opts.nativeBin), onProgress: opts.onProgress })
   } catch (e) { return { ok: false, error: e.message || '透明视频预处理失败' } }
-  if (!seq.audioOnly && (seq.clips || []).some(c => c.enabled !== false && c.text?.fancy)) {
+  if (!seq.audioOnly && (seq.clips || []).some(c => c.enabled !== false && c.text)) {
     let prepared
     try {
-      const { prepareChalkText } = require('./chalkTextExport.cjs')
-      prepared = await prepareChalkText(seq, { ffmpeg: resolveFfmpeg(opts.nativeBin), rendererUrl: opts.chalkRendererUrl, onProgress: opts.onProgress })
-      return await exportPreparedSequence(prepared.sequence, outPath, { ...opts, onProgress: p => opts.onProgress?.(25 + Math.round(p * 0.75)) })
-    } catch (e) { return { ok: false, error: e.message || '粉笔花字导出失败' } }
-    finally { prepared?.cleanup() }
+      const { prepareTextLayers } = require('./chalkTextExport.cjs')
+      prepared = await prepareTextLayers(seq, {
+        ffmpeg: resolveFfmpeg(opts.nativeBin),
+        rendererUrl: opts.chalkRendererUrl,
+        onProgress: (p, stage) => opts.onProgress?.(10 + p * 0.1, stage),
+      })
+    } catch (e) { return { ok: false, error: e.message || '字幕渲染失败' } }
+    try {
+      return await exportPreparedSequence(prepared.sequence, outPath, {
+        ...opts,
+        onProgress: (p, stage) => opts.onProgress?.(20 + Math.max(0, p - 10) * (80 / 90), stage),
+      })
+    } finally { prepared.cleanup() }
   }
   return exportPreparedSequence(seq, outPath, opts)
 }
@@ -108,6 +116,8 @@ function exportPreparedSequence(seq, outPath, opts = {}) {
   }
   return exportViaFfmpegCli(seq, outPath, opts)
 }
+
+const fmtEta = (sec) => (sec >= 3600 ? `${(sec / 3600).toFixed(1)} 小时` : sec >= 60 ? `${Math.round(sec / 60)} 分钟` : `${Math.max(1, Math.round(sec))} 秒`)
 
 function exportViaCpp(engine, seq, outPath, opts = {}) {
   return new Promise((resolve) => {
@@ -148,8 +158,35 @@ function exportViaCpp(engine, seq, outPath, opts = {}) {
     let stderr = ''
     child.stdout.setEncoding('utf8')
     child.stdout.on('data', (c) => { stdout += c })
+    // 引擎每合成一帧往 stderr 写「progress 已合成 总帧数」，边合成边编码；合成占 10%→99%
+    let rateFrom = null
+    let lastReport = 0
+    let errBuf = ''
     child.stderr.setEncoding('utf8')
-    child.stderr.on('data', (c) => { stderr += c })
+    child.stderr.on('data', (chunk) => {
+      errBuf += chunk
+      let idx
+      while ((idx = errBuf.indexOf('\n')) >= 0) {
+        const line = errBuf.slice(0, idx).trim()
+        errBuf = errBuf.slice(idx + 1)
+        const m = /^progress (\d+) (\d+)$/.exec(line)
+        if (!m) {
+          if (line) stderr = (stderr + line + '\n').slice(-4000)
+          continue
+        }
+        const done = Number(m[1])
+        const total = Math.max(1, Number(m[2]))
+        const now = Date.now()
+        // 首帧含编码器探测、素材打开，从它之后开始算速率，攒够 1 秒再报剩余时间
+        if (!rateFrom) rateFrom = { t: now, done }
+        if (!opts.onProgress || (now - lastReport < 250 && done < total)) continue
+        lastReport = now
+        const spent = (now - rateFrom.t) / 1000
+        const eta = spent >= 1 && done > rateFrom.done ? ` · 约剩 ${fmtEta((spent / (done - rateFrom.done)) * (total - done))}` : ''
+        opts.onProgress(10 + (done / total) * 89, done < total ? `合成并编码 ${done}/${total} 帧${eta}` : '收尾封装…')
+      }
+    })
+
     child.on('error', (err) => {
       try { fs.unlinkSync(graphFile) } catch { /* */ }
       resolve({
@@ -208,7 +245,7 @@ function exportViaFfmpegCli(seq, outPath, opts = {}) {
     .filter((c) => {
       const t = trackById.get(c.trackId)
       if (!t || t.kind !== 'video') return false
-      const k = c.kind || (isStillImage(c) ? 'image' : 'video')
+      const k = c.kind === 'sticker' ? 'image' : (c.kind || (isStillImage(c) ? 'image' : 'video'))
       return k === 'video' || k === 'image'
     })
     .sort((a, b) => {
@@ -221,6 +258,7 @@ function exportViaFfmpegCli(seq, outPath, opts = {}) {
   const audioClips = clips.filter((c) => {
     const t = trackById.get(c.trackId)
     if (!t || t.kind !== 'audio' || t.muted) return false
+    if (c.mute || c.audio?.mute) return false
     if (isStillImage(c) || c.kind === 'image') return false
     return true
   })
@@ -294,8 +332,10 @@ function exportViaFfmpegCli(seq, outPath, opts = {}) {
     const inPoint = Math.max(0, Number(c.inPoint) || 0)
     const delayMs = Math.round(start * 1000)
     const lab = `a${i}`
+    const gainDb = Number(c.gainDb ?? c.audio?.gainDb) || 0
+    const vol = Math.abs(gainDb) > 1e-6 ? `,volume=${gainDb}dB` : ''
     filters.push(
-      `[${idx}:a]atrim=start=${inPoint}:duration=${dur},asetpts=PTS-STARTPTS,` +
+      `[${idx}:a]atrim=start=${inPoint}:duration=${dur},asetpts=PTS-STARTPTS${vol},` +
       `adelay=${delayMs}|${delayMs}:all=1[${lab}]`,
     )
     audioLabs.push(`[${lab}]`)
@@ -380,7 +420,7 @@ function exportViaFfmpegCli(seq, outPath, opts = {}) {
         if (line.startsWith('out_time_ms=')) {
           const ms = Number(line.slice('out_time_ms='.length))
           if (Number.isFinite(ms) && opts.onProgress) {
-            opts.onProgress(Math.min(99, (ms / totalMs) * 100))
+            opts.onProgress(Math.min(99, (ms / totalMs) * 100), '编码 MP4…')
           }
         } else if (line === 'progress=end' && opts.onProgress) {
           opts.onProgress(100)

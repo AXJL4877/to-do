@@ -61,6 +61,9 @@ export type TtsOutput = {
   narration: { text: string; duration: number; speaker: string | null; audio: string; timing: string }
 }
 
+/** 自动入轨从哪开始：提交时的播放头，或接在时间线末尾 */
+export type TimelinePlacement = 'playhead' | 'end'
+
 /** /api/ai-jobs 里 kind = 'skill' 的一行 */
 export type SkillJob<O = SkillOutput> = {
   id: string
@@ -70,6 +73,8 @@ export type SkillJob<O = SkillOutput> = {
   params: {
     duration?: number
     autoTimeline?: boolean
+    placement?: TimelinePlacement | null
+    placeAt?: number | null
     width?: number | null
     height?: number | null
     skill?: { id: string; name: string; summary: string; alpha: boolean; pipeline?: SkillPack['pipeline'] | 'voice' } | null
@@ -193,6 +198,9 @@ export async function enqueueSkill(body: {
   params: SkillParams
   plan?: SkillPlan | null
   autoTimeline: boolean
+  /** 自动入轨位置；playhead 时 placeAt 为提交那一刻的播放头（生成期间挪动播放头不影响） */
+  placement?: TimelinePlacement
+  placeAt?: number
   /** subtitle 管线：字幕对应的配音任务（没有时给素材文件，走语音识别），以及要对齐的时间线片段 */
   sourceJobId?: string
   sourceMedia?: SubtitleSourceMedia

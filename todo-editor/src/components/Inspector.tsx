@@ -44,7 +44,10 @@ export function Inspector({ onClose }: { onClose: () => void }) {
         <NumInput label="曝光" value={clip.color.exposure} min={-2} max={2} step={0.05} defaultValue={0} onChange={exposure => updateColor({ exposure })} />
         <NumInput label="对比度" value={clip.color.contrast} min={-1} max={1} step={0.01} defaultValue={0} onChange={contrast => updateColor({ contrast })} />
         <NumInput label="饱和度" value={clip.color.saturation} min={-1} max={1} step={0.01} defaultValue={0} onChange={saturation => updateColor({ saturation })} />
-      </PropSection><PropSection title="音频"><NumInput label="增益" value={clip.audio.gainDb} min={-60} max={12} unit="dB" defaultValue={0} onChange={gainDb => updateAudio({ gainDb })} /></PropSection></>}
+      </PropSection><PropSection title="音频">
+        <NumInput label="增益" value={clip.audio.gainDb} min={-60} max={12} unit="dB" defaultValue={0} testId="audio-gain" onChange={gainDb => updateAudio({ gainDb })} />
+        <button type="button" className="btn btn-ghost" data-testid="btn-loudness-inspector" onClick={() => { void useApp.getState().levelAudioLoudness() }}>一键调音</button>
+      </PropSection></>}
       <p className="editor-hint">拖动属性名称快速调整 · Shift 精调<br />双击数值恢复默认 · Ctrl+Z 撤销</p>
     </div>}
   </aside>

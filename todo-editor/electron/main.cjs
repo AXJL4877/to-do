@@ -770,9 +770,9 @@ app.whenReady().then(async () => {
       {
         nativeBin,
         chalkRendererUrl: isDev ? new URL('/chalk-render.html', appUrl()).href : undefined,
-        onProgress: (progress) => {
+        onProgress: (progress, stage) => {
           if (!sender.isDestroyed()) {
-            sender.send('desktop:export-progress', { jobId, progress, status: 'running' })
+            sender.send('desktop:export-progress', { jobId, progress, stage, status: 'running' })
           }
         },
       },
@@ -809,6 +809,61 @@ app.whenReady().then(async () => {
   ipcMain.handle('desktop:waveform-peaks-buffer', async (_e, payload = {}) => {
     const { data, bins, ext } = payload || {}
     return extractWaveformPeaksFromBuffer({ data, bins, ext, nativeBin })
+  })
+
+  const { analyzeLoudness } = require('./loudnessAnalyze.cjs')
+  ipcMain.handle('desktop:analyze-loudness', async (_e, payload = {}) => {
+    const { filePath, inPoint, duration } = payload || {}
+    return analyzeLoudness({ filePath, inPoint, duration, nativeBin })
+  })
+
+  /** 把 dataURL 图片落到当前项目 ai-generated/（无项目则 userData/cache），作透明水印等素材 */
+  ipcMain.handle('desktop:save-media-asset', async (_e, payload = {}) => {
+    const name = path.basename(String(payload?.name || `asset_${Date.now()}.png`))
+    if (!name || name !== String(payload?.name || name)) return { ok: false, error: 'invalid name' }
+    const dataUrl = String(payload?.dataUrl || '')
+    const b64 = dataUrl.replace(/^data:image\/\w+;base64,/, '')
+    if (!b64 || b64 === dataUrl) return { ok: false, error: '无效图片数据' }
+    const destDir = currentProjectDir
+      ? path.join(currentProjectDir, PROJECT_SUBDIRS.ai)
+      : path.join(userDataPaths().cache, 'assets')
+    try {
+      fs.mkdirSync(destDir, { recursive: true })
+      const dest = path.join(destDir, name)
+      fs.writeFileSync(dest, Buffer.from(b64, 'base64'))
+      return { ok: true, path: dest, url: pathToFileURL(dest).href }
+    } catch (e) {
+      return { ok: false, error: e.message || String(e) }
+    }
+  })
+
+  const douyin = require('./douyinPublish.cjs')
+  ipcMain.handle('desktop:douyin-status', (_e, payload = {}) => douyin.status(payload?.root))
+  ipcMain.handle('desktop:douyin-open-desk', (_e, payload = {}) => douyin.openDesk(payload?.root))
+  ipcMain.handle('desktop:douyin-reveal-inbox', (_e, payload = {}) => douyin.revealInbox(payload?.root))
+  ipcMain.handle('desktop:douyin-list-assets', (_e, payload = {}) => douyin.listAssets(payload?.root))
+  ipcMain.handle('desktop:douyin-use-asset', (_e, payload = {}) => douyin.useAsset(payload?.slug, payload?.root))
+  ipcMain.handle('desktop:douyin-stage-asset', (_e, payload = {}) => douyin.stageAsset(payload || {}))
+  ipcMain.handle('desktop:douyin-attach-cover', (_e, payload = {}) => douyin.attachCover(payload || {}))
+  ipcMain.handle('desktop:douyin-save-meta', (_e, payload = {}) => douyin.saveAssetMeta(payload || {}))
+  ipcMain.handle('desktop:douyin-publish', (_e, payload = {}) => douyin.runPublish(payload || {}))
+  ipcMain.handle('desktop:pick-image', async () => {
+    const { canceled, filePaths } = await dialog.showOpenDialog({
+      title: '选择封面图（须生图自带大标题，禁止后期贴字）',
+      properties: ['openFile'],
+      filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp'] }],
+    })
+    if (canceled || !filePaths[0]) return { ok: false, canceled: true }
+    return { ok: true, path: filePaths[0], url: pathToFileURL(filePaths[0]).href }
+  })
+  ipcMain.handle('desktop:pick-video', async () => {
+    const { canceled, filePaths } = await dialog.showOpenDialog({
+      title: '选择成片视频',
+      properties: ['openFile'],
+      filters: [{ name: '视频', extensions: ['mp4', 'mov', 'webm'] }],
+    })
+    if (canceled || !filePaths[0]) return { ok: false, canceled: true }
+    return { ok: true, path: filePaths[0], url: pathToFileURL(filePaths[0]).href }
   })
 
   // Windows 上 BrowserWindow 之间 HTML5 拖放经常丢；松手时看光标是否在时间轴窗里

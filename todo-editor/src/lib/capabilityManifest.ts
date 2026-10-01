@@ -200,6 +200,8 @@ export const CAPABILITY_MANIFEST: CapabilityItem[] = [
   { module: 12, moduleName: '音频', feature: '人声增强', selector: '[data-testid="btn-voice-enhance"]', kind: 'exists' },
   { module: 12, moduleName: '音频', feature: '响度统一', selector: '[data-testid="btn-loudness"]', kind: 'exists' },
   { module: 12, moduleName: '音频', feature: '电平表', selector: '[data-testid="level-meter"]', kind: 'exists' },
+  { module: 10, moduleName: '画中画合成', feature: '水印设计', selector: '[data-testid="btn-watermark"]', kind: 'exists' },
+  { module: 16, moduleName: '导出发布', feature: '抖音发布台', selector: '[data-testid="btn-douyin"]', kind: 'exists' },
 
   // 13 跟踪 (3)
   { module: 13, moduleName: '跟踪运镜', feature: '运动跟踪', selector: '[data-testid="btn-track"]', kind: 'exists' },

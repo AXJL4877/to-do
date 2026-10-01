@@ -547,6 +547,8 @@ bool parse_clip_obj(const std::string &s, size_t *i, Clip *c) {
       if (!parse_string(s, i, &c->track_id)) return false;
     } else if (key == "kind") {
       if (!parse_string(s, i, &c->kind)) return false;
+    } else if (key == "textLayer") {
+      if (!parse_bool(s, i, &c->text_layer)) return false;
     } else if (key == "start") {
       if (!parse_number(s, i, &c->start)) return false;
     } else if (key == "duration") {
@@ -610,6 +612,10 @@ bool parse_clip_obj(const std::string &s, size_t *i, Clip *c) {
       if (!parse_transition_obj(s, i, &c->trans_in_type, &c->trans_in_dur)) return false;
     } else if (key == "transitionOut") {
       if (!parse_transition_obj(s, i, &c->trans_out_type, &c->trans_out_dur)) return false;
+    } else if (key == "gainDb") {
+      if (!parse_number(s, i, &c->gain_db)) return false;
+    } else if (key == "mute") {
+      if (!parse_bool(s, i, &c->mute)) return false;
     } else if (key == "keyframes") {
       if (!parse_keyframes_obj(s, i, c)) return false;
     } else {
@@ -697,7 +703,8 @@ bool usable_path(const std::string &p) {
 }
 
 bool is_still_image(const std::string &kind, const std::string &media_path) {
-  if (kind == "image") return true;
+  // sticker = 透明静图水印/贴图（与预览 monitorDraw 一致）
+  if (kind == "image" || kind == "sticker") return true;
   const std::string e = lower_ext(media_path);
   return e == ".png" || e == ".jpg" || e == ".jpeg" || e == ".webp" ||
          e == ".bmp" || e == ".gif" || e == ".tif" || e == ".tiff";

@@ -4,7 +4,7 @@ import { ArrowDown, ArrowUp, Blocks, Loader2, Plus, Sparkles, Trash2, Wand2, X }
 import clsx from 'clsx'
 import {
   GROUP_LABELS, ROLE_LABELS, estimateTimings, optionLabel, paramVisible, planSkill, skillHasAlpha,
-  type SkillElement, type SkillGroup, type SkillPack, type SkillParam, type SkillParams, type SkillPlan, type SkillRole,
+  type SkillElement, type SkillGroup, type SkillPack, type SkillParam, type SkillParams, type SkillPlan, type SkillRole, type TimelinePlacement,
 } from '../lib/aiSkills'
 
 export const ELEMENT_COLORS = ['#f4d35e', '#7cc6fe', '#f28482', '#84dcc6', '#c3a6ff', '#ffb870', '#a3d977', '#ff9ecb']
@@ -19,8 +19,28 @@ type Props = {
   setPlan: (v: SkillPlan | null) => void
   autoTimeline: boolean
   setAutoTimeline: (v: boolean) => void
+  placement?: TimelinePlacement
+  setPlacement?: (v: TimelinePlacement) => void
   onSubmit: () => Promise<boolean>
   onClose: () => void
+}
+
+const PLACEMENT_OPTIONS: { value: TimelinePlacement; label: string; hint: string }[] = [
+  { value: 'playhead', label: '从播放头', hint: '从点「生成」那一刻的播放头开始放；那里有片段时换到空轨，不挪位置' },
+  { value: 'end', label: '接到末尾', hint: '接在整条时间线最后一个片段后面' },
+]
+
+/** 自动入轨的位置（分段按钮） */
+export function PlacementControl({ value, onChange }: { value: TimelinePlacement; onChange: (v: TimelinePlacement) => void }) {
+  return (
+    <div className="skill-seg" data-testid="skill-placement">
+      {PLACEMENT_OPTIONS.map((o) => (
+        <button key={o.value} type="button" className={clsx(value === o.value && 'active')} title={o.hint} data-testid={`skill-placement-${o.value}`} onClick={() => onChange(o.value)}>
+          {o.label}
+        </button>
+      ))}
+    </div>
+  )
 }
 
 /** 单个参数控件：≤4 个选项用分段按钮，更多用下拉；数值用滑杆 */
@@ -114,7 +134,7 @@ export const SkillTimingBar = memo(function SkillTimingBar({ plan, duration, hol
 })
 
 export function SkillStudio(props: Props) {
-  const { pack, prompt, setPrompt, params, setParams, plan, setPlan, autoTimeline, setAutoTimeline, onSubmit, onClose } = props
+  const { pack, prompt, setPrompt, params, setParams, plan, setPlan, autoTimeline, setAutoTimeline, placement, setPlacement, onSubmit, onClose } = props
   const [planning, setPlanning] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -297,6 +317,7 @@ export function SkillStudio(props: Props) {
             <input type="checkbox" checked={autoTimeline} onChange={(e) => setAutoTimeline(e.target.checked)} />
             自动入轨
           </label>
+          {autoTimeline && placement && setPlacement && <PlacementControl value={placement} onChange={setPlacement} />}
           <button type="button" className="btn btn-ghost" onClick={onClose}>取消</button>
           <button type="button" className="btn btn-primary" data-testid="skill-studio-submit" disabled={!canSubmit} onClick={() => void submit()}>
             {submitting ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}

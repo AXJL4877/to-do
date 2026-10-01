@@ -4,7 +4,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 const assert = require('node:assert/strict')
 const { PNG } = require('pngjs')
-const { prepareChalkText } = require('../electron/chalkTextExport.cjs')
+const { prepareTextLayers } = require('../electron/chalkTextExport.cjs')
 const { exportSequence } = require('../electron/exportSequence.cjs')
 const root = path.resolve(__dirname, '..')
 const out = path.join(root, 'native/test-output/chalk-integration')
@@ -75,7 +75,7 @@ app.whenReady().then(async () => {
         text: { content: '粉笔', fontFamily: 'KaiTi', fontSize: 240, align: 'center', lineHeight: 1.25, letterSpacing: 0,
           animIn: 'none', animOut: 'none', fancy: { fontWeight: 400, fill: ['#ffffff'], fillAngle: 90, strokes: [], chalk: { duration: 1, grain: 0.55, hand: false } } } },
     ], workIn: 0, workOut: 1.5 }
-    prepared = await prepareChalkText(sequence, { ffmpeg })
+    prepared = await prepareTextLayers(sequence, { ffmpeg })
     const video = prepared.sequence.clips[0].mediaPath
     assert.equal(sum(pixels(video, 0), 3), 0, 'first frame should be transparent')
     const partial = sum(pixels(video, 0.5), 3), full = sum(pixels(video, 1.25), 3)

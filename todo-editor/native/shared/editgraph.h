@@ -16,6 +16,8 @@ struct Clip {
   std::string track_id;
   bool enabled = true;
   std::string kind;
+  /** 字幕/文字预渲染成图片后的层：叠放层级仍按文字算 */
+  bool text_layer = false;
   double speed = 1;
   bool reverse = false;
   bool has_freeze = false;
@@ -62,6 +64,9 @@ struct Clip {
   double trans_in_dur = 0;
   std::string trans_out_type;
   double trans_out_dur = 0;
+  /** 音频增益 dB；导出 volume 滤镜 */
+  double gain_db = 0;
+  bool mute = false;
   struct KfHandle { double x = 0; double y = 0; };
   struct Kf {
     double t = 0;

@@ -27,6 +27,7 @@ import { listStylePacks, stylePreviewPath } from './stylePacks.mjs'
 import { animPreviewPath, listAnimPacks } from './animPacks.mjs'
 import { H3_QUALITIES, ensureH3, h3Health } from './h3Client.mjs'
 import { designFancyText, texturePrompt } from './fancyTextAi.mjs'
+import { designDouyinMeta, buildDouyinCoverPrompt } from './douyinMetaAi.mjs'
 import { directAnim } from './animDirector.mjs'
 import { getSkillEntry, listSkillPacks, planSkill, resolveSkillParams, skillPreviewPath } from './skillPacks.mjs'
 import { cleanText } from './stylePacks.mjs'
@@ -308,6 +309,41 @@ export async function handleAiHttp(req, res) {
           model: 'gpt-image-2', purpose: 'texture',
         })
         sendJson(res, 200, { ok: true, job })
+      } catch (e) {
+        sendJson(res, 400, { ok: false, error: String(e instanceof Error ? e.message : e) })
+      }
+      return true
+    }
+
+    if (url === '/api/ai-douyin-meta' && req.method === 'POST') {
+      try {
+        const body = JSON.parse((await readBody(req)) || '{}')
+        const meta = await designDouyinMeta(readAiConfig({ revealKey: true }), body)
+        sendJson(res, 200, { ok: true, meta })
+      } catch (e) {
+        sendJson(res, 400, { ok: false, error: String(e instanceof Error ? e.message : e) })
+      }
+      return true
+    }
+
+    if (url === '/api/ai-douyin-cover' && req.method === 'POST') {
+      try {
+        const body = JSON.parse((await readBody(req)) || '{}')
+        const title = cleanText(body.title) || cleanText(body.projectName) || '成片'
+        const prompt = buildDouyinCoverPrompt({
+          title,
+          styleHint: body.styleHint,
+        })
+        const job = enqueueAiJob({
+          kind: 'image',
+          prompt,
+          size: '3:4',
+          quality: body.quality === '1K' ? '1K' : '2K',
+          model: body.model || 'gpt-image-2',
+          purpose: 'douyin-cover',
+          imageDataUrl: typeof body.imageDataUrl === 'string' ? body.imageDataUrl : undefined,
+        })
+        sendJson(res, 200, { ok: true, job, prompt })
       } catch (e) {
         sendJson(res, 400, { ok: false, error: String(e instanceof Error ? e.message : e) })
       }
