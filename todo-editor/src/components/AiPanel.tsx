@@ -10,6 +10,7 @@ import { AiAnimStudio, type AnimPack, type AnimValues } from './AiAnimStudio'
 import { importAiJob, shouldImport } from '../lib/aiJobImport'
 import { phasePercent, phaseText } from '../lib/aiSkills'
 import clsx from 'clsx'
+import { CreativeProgress, progressThemeForJob } from './CreativeProgress'
 
 const FALLBACK_SIZE_OPTIONS = [
   { value: '1024x1024', label: '1:1 1024' },
@@ -979,9 +980,13 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
                           : j.prompt}
                   </p>
                   {j.status === 'running' && (
-                    <div className="ai-progress mt-1">
-                      <div className={pct == null ? 'ai-progress-bar' : 'ai-progress-fill'} style={pct == null ? undefined : { width: `${pct}%` }} />
-                    </div>
+                    <CreativeProgress
+                      theme={progressThemeForJob(j)}
+                      compact
+                      percent={pct}
+                      label={phaseText(j.phase) || '进行中'}
+                      className="mt-1"
+                    />
                   )}
                   {j.error && <p className="m-0 mt-0.5 line-clamp-2" style={{ color: 'var(--error)' }} title={j.error}>{friendlyAiError(j.error)}</p>}
                 </div>

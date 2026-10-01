@@ -13,6 +13,7 @@ import { createProduction, listProductions, type ProductionSummary } from '../li
 import { forgetProduction, registerProduction } from '../lib/productionTimeline'
 import { ProductionStudio } from './ProductionStudio'
 import { PlacementControl, SkillParamControl, SkillStudio } from './SkillStudio'
+import { CreativeProgress, progressThemeForJob } from './CreativeProgress'
 
 const QUICK_FALLBACK = 4
 
@@ -85,10 +86,12 @@ const SkillJobCard = memo(function SkillJobCard({ j, onRetry, onRemove }: { j: S
       <div className="min-w-0 flex-1 flex flex-col gap-1">
         <p className="m-0 text-[11px] leading-snug line-clamp-2" title={j.prompt}>{out?.plan?.title ? `〔${out.plan.title}〕` : ''}{j.prompt}</p>
         {j.status === 'running' ? (
-          <>
-            <div className="ai-progress"><div className={pct == null ? 'ai-progress-bar' : 'ai-progress-fill'} style={pct == null ? undefined : { width: `${pct}%` }} /></div>
-            <span className="text-[10px] truncate" style={{ color: 'var(--text-muted)' }}>{[pct != null ? `${pct}%` : phaseText(j.phase) || '进行中', sceneCount].filter(Boolean).join(' · ')}</span>
-          </>
+          <CreativeProgress
+            theme={progressThemeForJob(j)}
+            compact
+            percent={pct}
+            label={[phaseText(j.phase) || '进行中', sceneCount].filter(Boolean).join(' · ')}
+          />
         ) : j.status === 'error' ? (
           <span className="text-[10px] line-clamp-2" style={{ color: 'var(--error)' }} title={j.error || ''}>{j.error}</span>
         ) : (
@@ -126,10 +129,12 @@ const ProductionCard = memo(function ProductionCard({ p, onOpen, onRemove }: { p
       <button type="button" className="min-w-0 flex-1 flex flex-col gap-1 text-left" onClick={() => onOpen(p.id)}>
         <p className="m-0 text-[11px] leading-snug font-semibold truncate">{p.title || '成片'}</p>
         {live ? (
-          <>
-            <div className="ai-progress"><div className="ai-progress-fill" style={{ width: `${pct}%` }} /></div>
-            <span className="text-[10px] truncate" style={{ color: 'var(--text-muted)' }} title={p.status?.phase}>{p.queuedJobId && !p.runningJobId ? '排队中' : phaseText(p.status?.phase) || '进行中'}</span>
-          </>
+          <CreativeProgress
+            theme="chalk"
+            compact
+            percent={pct}
+            label={p.queuedJobId && !p.runningJobId ? '排队中' : phaseText(p.status?.phase) || '成片生成中'}
+          />
         ) : (
           <span className="text-[10px] truncate" style={{ color: failed ? 'var(--error)' : 'var(--text-muted)' }} title={p.status?.error || p.status?.phase}>
             {[p.segments ? `${p.segments} 段 · ${p.boards} 块黑板 · ${p.duration.toFixed(1)}s` : '', phaseText(p.status?.phase)].filter(Boolean).join(' · ')}

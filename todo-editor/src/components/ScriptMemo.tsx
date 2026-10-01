@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { BookOpen, Loader2, NotebookPen, PencilLine, Plus, Sparkles, X } from 'lucide-react'
+import { BookOpen, NotebookPen, PencilLine, Plus, Sparkles, X } from 'lucide-react'
 import { useApp } from '../store'
 import { requestScriptAi, type ScriptAiMode } from '../lib/scriptAi'
+import { CreativeProgress } from './CreativeProgress'
 
 /** 口播语速按每秒约 4.5 字估算 */
 const CHARS_PER_SEC = 4.5
@@ -377,7 +378,7 @@ export function ScriptMemo() {
           >
             <Sparkles size={14} />
           </button>
-          {busy ? <Loader2 size={13} className="animate-spin script-ai-spin" /> : null}
+          {busy ? <CreativeProgress theme="type" compact className="w-[88px]" label="AI…" /> : null}
         </div>
       )}
 
@@ -424,10 +425,11 @@ export function ScriptMemo() {
                 disabled={busy}
                 onClick={() => { void runAi(panel) }}
               >
-                {busy ? <Loader2 size={13} className="animate-spin" /> : '发送'}
+                {busy ? '…' : '发送'}
               </button>
             </div>
           ) : null}
+          {busy ? <CreativeProgress theme="type" compact label="口播 AI 思考中…" /> : null}
           {error ? <div className="script-ai-msg err" data-testid="script-ai-error">{error}</div> : null}
           {reply ? <div className="script-ai-msg" data-testid="script-ai-reply">{reply}</div> : null}
         </div>

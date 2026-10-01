@@ -4,6 +4,7 @@ import { desktop, isDesktopApp } from '../lib/desktop'
 import { fetchDouyinMeta, generateDouyinCover, generateMetaAndCover, resolvePublishBrief } from '../lib/douyinPublishAi'
 import { takeDouyinPendingVideo } from '../lib/douyinPending'
 import { pathToFileUrl } from '../lib/importFiles'
+import { CreativeProgress } from './CreativeProgress'
 
 type Asset = {
   id: string
@@ -920,7 +921,9 @@ export function DouyinPublishPanel() {
                   <button type="button" className="btn btn-ghost text-[11px]" disabled={coverBusy} onClick={() => { void pickCover() }}>
                     换本机图
                   </button>
-                  {coverMsg ? (
+                  {coverBusy ? (
+                    <CreativeProgress theme="brush" compact label={coverMsg || '笔刷绘制竖封面…'} />
+                  ) : coverMsg ? (
                     <div className="text-[10px] leading-snug" style={{ color: /失败|错误|超时|请先/.test(coverMsg) ? 'var(--accent)' : 'var(--text-muted)' }}>
                       {coverMsg}
                     </div>
@@ -975,7 +978,9 @@ export function DouyinPublishPanel() {
                       </button>
                     )}
                   </div>
-                  {metaMsg ? (
+                  {metaBusy ? (
+                    <CreativeProgress theme="type" compact label={metaMsg || '正在写标题与简介…'} />
+                  ) : metaMsg ? (
                     <div className="text-[10px]" style={{ color: /失败|错误|超时/.test(metaMsg) ? 'var(--accent)' : 'var(--text-muted)' }}>
                       {metaMsg}
                     </div>

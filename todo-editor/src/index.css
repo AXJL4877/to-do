@@ -535,7 +535,10 @@ div.start-item-main { cursor: default; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
   .modal-backdrop, .modal, .toast { animation: none !important; opacity: 1 !important; }
-  .ai-progress-bar, .ai-result-card, .ai-error-in, .menu-pop { animation: none !important; }
+  .ai-progress-bar, .ai-result-card, .ai-error-in, .menu-pop,
+  .cp-wave-bars span, .cp-wave-beam, .cp-type-caret, .cp-type-write,
+  .cp-brush-stroke, .cp-brush-tip, .cp-film-strip, .cp-chalk-line,
+  .cp-chalk-hand, .cp-chalk-dust, .cp-orbit-glow, .cp-orbit-fill { animation: none !important; }
 }
 
 /* —— AI 风格库 —— */
@@ -994,3 +997,257 @@ div.start-item-main { cursor: default; }
 }
 .media-folder-add:hover { background: var(--surface-2); color: var(--accent); }
 .media-grid-pane { min-height: 0; }
+
+/* —— 时间轴：烧字幕等待入轨时的音频条动效 —— */
+.clip-subburn-fx {
+  position: absolute; inset: 0; z-index: 5; pointer-events: none; overflow: hidden;
+  background: linear-gradient(180deg, hsl(75 40% 40% / 0.12), hsl(158 35% 25% / 0.2));
+}
+.clip-subburn-bars {
+  position: absolute; inset: 0; display: flex; align-items: flex-end; justify-content: space-between;
+  padding: 0 3px 2px; gap: 1px;
+}
+.clip-subburn-bars span {
+  flex: 1; min-width: 2px; height: 35%; border-radius: 1px 1px 0 0;
+  background: linear-gradient(180deg, hsl(75 70% 68% / 0.95), hsl(158 40% 45% / 0.35));
+  transform-origin: bottom center;
+  animation: clip-subburn-bar 0.9s ease-in-out infinite;
+  animation-delay: calc(var(--i) * -0.07s);
+}
+.clip-subburn-beam {
+  position: absolute; top: -60%; bottom: -60%; width: 55%; left: 22%;
+  background: conic-gradient(from 210deg, transparent 0 50%, hsl(55 100% 72% / 0.7) 68%, transparent 86%);
+  filter: blur(1.5px); mix-blend-mode: screen; opacity: 0.9;
+  animation: clip-subburn-spin 1.8s linear infinite;
+}
+.clip-subburn-tag {
+  position: absolute; right: 4px; top: 2px; z-index: 2;
+  padding: 0 5px; height: 14px; line-height: 14px; border-radius: 4px;
+  font-size: 9px; font-weight: 700; letter-spacing: 0.02em;
+  color: #1b1f1d; background: hsl(75 75% 62% / 0.92);
+  box-shadow: 0 0 8px hsl(75 80% 55% / 0.45);
+  animation: clip-subburn-tag 1.2s ease-in-out infinite;
+}
+@keyframes clip-subburn-bar {
+  0%, 100% { transform: scaleY(0.45); opacity: 0.55; }
+  50% { transform: scaleY(1); opacity: 1; }
+}
+@keyframes clip-subburn-spin {
+  from { transform: rotate(0deg) scale(1.35); }
+  to { transform: rotate(360deg) scale(1.35); }
+}
+@keyframes clip-subburn-tag {
+  0%, 100% { opacity: 0.75; transform: translateY(0); }
+  50% { opacity: 1; transform: translateY(-1px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .clip-subburn-bars span, .clip-subburn-beam, .clip-subburn-tag { animation: none !important; }
+}
+
+/* —— 创意进度条（按场景） —— */
+.cp { display: flex; flex-direction: column; gap: 4px; width: 100%; min-width: 0; }
+.cp.is-compact { gap: 2px; }
+.cp-meta {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  font-size: 10px; color: var(--text-muted); line-height: 1.2;
+}
+.cp-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cp-pct { flex: none; font-variant-numeric: tabular-nums; }
+
+/* 烧字幕 / 配音：波形 + 旋转扫光 */
+.cp-wave {
+  position: relative; height: 28px; border-radius: 8px; overflow: hidden;
+  background: linear-gradient(180deg, #1a2220, #101614);
+  border: 1px solid hsl(150 10% 100% / 0.06);
+}
+.cp.is-compact .cp-wave { height: 18px; border-radius: 6px; }
+.cp-wave-bars {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: space-between;
+  padding: 0 6px; gap: 2px;
+}
+.cp-wave-bars span {
+  flex: 1; height: calc(var(--h) * 70%); border-radius: 2px;
+  background: linear-gradient(180deg, hsl(75 45% 62% / 0.55), hsl(150 20% 40% / 0.25));
+  transform-origin: center bottom;
+  animation: cp-wave-pulse 1.1s ease-in-out infinite;
+  animation-delay: calc(var(--i) * -0.08s);
+}
+.cp-wave-beam {
+  position: absolute; top: -40%; bottom: -40%; width: 36%;
+  background: conic-gradient(from 0deg, transparent 0 55%, hsl(55 95% 70% / 0.55) 70%, transparent 88%);
+  filter: blur(1px); mix-blend-mode: screen;
+  animation: cp-wave-spin 2.2s linear infinite;
+  left: 32%;
+}
+.cp-wave-fill {
+  position: absolute; left: 0; top: 0; bottom: 0;
+  background: linear-gradient(90deg, hsl(75 50% 48% / 0.15), hsl(75 60% 58% / 0.35));
+  pointer-events: none; transition: width 500ms var(--ease-out-expo);
+}
+@keyframes cp-wave-pulse {
+  0%, 100% { transform: scaleY(0.55); opacity: 0.65; }
+  50% { transform: scaleY(1); opacity: 1; }
+}
+@keyframes cp-wave-spin {
+  from { transform: rotate(0deg) scale(1.4); }
+  to { transform: rotate(360deg) scale(1.4); }
+}
+
+/* AI 文案：打字机 */
+.cp-type {
+  height: 22px; border-radius: 7px; overflow: hidden;
+  background: var(--surface-2); border: 1px solid var(--border);
+}
+.cp.is-compact .cp-type { height: 16px; }
+.cp-type-track {
+  position: relative; height: 100%; display: flex; align-items: center; padding: 0 8px;
+  font-size: 11px; letter-spacing: 0.02em;
+}
+.cp-type-ghost { color: var(--text-muted); opacity: 0.35; }
+.cp-type-write {
+  position: absolute; left: 8px; top: 0; bottom: 0; overflow: hidden; white-space: nowrap;
+  color: var(--accent); display: flex; align-items: center;
+  animation: cp-type-reveal 2.4s steps(18, end) infinite;
+}
+.cp-type-caret {
+  position: absolute; right: 8px; width: 2px; height: 12px; border-radius: 1px;
+  background: var(--accent); animation: cp-caret 0.9s step-end infinite;
+}
+@keyframes cp-type-reveal {
+  0% { width: 0; }
+  55% { width: calc(100% - 24px); }
+  80%, 100% { width: calc(100% - 24px); }
+}
+@keyframes cp-caret {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+/* AI 封面 / 生图：笔刷扫过 */
+.cp-brush {
+  height: 22px; border-radius: 7px; overflow: hidden;
+  background:
+    repeating-conic-gradient(hsl(40 8% 88% / 0.08) 0% 25%, transparent 0% 50%) 0 0 / 10px 10px,
+    var(--surface-2);
+  border: 1px solid var(--border);
+}
+.cp.is-compact .cp-brush { height: 16px; }
+.cp-brush-canvas { position: relative; height: 100%; }
+.cp-brush-stroke {
+  position: absolute; left: 0; top: 20%; bottom: 20%; width: 42%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, hsl(28 70% 42% / 0.15), hsl(35 85% 55% / 0.75), hsl(48 90% 65% / 0.9));
+  box-shadow: 0 0 10px hsl(40 90% 55% / 0.35);
+  animation: cp-brush-sweep 1.8s var(--ease-out-expo) infinite;
+}
+.cp-brush-tip {
+  position: absolute; top: 50%; width: 10px; height: 10px; margin: -5px 0 0 -5px; border-radius: 50%;
+  background: radial-gradient(circle, #fff 0 35%, hsl(45 95% 60%) 55%, transparent 70%);
+  left: 42%;
+  animation: cp-brush-tip 1.8s var(--ease-out-expo) infinite;
+}
+@keyframes cp-brush-sweep {
+  0% { width: 8%; opacity: 0.4; }
+  55% { width: 88%; opacity: 1; }
+  100% { width: 96%; opacity: 0.85; }
+}
+@keyframes cp-brush-tip {
+  0% { left: 8%; }
+  55% { left: 88%; }
+  100% { left: 96%; }
+}
+
+/* 导出 / 视频：胶片齿孔滚动 */
+.cp-film {
+  position: relative; height: 22px; border-radius: 7px; overflow: hidden;
+  background: #141816; border: 1px solid var(--border);
+}
+.cp.is-compact .cp-film { height: 16px; }
+.cp-film-strip {
+  position: absolute; inset: 0; display: flex; gap: 6px; align-items: stretch; padding: 3px 4px;
+  animation: cp-film-roll 1.4s linear infinite;
+}
+.cp-film-frame {
+  flex: none; width: 28px; border-radius: 3px;
+  background: linear-gradient(180deg, #2a3430, #1c2421);
+  box-shadow: inset 0 0 0 1px hsl(0 0% 100% / 0.06);
+  position: relative;
+}
+.cp-film-frame::before, .cp-film-frame::after {
+  content: ''; position: absolute; left: 3px; right: 3px; height: 2px; border-radius: 1px;
+  background: hsl(0 0% 100% / 0.18);
+}
+.cp-film-frame::before { top: 2px; }
+.cp-film-frame::after { bottom: 2px; }
+.cp-film-fill {
+  position: absolute; inset: 0 auto 0 0;
+  background: linear-gradient(90deg, hsl(75 40% 45% / 0.2), hsl(75 50% 55% / 0.45));
+  transition: width 500ms var(--ease-out-expo);
+}
+@keyframes cp-film-roll {
+  from { transform: translateX(0); }
+  to { transform: translateX(-34px); }
+}
+
+/* 黑板报成片：粉笔线 */
+.cp-chalk {
+  height: 22px; border-radius: 7px; overflow: hidden;
+  background: #1e2a24; border: 1px solid hsl(140 12% 100% / 0.08);
+}
+.cp.is-compact .cp-chalk { height: 16px; }
+.cp-chalk-board { position: relative; height: 100%; }
+.cp-chalk-dust {
+  position: absolute; inset: 0;
+  background: radial-gradient(circle at 20% 40%, hsl(0 0% 100% / 0.06), transparent 40%),
+    radial-gradient(circle at 70% 60%, hsl(0 0% 100% / 0.05), transparent 35%);
+  animation: cp-dust 2.5s ease-in-out infinite;
+}
+.cp-chalk-line {
+  position: absolute; left: 6%; top: 45%; height: 3px; width: 40%; border-radius: 2px;
+  background: linear-gradient(90deg, transparent, #f2efe6 12%, #f7f3e8 88%, transparent);
+  box-shadow: 0 0 6px hsl(45 30% 90% / 0.25);
+  animation: cp-chalk-draw 2s ease-in-out infinite;
+}
+.cp-chalk-hand {
+  position: absolute; top: 28%; width: 8px; height: 8px; margin-left: -4px; border-radius: 50% 40% 50% 40%;
+  background: #e8e2d4; left: 46%;
+  box-shadow: 0 0 0 2px hsl(25 30% 35% / 0.5);
+  animation: cp-chalk-hand 2s ease-in-out infinite;
+}
+@keyframes cp-dust {
+  0%, 100% { opacity: 0.5; transform: translateX(0); }
+  50% { opacity: 1; transform: translateX(4px); }
+}
+@keyframes cp-chalk-draw {
+  0% { width: 10%; }
+  60% { width: 78%; }
+  100% { width: 82%; }
+}
+@keyframes cp-chalk-hand {
+  0% { left: 16%; }
+  60% { left: 84%; }
+  100% { left: 88%; }
+}
+
+/* 通用：轨道扫光 */
+.cp-orbit {
+  height: 6px; border-radius: 999px; overflow: hidden; background: var(--surface-2);
+}
+.cp.is-compact .cp-orbit { height: 4px; }
+.cp-orbit-track { position: relative; height: 100%; }
+.cp-orbit-fill {
+  height: 100%; width: 35%; border-radius: inherit;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  animation: ai-indeterminate 1.1s var(--ease-out-expo) infinite;
+}
+.cp-orbit-glow {
+  position: absolute; top: 50%; width: 10px; height: 10px; margin: -5px 0 0 -5px; border-radius: 50%;
+  background: radial-gradient(circle, #fff 0 30%, var(--accent) 55%, transparent 70%);
+  left: 35%;
+  animation: cp-orbit-run 1.1s var(--ease-out-expo) infinite;
+}
+@keyframes cp-orbit-run {
+  0% { left: 0%; }
+  100% { left: 100%; }
+}
+

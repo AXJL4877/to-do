@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
-import { Captions, Loader2, X } from 'lucide-react'
+import { Captions, X } from 'lucide-react'
 import clsx from 'clsx'
 import { usePreviewSuspend } from '../hooks/usePreviewSuspend'
 import { subtitleFontPx, subtitleMarginPx, type SkillPack, type SkillParams, type SubtitleSourceMedia } from '../lib/aiSkills'
 import { ensureSmileyFont, subtitleCssFont } from '../lib/textFonts'
 import { burnSubtitles, initialSubtitleParams, narrationText, subtitlePack, subtitleTargets } from '../lib/subtitleBurn'
 import { SkillParamControl } from './SkillStudio'
+import { CreativeProgress } from './CreativeProgress'
 
 const cssFont = subtitleCssFont
 
@@ -111,10 +112,10 @@ export function SubtitleBurnDialog({ clipIds, onClose }: { clipIds: string[]; on
     setError(null)
     try {
       await burnSubtitles(ready ?? [], params)
+      // 立刻关窗回时间轴：被烧的音频条会持续扫光直到字幕入轨
       onClose()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
-    } finally {
       setSubmitting(false)
     }
   }
@@ -134,13 +135,26 @@ export function SubtitleBurnDialog({ clipIds, onClose }: { clipIds: string[]; on
         </div>
 
         {!pack ? (
-          <div className="py-16 text-center text-[12px]" style={{ color: error ? 'var(--error)' : 'var(--text-muted)' }}>
-            {error || <Loader2 size={16} className="animate-spin inline" />}
+          <div className="py-12 px-6 grid gap-3 place-items-center" style={{ color: error ? 'var(--error)' : 'var(--text-muted)' }}>
+            {error || (
+              <>
+                <CreativeProgress theme="wave" label="正在准备配音与字幕样式…" />
+                <span className="text-[12px]">检查音频与字体</span>
+              </>
+            )}
           </div>
         ) : (
           <div className="flex flex-col md:flex-row min-h-0 overflow-y-auto">
-            <div className="flex-1 min-w-0 p-4 flex items-center justify-center" style={{ background: 'var(--surface-0)' }}>
+            <div className="flex-1 min-w-0 p-4 flex flex-col items-center justify-center gap-3" style={{ background: 'var(--surface-0)' }}>
               <Preview params={params} script={script} frame={frame} />
+              {submitting ? (
+                <div className="w-full max-w-md">
+                  <CreativeProgress
+                    theme="wave"
+                    label={asrCount > 0 ? `烧录中 · ${count} 段（含语音识别对时）` : `烧录中 · ${count} 段字幕入队`}
+                  />
+                </div>
+              ) : null}
             </div>
 
             <div className="md:w-[320px] shrink-0 p-4 flex flex-col gap-4 border-t md:border-t-0 md:border-l overflow-y-auto" style={{ borderColor: 'var(--border)' }}>
@@ -184,12 +198,14 @@ export function SubtitleBurnDialog({ clipIds, onClose }: { clipIds: string[]; on
 
         <div className="flex items-center gap-3 px-4 py-3 border-t" style={{ borderColor: 'var(--border)' }}>
           <span className="text-[11px] min-w-0 flex-1 truncate" style={{ color: error ? 'var(--error)' : 'var(--text-muted)' }}>
-            {error || '字幕进字幕轨并链接到音频；语音识别可能认错字，烧完可在字幕轨里改；关键词变色只在烧录的 WebM 里生效'}
+            {error || (submitting
+              ? '音频波形上的扫光表示正在识别/烧录；完成后字幕会进字幕轨'
+              : '字幕进字幕轨并链接到音频；语音识别可能认错字，烧完可在字幕轨里改；关键词变色只在烧录的 WebM 里生效')}
           </span>
-          <button type="button" className="btn btn-ghost" onClick={onClose}>取消</button>
+          <button type="button" className="btn btn-ghost" disabled={submitting} onClick={onClose}>取消</button>
           <button type="button" className="btn btn-primary" data-testid="subburn-submit" disabled={!pack || !count || submitting} onClick={() => void submit()}>
-            {submitting ? <Loader2 size={13} className="animate-spin" /> : <Captions size={13} />}
-            烧录{count > 1 ? ` ${count} 段` : ''}
+            <Captions size={13} />
+            {submitting ? '烧录中…' : `烧录${count > 1 ? ` ${count} 段` : ''}`}
           </button>
         </div>
       </div>

@@ -10,6 +10,7 @@ import {
   type WatermarkPlacement,
 } from '../lib/watermarkDesign'
 import { ensureSmileyFont, watermarkFontChoices } from '../lib/textFonts'
+import { CreativeProgress } from './CreativeProgress'
 
 const PLACEMENTS: { id: WatermarkPlacement; label: string }[] = [
   { id: 'bottom', label: '底部通栏' },
@@ -242,6 +243,10 @@ export function WatermarkDesigner() {
           )}
         </div>
       </div>
+
+      {busy ? (
+        <CreativeProgress theme="brush" compact label="正在生成水印图…" />
+      ) : null}
 
       {error && <div className="text-[12px]" style={{ color: 'var(--accent)' }}>{error}</div>}
 

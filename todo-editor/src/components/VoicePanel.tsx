@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Loader2, Mic, Pause, Play, Plus, RotateCcw, Trash2 } from 'lucide-react'
 import clsx from 'clsx'
+import { CreativeProgress } from './CreativeProgress'
 import { useApp } from '../store'
 import { aiFetch, aiUrl } from '../lib/aiFetch'
 import { importAiJob, placeTtsVoice, shouldImport } from '../lib/aiJobImport'
@@ -63,10 +64,12 @@ function TtsJobCard({ pack, j, onRetry, onRemove }: { pack: SkillPack; j: TtsJob
       <div className="min-w-0 flex-1 flex flex-col gap-1">
         <p className="m-0 text-[11px] leading-snug line-clamp-2" title={j.prompt}>{j.prompt}</p>
         {j.status === 'running' ? (
-          <>
-            <div className="ai-progress"><div className={pct == null ? 'ai-progress-bar' : 'ai-progress-fill'} style={pct == null ? undefined : { width: `${pct}%` }} /></div>
-            <span className="text-[10px] truncate" style={{ color: 'var(--text-muted)' }}>{phaseText(j.phase) || '进行中'}{pct != null ? ` · ${pct}%` : ''}</span>
-          </>
+          <CreativeProgress
+            theme="wave"
+            compact
+            percent={pct}
+            label={`${phaseText(j.phase) || '配音合成中'}${pct != null ? '' : ''}`}
+          />
         ) : j.status === 'error' ? (
           <span className="text-[10px] line-clamp-2" style={{ color: 'var(--error)' }} title={j.error || ''}>{j.error}</span>
         ) : (

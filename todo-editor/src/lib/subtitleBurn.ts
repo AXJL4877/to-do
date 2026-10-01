@@ -4,6 +4,11 @@ import { importAiJob, narrationJobIdOfUrl, shouldImport, type ImportableAiJob } 
 import { SUBTITLE_SKILL_ID, defaultSkillParams, enqueueSkill, fetchSkills, type SkillPack, type SkillParams, type SubtitleSourceMedia } from './aiSkills'
 import type { Clip, MediaItem } from '../types'
 import { availableNarration } from '../../shared/ttsNarration.mjs'
+import {
+  clearSubtitleBurnPending,
+  clearSubtitleBurnPendingByJob,
+  markSubtitleBurnPending,
+} from './subtitleBurnPending'
 
 /** 服务端读得到文件的素材：AI 生成的（按 url 找）或带本机路径的；浏览器里拖进来的 blob 素材读不到 */
 function asrMedia(m: MediaItem | undefined): SubtitleSourceMedia | null {
@@ -91,28 +96,39 @@ export async function narrationText(jobId: string): Promise<string | null> {
 const watching = new Set<string>()
 
 /** 等字幕任务完成后入库并按 anchorClipId 对齐入轨；面板开着时它自己的轮询也可能先入库，由 importAiJob 去重 */
-function watch(jobId: string) {
+function watch(jobId: string, clipId: string) {
+  markSubtitleBurnPending(clipId, jobId)
   if (watching.has(jobId)) return
   watching.add(jobId)
+  const finish = () => {
+    watching.delete(jobId)
+    clearSubtitleBurnPending(clipId)
+    clearSubtitleBurnPendingByJob(jobId)
+  }
   const tick = async () => {
     try {
       const r = await aiFetch(`/api/ai-jobs/${jobId}`)
       const data = await r.json()
       const job = data.job as (ImportableAiJob & { status: string; error?: string | null }) | undefined
-      if (!data.ok || !job) { watching.delete(jobId); return }
+      if (!data.ok || !job) { finish(); return }
       if (job.status === 'error') {
-        watching.delete(jobId)
+        finish()
         useApp.getState().setToast(`字幕失败：${job.error || '未知错误'}`)
         return
       }
       if (job.status === 'done') {
-        watching.delete(jobId)
-        if (shouldImport(job)) await importAiJob(job)
+        try {
+          if (shouldImport(job)) await importAiJob(job)
+        } catch (e) {
+          useApp.getState().setToast(`字幕入轨失败：${e instanceof Error ? e.message : String(e)}`)
+        } finally {
+          finish()
+        }
         return
       }
-      if (job.status === 'imported') { watching.delete(jobId); return }
+      if (job.status === 'imported') { finish(); return }
     } catch { /* 网络抖动，下一轮再查 */ }
-    window.setTimeout(() => void tick(), 1500)
+    window.setTimeout(() => void tick(), 1200)
   }
   void tick()
 }
@@ -121,10 +137,20 @@ function watch(jobId: string) {
 export async function burnSubtitles(targets: { clipId: string; jobId?: string; media?: SubtitleSourceMedia }[], params: SkillParams) {
   if (!targets.length) throw new Error('选中的音频都读不到文件，烧不了字幕')
   saveSubtitleStyle(params)
-  const jobs = await Promise.all(targets.map(({ clipId, jobId, media }) => enqueueSkill({
-    skillId: SUBTITLE_SKILL_ID, prompt: '', params, autoTimeline: true, anchorClipId: clipId,
-    ...(jobId ? { sourceJobId: jobId } : {}), ...(media ? { sourceMedia: media } : {}),
-  })))
-  jobs.forEach((j) => watch(j.id))
-  useApp.getState().setToast(`正在烧录 ${jobs.length} 段字幕`)
+  // 先打上「烧录中」标记，关弹窗后时间轴立刻能看到动效
+  for (const t of targets) markSubtitleBurnPending(t.clipId, `pending:${t.clipId}`)
+  try {
+    const jobs = await Promise.all(targets.map(({ clipId, jobId, media }) => enqueueSkill({
+      skillId: SUBTITLE_SKILL_ID, prompt: '', params, autoTimeline: true, anchorClipId: clipId,
+      ...(jobId ? { sourceJobId: jobId } : {}), ...(media ? { sourceMedia: media } : {}),
+    })))
+    jobs.forEach((j, i) => {
+      const clipId = targets[i]?.clipId
+      if (clipId) watch(j.id, clipId)
+    })
+    useApp.getState().setToast(`正在烧录 ${jobs.length} 段字幕 · 看时间轴音频条扫光`)
+  } catch (e) {
+    for (const t of targets) clearSubtitleBurnPending(t.clipId)
+    throw e
+  }
 }

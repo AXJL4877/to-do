@@ -10,6 +10,7 @@ import { usePreviewSuspend } from '../hooks/usePreviewSuspend'
 import { WatermarkDesigner } from './WatermarkDesigner'
 import { DouyinPublishPanel } from './DouyinPublishPanel'
 import { setDouyinPendingVideo } from '../lib/douyinPending'
+import { CreativeProgress } from './CreativeProgress'
 
 function MoreActions() {
   const setModal = useApp((s) => s.setModal)
@@ -401,9 +402,22 @@ export function Modals() {
                       ) : null}
                     </div>
                   ) : null}
-                  <div className="h-1.5 rounded-full mt-1" style={{ background: 'var(--surface-2)' }}>
-                    <div className="h-full rounded-full" style={{ width: `${j.progress}%`, background: 'var(--accent)' }} />
-                  </div>
+                  {j.status === 'running' ? (
+                    <CreativeProgress
+                      theme={j.audioOnly ? 'wave' : 'film'}
+                      percent={j.progress}
+                      label={j.stage || (j.audioOnly ? '导出音频…' : '导出成片…')}
+                      className="mt-1"
+                    />
+                  ) : j.status === 'done' || j.status === 'error' ? (
+                    <div className="h-1.5 rounded-full mt-1" style={{ background: 'var(--surface-2)' }}>
+                      <div className="h-full rounded-full" style={{ width: `${j.progress}%`, background: j.status === 'error' ? 'var(--error)' : 'var(--accent)' }} />
+                    </div>
+                  ) : (
+                    <div className="h-1.5 rounded-full mt-1" style={{ background: 'var(--surface-2)' }}>
+                      <div className="h-full rounded-full" style={{ width: `${j.progress}%`, background: 'var(--accent)' }} />
+                    </div>
+                  )}
                 </div>
               ))}
             </>

@@ -5,6 +5,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ArrowDown, ArrowUp, Clapperboard, Crosshair, Loader2, Merge, Plus, RefreshCw, Scissors, Sparkles, Square, Trash2, Upload, Wand2, X } from 'lucide-react'
+import { CreativeProgress } from './CreativeProgress'
 import clsx from 'clsx'
 import { useApp } from '../store'
 import { aiUrl } from '../lib/aiFetch'
@@ -148,12 +149,13 @@ export function ProductionStudio({ id, pack, onClose }: { id: string; pack: Skil
           </span>
           <span className="min-w-0 flex-1 flex items-center gap-2">
             {running && (
-              <>
-                <div className="ai-progress" style={{ width: 120 }}><div className="ai-progress-fill" style={{ width: `${status?.pct ?? 0}%` }} /></div>
-                <span className="text-[11px] truncate" style={{ color: 'var(--text-secondary)' }} title={status?.phase}>
-                  {doc.queuedJobId && !doc.runningJobId ? '排队中' : phaseText(status?.phase)}
-                </span>
-              </>
+              <CreativeProgress
+                theme="chalk"
+                compact
+                percent={status?.pct ?? 0}
+                label={doc.queuedJobId && !doc.runningJobId ? '排队中' : phaseText(status?.phase) || '成片生成中'}
+                className="max-w-[220px]"
+              />
             )}
           </span>
           <label className="flex items-center gap-1.5 text-[11px] cursor-pointer shrink-0" style={{ color: 'var(--text-secondary)' }} title="生成好的配音、元素、字幕自动铺进时间轴，改动后原位替换">

@@ -1,10 +1,14 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import clsx from 'clsx'
 import type { Clip, Track } from '../types'
 import { useApp } from '../store'
 import { loadWaveformPeaks, slicePeaks } from '../lib/waveform'
 import { isEntranceKeyframes } from '../lib/keyframeEval'
 import { indexMedia } from '../lib/sequenceIndex'
+import {
+  isSubtitleBurnPending,
+  subscribeSubtitleBurnPending,
+} from '../lib/subtitleBurnPending'
 
 /** 波形画布按 2 的幂档位画、CSS 拉伸铺满片段：缩放时间轴时不用每一帧重建画布、重算波峰 */
 export function waveformDrawWidth(widthPx: number) {
@@ -181,6 +185,11 @@ export const TimelineClip = memo(function TimelineClip({
   const onContextMenu = (e: React.MouseEvent) => onMenu(e, clip.id)
   const resizeEdgeAnim = useApp((s) => s.resizeEdgeAnim)
   const media = useApp((s) => (clip.mediaId && track.kind === 'audio' ? indexMedia(s.media).get(clip.mediaId) : undefined))
+  const burning = useSyncExternalStore(
+    subscribeSubtitleBurnPending,
+    () => track.kind === 'audio' && isSubtitleBurnPending(clip.id),
+    () => false,
+  )
   const drag = useRef<{ edge: 'in' | 'out'; startX: number; originSec: number } | null>(null)
   const bg = clip.solid
     ? `color-mix(in oklab, ${clip.solid.color} 70%, transparent)`
@@ -222,32 +231,36 @@ export const TimelineClip = memo(function TimelineClip({
 
   return (
     <div
-      className={clsx('absolute top-1 bottom-1 rounded-none overflow-hidden border group', selected && 'ring-2')}
+      className={clsx('absolute top-1 bottom-1 rounded-none overflow-hidden border group', selected && 'ring-2', burning && 'is-subburn')}
       style={{
         // 像素对齐：起止分别取整，避免中间缝/重叠与缩放后「中间对不齐」
         left: Math.round(clip.start * geometryZoom),
         width: Math.max(1, Math.round((clip.start + clip.duration) * geometryZoom) - Math.round(clip.start * geometryZoom)),
         background: bg,
-        borderColor: selected ? 'var(--accent)' : 'var(--border)',
+        borderColor: burning ? 'hsl(75 55% 48%)' : selected ? 'var(--accent)' : 'var(--border)',
         opacity: clip.enabled ? 1 : 0.4,
         cursor: tool === 'razor' ? 'inherit' : tool === 'hand' ? 'grab' : 'grab',
         color: track.kind === 'audio' ? 'hsl(158 45% 30%)' : undefined,
         userSelect: 'none',
         WebkitUserSelect: 'none',
+        boxShadow: burning ? '0 0 0 1px hsl(75 60% 50% / 0.55), inset 0 0 18px hsl(75 70% 55% / 0.18)' : undefined,
       }}
       data-testid={`clip-${clip.id}`}
-      aria-label={clip.name}
+      aria-label={burning ? `${clip.name}（正在烧录字幕）` : clip.name}
       data-clip-start={clip.start}
       data-clip-duration={clip.duration}
+      data-subburn={burning ? '1' : undefined}
+      title={burning
+        ? '正在烧录字幕…完成后会自动入字幕轨并链接到本段音频'
+        : rate
+          ? '比率拉伸：拖左右边缘，缩短 = 加速，拉长 = 减速（0.25×~4×）'
+          : 'S缩放 · R旋转（鼠标在时间轴上时 R 为比率拉伸）· 1 静态 · 2 K帧模式 · 3 转场；K帧下 T透明'}
       onPointerDown={onPointerDown}
       onDoubleClick={(e) => {
         e.stopPropagation()
         useApp.getState().openPropWheelOnMonitor()
       }}
       onContextMenu={onContextMenu}
-      title={rate
-        ? '比率拉伸：拖左右边缘，缩短 = 加速，拉长 = 减速（0.25×~4×）'
-        : 'S缩放 · R旋转（鼠标在时间轴上时 R 为比率拉伸）· 1 静态 · 2 K帧模式 · 3 转场；K帧下 T透明'}
     >
       {trimmable && (
         <div
@@ -320,6 +333,17 @@ export const TimelineClip = memo(function TimelineClip({
           drawW={waveW}
         />
       )}
+      {burning ? (
+        <div className="clip-subburn-fx" data-testid={`clip-subburn-${clip.id}`} aria-hidden>
+          <div className="clip-subburn-bars">
+            {Array.from({ length: 14 }, (_, i) => (
+              <span key={i} style={{ ['--i' as string]: i }} />
+            ))}
+          </div>
+          <div className="clip-subburn-beam" />
+          <span className="clip-subburn-tag">烧字幕</span>
+        </div>
+      ) : null}
       <span
         data-clip-label=""
         className="text-[10px] font-medium truncate block px-1.5 pt-0.5 pointer-events-none relative z-[2] select-none"
