@@ -112,10 +112,13 @@ export function ScriptMemo() {
   const [reply, setReply] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const restored = useRef(false)
+  /** AI 写入后恢复选区/滚动，避免受控更新 + setSelectionRange 把视口拽走 */
+  const pendingApply = useRef<{ from: number; to: number; scrollTop: number } | null>(null)
+  const lockView = useRef(false)
 
   const persistView = useCallback(() => {
     const el = ref.current
-    if (!el) return
+    if (!el || lockView.current) return
     saveView(projectId, {
       start: el.selectionStart ?? 0,
       end: el.selectionEnd ?? 0,
@@ -127,6 +130,17 @@ export function ScriptMemo() {
     persistView()
     toggleScript(false)
   }, [persistView, toggleScript])
+
+  function placeBar(el: HTMLTextAreaElement, atIndex?: number) {
+    const cur = readSel(el)
+    const idx = atIndex ?? (cur.end > cur.start ? cur.end : cur.start)
+    const pos = caretPagePos(el, idx)
+    const pad = 8
+    const x = Math.min(window.innerWidth - 220, Math.max(12, pos.x))
+    const y = Math.min(window.innerHeight - 48, Math.max(56, pos.y + pad))
+    setBar({ x, y, visible: true })
+    setSel(cur)
+  }
 
   useLayoutEffect(() => {
     const el = ref.current
@@ -140,8 +154,8 @@ export function ScriptMemo() {
       const b = Math.min(saved.end, max)
       el.scrollTop = saved.scrollTop
       el.setSelectionRange(a, b)
+      el.scrollTop = saved.scrollTop
       setSel(readSel(el))
-      // 下一帧再算浮栏位置（等 scroll 生效）
       requestAnimationFrame(() => placeBar(el))
     } else {
       const end = el.value.length
@@ -149,6 +163,28 @@ export function ScriptMemo() {
       setSel({ start: end, end, text: '' })
     }
   }, [projectId])
+
+  // AI 改写/插入落盘后：折叠光标、锁回原 scrollTop，浮栏仍贴在编辑起点附近
+  useLayoutEffect(() => {
+    const p = pendingApply.current
+    if (!p) return
+    pendingApply.current = null
+    const el = ref.current
+    if (!el) return
+    lockView.current = true
+    const max = el.value.length
+    const from = Math.min(p.from, max)
+    const to = Math.min(p.to, max)
+    el.focus()
+    el.scrollTop = p.scrollTop
+    // 折叠到改动末端，避免选中大段时浏览器把末端滚进视口
+    el.setSelectionRange(to, to)
+    el.scrollTop = p.scrollTop
+    setSel(readSel(el))
+    saveView(projectId, { start: to, end: to, scrollTop: p.scrollTop })
+    placeBar(el, from)
+    lockView.current = false
+  }, [script, projectId])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -170,18 +206,8 @@ export function ScriptMemo() {
     return () => window.removeEventListener('keydown', onKey)
   }, [panel, bar.visible])
 
-  function placeBar(el: HTMLTextAreaElement) {
-    const cur = readSel(el)
-    const idx = cur.end > cur.start ? cur.end : cur.start
-    const pos = caretPagePos(el, idx)
-    const pad = 8
-    const x = Math.min(window.innerWidth - 220, Math.max(12, pos.x))
-    const y = Math.min(window.innerHeight - 48, Math.max(56, pos.y + pad))
-    setBar({ x, y, visible: true })
-    setSel(cur)
-  }
-
   const syncSel = useCallback(() => {
+    if (lockView.current) return
     const el = ref.current
     if (!el) return
     persistView()
@@ -193,16 +219,13 @@ export function ScriptMemo() {
   }, [panel, persistView])
 
   const applyText = (next: string, selectFrom: number, selectTo: number) => {
+    const el = ref.current
+    pendingApply.current = {
+      from: selectFrom,
+      to: selectTo,
+      scrollTop: el?.scrollTop ?? 0,
+    }
     setScript(next)
-    requestAnimationFrame(() => {
-      const el = ref.current
-      if (!el) return
-      el.focus()
-      el.setSelectionRange(selectFrom, selectTo)
-      setSel(readSel(el))
-      persistView()
-      placeBar(el)
-    })
   }
 
   const openPanel = (m: ScriptAiMode) => {

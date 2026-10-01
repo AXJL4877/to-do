@@ -79,6 +79,13 @@ contextBridge.exposeInMainWorld('todoDesktop', {
     ipcRenderer.on('desktop:ai-window-closed', handler)
     return () => ipcRenderer.removeListener('desktop:ai-window-closed', handler)
   },
+  openBrowserWindow: (url) => ipcRenderer.invoke('desktop:open-browser-window', { url }),
+  closeBrowserWindow: () => ipcRenderer.invoke('desktop:close-browser-window'),
+  onBrowserShot: (cb) => {
+    const handler = (_e, shot) => cb(shot)
+    ipcRenderer.on('desktop:browser-shot', handler)
+    return () => ipcRenderer.removeListener('desktop:browser-shot', handler)
+  },
   postStoreSync: (msg) => ipcRenderer.send('desktop:store-sync', msg),
   onStoreSync: (cb) => {
     const handler = (_e, msg) => cb(msg)

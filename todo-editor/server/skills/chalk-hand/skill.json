@@ -2,16 +2,16 @@
   "spec": "todo-skill-pack/1",
   "id": "builtin.chalk-hand",
   "name": "黑板手绘",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "author": "TO DO",
-  "description": "粘贴口播：配音先进时间轴，AI 按语句换板、给每块黑板拆 1~4 个粉笔元素；每块渲好就把每个元素单独的透明素材按口播时间戳放上轨道并链接配音，可随意拖动缩放重新排版。粉笔手是可选的入场动画。书写速度可调。",
-  "tags": ["黑板报", "口播", "配音", "粉笔", "WebM"],
+  "description": "长口播一键成片：AI 先按意思把全文切成口播段，每段单独配音、拆成几块黑板，每块 1~4 个粉笔元素；配音、黑板底、元素书写片段和字幕按时间戳自动铺进时间轴。每个元素可以多出几张候选图挑选、换描述重画或上传自己的图，改哪里只重做哪里。",
+  "tags": ["黑板报", "口播", "成片", "配音", "粉笔", "字幕"],
   "previews": ["previews/01-board.png", "previews/02-alpha.png"],
-  "pipeline": "narrated",
+  "pipeline": "production",
   "input": {
     "label": "口播文案",
-    "maxLength": 3600,
-    "placeholder": "粘贴整段口播，AI 会按语句拆成几块黑板，边讲边画"
+    "maxLength": 12000,
+    "placeholder": "粘贴整篇口播（几千字也行）。空行或 --- 表示这里必须换段；AI 会按意思切段、拆黑板，边讲边画"
   },
   "output": {
     "mime": "video/webm",
@@ -31,8 +31,24 @@
       "default": "", "maxLength": 64, "pattern": "^S_[A-Za-z0-9_-]{2,60}$", "placeholder": "S_xxxxxxxx"
     },
     {
-      "id": "scenes", "type": "number", "group": "scene", "label": "黑板数",
-      "min": 0, "max": 80, "step": 1, "default": 0, "hint": "0 = AI 按话题换板（约每 8~15 秒一块）"
+      "id": "split", "type": "select", "group": "story", "label": "分段方式", "default": "semantic",
+      "options": [
+        { "value": "semantic", "label": "AI 按意思", "hint": "AI 找话题转折处切段，顺带定片名和人物外观；空行和 --- 一定换段" },
+        { "value": "paragraph", "label": "按段落", "hint": "尽量一个自然段一段，过长的再切" },
+        { "value": "length", "label": "按字数", "hint": "按目标字数在句号处切，不调用 AI" }
+      ]
+    },
+    {
+      "id": "segmentChars", "type": "number", "group": "story", "label": "每段字数",
+      "min": 60, "max": 200, "step": 10, "default": 120, "unit": "字", "hint": "口播段的目标长度；一段 = 一条配音，硬上限 200 字"
+    },
+    {
+      "id": "boardSec", "type": "number", "group": "story", "label": "换板节奏",
+      "min": 5, "max": 30, "step": 1, "default": 10, "unit": "秒", "hint": "大约每几秒换一块黑板；AI 仍按意思找换板点"
+    },
+    {
+      "id": "variants", "type": "number", "group": "story", "label": "候选图",
+      "min": 1, "max": 4, "step": 1, "default": 1, "unit": "张", "hint": "每个元素先出几张图供挑选；之后也可以单独「再来一张」"
     },
     {
       "id": "layout", "type": "select", "group": "scene", "label": "版式", "default": "auto",
@@ -48,7 +64,7 @@
       ]
     },
     {
-      "id": "size", "type": "select", "group": "scene", "label": "画幅", "default": "1280x720",
+      "id": "size", "type": "select", "group": "scene", "label": "画幅", "default": "1920x1080",
       "options": [
         { "value": "1280x720", "label": "16:9 · 720p" },
         { "value": "1920x1080", "label": "16:9 · 1080p" },
@@ -119,9 +135,27 @@
         { "value": "standard", "label": "标准" },
         { "value": "draft", "label": "草稿" }
       ]
+    },
+    {
+      "id": "plate", "type": "select", "group": "output", "label": "底板", "default": "board",
+      "options": [
+        { "value": "board", "label": "黑板底", "hint": "整片铺一张黑板底图在最底层轨道" },
+        { "value": "none", "label": "不铺", "hint": "元素是透明的，叠在你自己的画面上" }
+      ]
+    },
+    {
+      "id": "subtitles", "type": "select", "group": "output", "label": "字幕", "default": "on",
+      "options": [
+        { "value": "on", "label": "生成", "hint": "按配音逐字时间戳切好字幕条，进时间轴后可直接改字" },
+        { "value": "off", "label": "不要" }
+      ]
+    },
+    {
+      "id": "subtitleChars", "type": "number", "group": "output", "label": "每条字数",
+      "min": 8, "max": 30, "step": 1, "default": 18, "when": { "subtitles": ["on"] }
     }
   ],
-  "quick": ["voice", "size", "tone", "drawSpeed"],
+  "quick": ["voice", "split", "size", "variants", "subtitles"],
   "planner": {
     "maxElements": 4,
     "system": "你是黑板报口播的分镜师。一段口播会边讲边在黑板上用粉笔画出来：你先按意思把口播切成几块黑板（一块黑板讲清一个要点），再给每块黑板挑 1~4 个要画的视觉元素，并指定每个元素在讲到哪个短语时开始画。每个元素是一个独立的粉笔小场景或物件簇（例如：拿着钱袋的火柴小人、带锁的房子、向上的箭头和柱状图），不是一行字；也可以是短标题（accent，只写 ≤6 个字的粉笔大字）。人物只用极简粉笔小人，不要真人脸；不要流程图式的图标串、不要四分屏、不要长句抄写；物件上可带 ≤4 字的短标签。"

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useApp } from '../store'
 import { desktop, isDesktopApp } from '../lib/desktop'
-import { fetchDouyinMeta, generateDouyinCover } from '../lib/douyinPublishAi'
+import { fetchDouyinMeta, generateDouyinCover, generateMetaAndCover, resolvePublishBrief } from '../lib/douyinPublishAi'
+import { takeDouyinPendingVideo } from '../lib/douyinPending'
 import { pathToFileUrl } from '../lib/importFiles'
 
 type Asset = {
@@ -16,6 +17,7 @@ type Asset = {
   cover_url?: string
   folder?: string
   updated_at?: number
+  video_bytes?: number
 }
 
 type Phone = {
@@ -66,11 +68,34 @@ function coverSrc(a: Asset | null | undefined) {
   return ''
 }
 
+function fileBase(p?: string | null) {
+  if (!p) return ''
+  const s = String(p).replace(/\\/g, '/')
+  const i = s.lastIndexOf('/')
+  return i >= 0 ? s.slice(i + 1) : s
+}
+
+function formatBytes(n?: number) {
+  if (!n || n <= 0) return ''
+  if (n < 1024 * 1024) return `${Math.max(1, Math.round(n / 1024))} KB`
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`
+}
+
 function phoneLabel(p: Phone) {
   const name = p.model || p.product || '手机'
   const state = p.state === 'device' ? '已连接' : p.state === 'unauthorized' ? '未授权' : p.state
   const dy = p.douyin ? ' · 抖音运行中' : ''
   return `${name} · ${state}${dy}`
+}
+
+function normPath(p?: string | null) {
+  return String(p || '').replace(/\\/g, '/').toLowerCase()
+}
+
+function applyBriefNote(source: string, title: string) {
+  if (source === 'script') return '文案来源：本工程口播 + 项目主题'
+  if (source === 'production') return `文案来源：工程口播不足，已用最长成片稿「${title}」兜底`
+  return '文案来源：项目名（暂无口播稿）'
 }
 
 /** 内置抖音发布台：资产库 + 发布页 + 新投放 */
@@ -79,10 +104,11 @@ export function DouyinPublishPanel() {
   const exportQueue = useApp((s) => s.exportQueue)
   const projectName = useApp((s) => s.projectName)
   const script = useApp((s) => s.script)
-  const lastDone = useMemo(
-    () => [...exportQueue].reverse().find((j) => j.status === 'done' && j.path && !j.audioOnly),
+  const recentExports = useMemo(
+    () => [...exportQueue].reverse().filter((j) => j.status === 'done' && j.path && !j.audioOnly).slice(0, 8),
     [exportQueue],
   )
+  const lastDone = recentExports[0]
 
   const [tab, setTab] = useState<Tab>(() => loadUi().tab || 'publish')
   const [videoPath, setVideoPath] = useState(lastDone?.path ?? '')
@@ -93,19 +119,43 @@ export function DouyinPublishPanel() {
   const [tags, setTags] = useState('财经,A股')
   const [styleHint, setStyleHint] = useState('财经黑板粉笔风，深色黑板，粉笔白字与橙色强调')
   const [slug, setSlug] = useState(() => defaultSlug(projectName || '成片'))
-  const [busy, setBusy] = useState(false)
+  /** 拆开忙态：文案 / 封面可并行；投放与 ADB 共用 actionBusy */
+  const [metaBusy, setMetaBusy] = useState(false)
+  const [coverBusy, setCoverBusy] = useState(false)
+  const [actionBusy, setActionBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
+  const [metaMsg, setMetaMsg] = useState<string | null>(null)
+  const [coverMsg, setCoverMsg] = useState<string | null>(null)
   const [inbox, setInbox] = useState('')
   const [assets, setAssets] = useState<Asset[]>([])
   const [selected, setSelected] = useState<string | null>(() => loadUi().selectedSlug || null)
   const [phones, setPhones] = useState<Phone[]>([])
   const [phoneSerial, setPhoneSerial] = useState<string>('')
   const [phonesBusy, setPhonesBusy] = useState(false)
+  const [phonesError, setPhonesError] = useState<string | null>(null)
+  const [usbNames, setUsbNames] = useState<string[]>([])
   const [restored, setRestored] = useState(false)
+  /** 用户是否亲手选过成片路径；未选手动时跟随最近导出 */
+  const [videoLocked, setVideoLocked] = useState(false)
+  const [sourceNote, setSourceNote] = useState<string | null>(null)
+  /** 发布台专用文稿（优先工程口播），不覆盖工程口播备忘录 */
+  const [publishScript, setPublishScript] = useState(script)
 
   const selectedAsset = useMemo(
     () => assets.find((a) => a.slug === selected) || null,
     [assets, selected],
+  )
+
+  /** 当前正在编辑/发布的那条成片路径（发布页跟资产，新投放跟表单） */
+  const activeVideoPath = tab === 'publish'
+    ? (selectedAsset?.video_path || videoPath || '')
+    : (videoPath || '')
+  const activeVideoName = fileBase(activeVideoPath) || (activeVideoPath ? '未命名视频' : '')
+  const anyBusy = metaBusy || coverBusy || actionBusy
+  const exportMismatch = !!(
+    lastDone?.path
+    && activeVideoPath
+    && normPath(lastDone.path) !== normPath(activeVideoPath)
   )
 
   const applyAssetToForm = useCallback((a: Asset) => {
@@ -117,6 +167,7 @@ export function DouyinPublishPanel() {
     setCoverPath(a.cover_path || '')
     setCoverPreview(coverSrc(a))
     setVideoPath(a.video_path || '')
+    setVideoLocked(true)
     setTab('publish')
     saveUi({ selectedSlug: a.slug, tab: 'publish' })
   }, [])
@@ -131,44 +182,100 @@ export function DouyinPublishPanel() {
     return { status: st, assets: next }
   }, [])
 
-  const refreshPhones = useCallback(async () => {
+  const refreshPhones = useCallback(async (opts?: { restartAdb?: boolean }) => {
     const api = desktop()
     if (!api?.douyinPublish) return
     setPhonesBusy(true)
     try {
-      const r = await api.douyinPublish({ action: 'phones' })
+      const r = await api.douyinPublish({
+        action: opts?.restartAdb ? 'restart-adb' : 'phones',
+        restartAdb: opts?.restartAdb,
+      })
       const list = Array.isArray(r.phones) ? (r.phones as Phone[]) : []
       setPhones(list)
+      const usb = (r.usb as { phones?: { name?: string; adb?: boolean }[] } | undefined)?.phones || []
+      setUsbNames([...new Set(usb.map((p) => String(p.name || '')).filter(Boolean))].slice(0, 4))
       setPhoneSerial((prev) => {
         if (prev && list.some((p) => p.serial === prev && p.state === 'device')) return prev
         const ready = list.find((p) => p.state === 'device')
         return ready?.serial || ''
       })
-      if (!r.ok && r.error) setMsg((m) => m || String(r.error))
+      const hint = typeof r.hint === 'string' ? r.hint : ''
+      if (list.some((p) => p.state === 'device')) {
+        setPhonesError(null)
+      } else if (hint) {
+        setPhonesError(hint)
+      } else if (!r.ok) {
+        setPhonesError(String(r.error || '检测手机失败'))
+      } else if (!list.length) {
+        setPhonesError('未检测到可调试的手机')
+      } else {
+        const st = list.map((p) => p.state).join('/')
+        setPhonesError(`已看到 ${list.length} 台设备（${st}），但还不能推送`)
+      }
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : String(e))
+      setPhonesError(e instanceof Error ? e.message : String(e))
     } finally {
       setPhonesBusy(false)
     }
   }, [])
 
   useEffect(() => {
-    if (lastDone?.path && tab === 'stage' && !videoPath) setVideoPath(lastDone.path)
-  }, [lastDone?.path, videoPath, tab])
+    if (lastDone?.path && !videoLocked && tab === 'stage') setVideoPath(lastDone.path)
+  }, [lastDone?.path, videoLocked, tab])
 
   useEffect(() => {
     let alive = true
     ;(async () => {
+      const pending = takeDouyinPendingVideo()
       const pack = await refreshAssets()
       if (!alive || !pack) return
       if (!restored) {
-        const want = pack.status?.selectedSlug || loadUi().selectedSlug || null
+        const exportPath = pending || lastDone?.path || ''
+
+        // 1) 从导出队列点进来，或最近导出尚未进资产库 → 新投放该成片
+        if (exportPath && (pending || !pack.assets.some((a) => normPath(a.video_path) === normPath(exportPath)))) {
+          setTab('stage')
+          setSelected(null)
+          setVideoPath(exportPath)
+          setVideoLocked(true)
+          setCoverPath('')
+          setCoverPreview('')
+          saveUi({ selectedSlug: null, tab: 'stage' })
+          setMsg(`已选中成片：${fileBase(exportPath)}（来自最近导出）`)
+          try {
+            const brief = await resolvePublishBrief({ projectName, script })
+            setTitle(brief.title)
+            setSlug(defaultSlug(brief.title))
+            setStyleHint(brief.styleHint)
+            setPublishScript(brief.script || script)
+            setSourceNote(applyBriefNote(brief.source, brief.title))
+          } catch { /* */ }
+          setRestored(true)
+          return
+        }
+
+        // 2) 资产库已有同路径视频 → 进该条发布页
+        if (exportPath) {
+          const hitByVideo = pack.assets.find((a) => normPath(a.video_path) === normPath(exportPath))
+          if (hitByVideo) {
+            applyAssetToForm(hitByVideo)
+            void desktop()?.douyinUseAsset?.(hitByVideo.slug)
+            setMsg(`已打开资产：${hitByVideo.title || hitByVideo.slug} · ${fileBase(hitByVideo.video_path)}`)
+            setRestored(true)
+            return
+          }
+        }
+
+        // 3) 恢复上次选中 / 最新资产
+        const want = loadUi().selectedSlug || pack.status?.selectedSlug || null
         const hit = want ? pack.assets.find((a) => a.slug === want) : null
+        const newest = [...pack.assets].sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0))[0]
         if (hit) {
           applyAssetToForm(hit)
           void desktop()?.douyinUseAsset?.(hit.slug)
-        } else if (pack.assets[0] && (loadUi().tab || 'publish') === 'publish') {
-          applyAssetToForm(pack.assets[0])
+        } else if (newest && (loadUi().tab || 'publish') === 'publish') {
+          applyAssetToForm(newest)
         } else {
           setTab(loadUi().tab === 'stage' ? 'stage' : 'publish')
         }
@@ -177,17 +284,48 @@ export function DouyinPublishPanel() {
     })()
     const id = setInterval(() => { void refreshAssets() }, 5000)
     return () => { alive = false; clearInterval(id) }
-  }, [refreshAssets, applyAssetToForm, restored])
+  }, [refreshAssets, applyAssetToForm, restored, lastDone?.path, projectName, script])
 
   useEffect(() => {
     void refreshPhones()
-    const id = setInterval(() => { void refreshPhones() }, 8000)
+    const id = setInterval(() => { void refreshPhones() }, 12000)
     return () => clearInterval(id)
   }, [refreshPhones])
 
+  /** 打开新投放：用本工程口播 + 项目主题，不用「最近一次成片任务」 */
+  const prepareStageFromLatest = useCallback(async () => {
+    setTab('stage')
+    setSelected(null)
+    setCoverPath('')
+    setCoverPreview('')
+    setMetaMsg(null)
+    setCoverMsg(null)
+    saveUi({ selectedSlug: null, tab: 'stage' })
+    if (lastDone?.path) {
+      setVideoPath(lastDone.path)
+      setVideoLocked(false)
+    }
+    try {
+      const brief = await resolvePublishBrief({ projectName, script })
+      setTitle(brief.title)
+      setSlug(defaultSlug(brief.title))
+      setStyleHint(brief.styleHint)
+      setPublishScript(brief.script || script)
+      setSourceNote(applyBriefNote(brief.source, brief.title))
+    } catch {
+      setTitle(projectName || '成片')
+      setSlug(defaultSlug(projectName || '成片'))
+      setPublishScript(script)
+      setSourceNote(script?.trim() ? '文案来源：本工程口播 + 项目主题' : null)
+    }
+  }, [lastDone?.path, projectName, script])
+
   const pickVideo = async () => {
     const r = await desktop()?.pickVideoFile?.()
-    if (r?.ok && r.path) setVideoPath(r.path)
+    if (r?.ok && r.path) {
+      setVideoPath(r.path)
+      setVideoLocked(true)
+    }
   }
   const pickCover = async () => {
     const r = await desktop()?.pickImageFile?.()
@@ -201,55 +339,126 @@ export function DouyinPublishPanel() {
     const a = assets.find((x) => x.slug === id || x.id === id)
     if (!a) return
     applyAssetToForm(a)
+    setMetaMsg(null)
+    setCoverMsg(null)
     const r = await desktop()?.douyinUseAsset?.(a.slug)
-    setMsg(r?.ok ? `已打开发布页：${a.title || a.slug}` : (r?.error || '选用失败'))
+    setMsg(r?.ok
+      ? `已选：${a.title || a.slug}${a.video_path ? ` · ${fileBase(a.video_path)}` : ' · 无视频'}`
+      : (r?.error || '选用失败'))
   }
 
   const writeMeta = async () => {
-    setBusy(true)
-    setMsg('AI 正在写标题/简介/标签…')
+    if (metaBusy) return
+    setMetaBusy(true)
+    setMetaMsg('AI 正在写标题/简介/标签…')
     try {
+      const brief = await resolvePublishBrief({ projectName, script: script || publishScript })
+      setPublishScript(brief.script || script || publishScript)
+      setSourceNote(applyBriefNote(brief.source, brief.title))
       const meta = await fetchDouyinMeta({
-        projectName: projectName || title,
-        script,
-        hint: title !== projectName ? title : undefined,
+        projectName: projectName || brief.title || title,
+        script: brief.script || script || publishScript,
+        hint: brief.title && brief.title !== projectName ? brief.title : undefined,
       })
       setTitle(meta.title)
       setCaption(meta.caption)
       setTags(meta.tags.join(','))
       if (tab === 'stage') setSlug(defaultSlug(meta.title))
-      setMsg('文案已生成')
+      setMetaMsg('文案已生成')
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : String(e))
+      setMetaMsg(e instanceof Error ? e.message : String(e))
     } finally {
-      setBusy(false)
+      setMetaBusy(false)
     }
   }
 
   const makeCover = async () => {
-    if (!title.trim()) { setMsg('请先填写或生成标题'); return }
-    setBusy(true)
+    if (coverBusy) return
+    if (!title.trim()) { setCoverMsg('请先填写或生成标题'); return }
+    setCoverBusy(true)
     try {
       const r = await generateDouyinCover({
         title: title.trim(),
         styleHint,
-        onProgress: (m) => setMsg(m),
+        quality: '1K',
+        onProgress: (m) => setCoverMsg(m),
       })
       setCoverPath(r.path)
       setCoverPreview(r.previewUrl)
       if (tab === 'publish' && selected) {
         const attached = await desktop()?.douyinAttachCover?.({ slug: selected, coverPath: r.path })
         if (attached?.ok) {
-          setMsg('封面已生成并写入资产')
+          setCoverMsg('封面已写入资产')
           await refreshAssets()
           return
         }
       }
-      setMsg('封面已生成（标题已画进画面）')
+      setCoverMsg('封面已生成（标题已画进画面）')
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : String(e))
+      setCoverMsg(e instanceof Error ? e.message : String(e))
     } finally {
-      setBusy(false)
+      setCoverBusy(false)
+    }
+  }
+
+  /** 发布页 / 新投放：文案与封面真正并行 */
+  const runMetaAndCoverParallel = async () => {
+    if (metaBusy || coverBusy) return
+    setMetaBusy(true)
+    setCoverBusy(true)
+    setMetaMsg('对齐口播与主题…')
+    setCoverMsg('等待封面标题…')
+    try {
+      const brief = await resolvePublishBrief({ projectName, script: script || publishScript })
+      setPublishScript(brief.script || script || publishScript)
+      setSourceNote(applyBriefNote(brief.source, brief.title))
+      const coverTitle = (projectName || brief.title || title || '成片').trim().slice(0, 22)
+      setMetaMsg('文案生成中…')
+      setCoverMsg('封面生成中…')
+      const [metaSettled, coverSettled] = await Promise.allSettled([
+        fetchDouyinMeta({
+          projectName: projectName || coverTitle,
+          script: brief.script || script || publishScript,
+          hint: coverTitle !== projectName ? coverTitle : undefined,
+        }),
+        generateDouyinCover({
+          title: coverTitle,
+          styleHint: brief.styleHint || styleHint,
+          quality: '1K',
+          onProgress: (m) => setCoverMsg(m),
+        }),
+      ])
+      if (metaSettled.status === 'fulfilled') {
+        const meta = metaSettled.value
+        setTitle(meta.title)
+        setCaption(meta.caption)
+        setTags(meta.tags.join(','))
+        if (tab === 'stage') setSlug(defaultSlug(meta.title))
+        setMetaMsg('文案已生成')
+      } else {
+        setMetaMsg(metaSettled.reason instanceof Error ? metaSettled.reason.message : String(metaSettled.reason))
+      }
+      if (coverSettled.status === 'fulfilled') {
+        const cover = coverSettled.value
+        setCoverPath(cover.path)
+        setCoverPreview(cover.previewUrl)
+        if (tab === 'publish' && selected) {
+          const attached = await desktop()?.douyinAttachCover?.({ slug: selected, coverPath: cover.path })
+          setCoverMsg(attached?.ok ? '封面已写入资产' : '封面已生成')
+          if (attached?.ok) await refreshAssets()
+        } else {
+          setCoverMsg('封面已生成')
+        }
+      } else {
+        setCoverMsg(coverSettled.reason instanceof Error ? coverSettled.reason.message : String(coverSettled.reason))
+      }
+    } catch (e) {
+      const err = e instanceof Error ? e.message : String(e)
+      setMetaMsg(err)
+      setCoverMsg(err)
+    } finally {
+      setMetaBusy(false)
+      setCoverBusy(false)
     }
   }
 
@@ -274,7 +483,7 @@ export function DouyinPublishPanel() {
   const stage = async (opts?: { withAi?: boolean }) => {
     const api = desktop()
     if (!api?.douyinStageAsset) { setMsg('需在桌面版使用'); return }
-    setBusy(true)
+    setActionBusy(true)
     setMsg(null)
     try {
       let nextTitle = title
@@ -284,34 +493,46 @@ export function DouyinPublishPanel() {
       let nextSlug = slug
 
       if (opts?.withAi) {
-        setMsg('① AI 写文案…')
-        const meta = await fetchDouyinMeta({
-          projectName: projectName || title,
-          script,
-        })
-        nextTitle = meta.title
-        nextCaption = meta.caption
-        nextTags = meta.tags.join(',')
-        nextSlug = defaultSlug(meta.title)
-        setTitle(nextTitle)
-        setCaption(nextCaption)
-        setTags(nextTags)
-        setSlug(nextSlug)
-
-        setMsg('② AI 生成竖封面…')
-        const cover = await generateDouyinCover({
-          title: nextTitle,
-          styleHint,
-          onProgress: (m) => setMsg(`② ${m}`),
-        })
-        nextCover = cover.path
-        setCoverPath(cover.path)
-        setCoverPreview(cover.previewUrl)
+        setMsg('对齐本工程口播与主题…')
+        setMetaBusy(true)
+        setCoverBusy(true)
+        const brief = await resolvePublishBrief({ projectName, script: script || publishScript })
+        setPublishScript(brief.script || script || publishScript)
+        setSourceNote(applyBriefNote(brief.source, brief.title))
+        const coverTitle = (projectName || brief.title || title || '成片').trim().slice(0, 22)
+        setMsg('文案与封面并行生成…')
+        setMetaMsg('文案生成中…')
+        setCoverMsg('封面生成中…')
+        try {
+          const { meta, cover } = await generateMetaAndCover({
+            projectName: projectName || coverTitle,
+            script: brief.script || script || publishScript,
+            coverTitle,
+            styleHint: brief.styleHint || styleHint,
+            onProgress: (m) => setMsg(m),
+          })
+          nextTitle = meta.title
+          nextCaption = meta.caption
+          nextTags = meta.tags.join(',')
+          nextSlug = defaultSlug(meta.title)
+          nextCover = cover.path
+          setTitle(nextTitle)
+          setCaption(nextCaption)
+          setTags(nextTags)
+          setSlug(nextSlug)
+          setCoverPath(cover.path)
+          setCoverPreview(cover.previewUrl)
+          setMetaMsg('文案已生成')
+          setCoverMsg('封面已生成')
+        } finally {
+          setMetaBusy(false)
+          setCoverBusy(false)
+        }
       }
 
       if (!videoPath && !nextCover) { setMsg('请选择成片或先生成封面'); return }
 
-      setMsg('③ 投放到资产库…')
+      setMsg(`投放中：${fileBase(videoPath) || '（仅封面）'}…`)
       const r = await api.douyinStageAsset({
         videoPath: videoPath || undefined,
         coverPath: nextCover || undefined,
@@ -334,22 +555,28 @@ export function DouyinPublishPanel() {
         setTab('publish')
         saveUi({ selectedSlug: r.slug, tab: 'publish' })
       }
-      setMsg(`${r.note || '已投放'}：${r.dir}`)
+      setMsg(`已投放「${fileBase(videoPath) || r.slug}」→ ${r.slug}${r.dir ? `（${r.dir}）` : ''}`)
     } catch (e) {
       setMsg(e instanceof Error ? e.message : String(e))
     } finally {
-      setBusy(false)
+      setActionBusy(false)
+      setMetaBusy(false)
+      setCoverBusy(false)
     }
   }
 
   const runAdb = async (action: 'push' | 'stage' | 'fill') => {
     if (!selected) { setMsg('请先在左侧选中要发的资产'); return }
-    setBusy(true)
+    if (!activeVideoPath && action !== 'fill') {
+      setMsg('当前资产没有视频文件，无法推送到发布页选片')
+      return
+    }
+    setActionBusy(true)
     setMsg(null)
     try {
       if (!(await savePublishMeta())) return
       const labels = { push: '推到手机相册', stage: '打开抖音发布页', fill: '填写标题简介' } as const
-      setMsg(`${labels[action]}…`)
+      setMsg(`${labels[action]}：${activeVideoName || selected}…`)
       const r = await desktop()?.douyinPublish?.({
         action,
         serial: phoneSerial || undefined,
@@ -362,15 +589,15 @@ export function DouyinPublishPanel() {
       if (action === 'fill') {
         setMsg(`已填到 ${serial || '手机'}。请检查后自己点「发作品」。`)
       } else if (action === 'stage') {
-        setMsg(`已到发布页（${serial || '手机'}）。可继续点「填标题简介」。`)
+        setMsg(`已推「${activeVideoName}」到发布页（${serial || '手机'}）。可继续点「填标题简介」。`)
       } else {
-        setMsg(`已推送到 ${serial || '手机'} 相册`)
+        setMsg(`已推送「${activeVideoName}」到 ${serial || '手机'} 相册`)
       }
       void refreshPhones()
     } catch (e) {
       setMsg(e instanceof Error ? e.message : String(e))
     } finally {
-      setBusy(false)
+      setActionBusy(false)
     }
   }
 
@@ -380,9 +607,10 @@ export function DouyinPublishPanel() {
 
   const readyPhones = phones.filter((p) => p.state === 'device')
   const publishCover = coverPreview || coverSrc(selectedAsset)
+  const videoMissing = !activeVideoPath
 
   return (
-    <div className="grid gap-3" data-testid="douyin-publish-panel" style={{ minWidth: 'min(780px, 100%)' }}>
+    <div className="grid gap-3" data-testid="douyin-publish-panel" style={{ minWidth: 'min(820px, 100%)' }}>
       {/* 手机状态条 */}
       <div
         className="flex flex-wrap items-center gap-2 rounded-lg px-3 py-2"
@@ -390,8 +618,16 @@ export function DouyinPublishPanel() {
         data-testid="dy-phones"
       >
         <span className="text-[11px] shrink-0" style={{ color: 'var(--text-muted)' }}>手机</span>
-        {!phones.length && !phonesBusy ? (
-          <span className="text-[12px]" style={{ color: 'var(--accent)' }}>未检测到设备 · 请开 USB 调试并授权</span>
+        {!readyPhones.length && !phonesBusy ? (
+          <span className="text-[12px] min-w-0 flex-1" style={{ color: 'var(--accent)' }} title={phonesError || undefined}>
+            {phonesError || '未检测到可调试的手机'}
+            {usbNames.length ? (
+              <span style={{ color: 'var(--text-muted)' }}> · USB：{usbNames.join(' / ')}</span>
+            ) : null}
+          </span>
+        ) : null}
+        {readyPhones.length > 0 && phonesError ? (
+          <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{phonesError}</span>
         ) : null}
         {phones.map((p) => {
           const active = p.serial === phoneSerial
@@ -425,11 +661,21 @@ export function DouyinPublishPanel() {
           disabled={phonesBusy}
           onClick={() => { void refreshPhones() }}
         >
-          {phonesBusy ? '扫描中…' : '刷新手机'}
+          {phonesBusy ? '扫描中…' : '刷新'}
+        </button>
+        <button
+          type="button"
+          className="btn btn-ghost text-[11px]"
+          data-testid="dy-phones-restart-adb"
+          disabled={phonesBusy}
+          title="重启本机 adb 服务后再扫描"
+          onClick={() => { void refreshPhones({ restartAdb: true }) }}
+        >
+          重启 adb
         </button>
       </div>
 
-      <div className="grid gap-3" style={{ gridTemplateColumns: 'minmax(200px, 240px) 1fr', minHeight: 420 }}>
+      <div className="grid gap-3" style={{ gridTemplateColumns: 'minmax(220px, 260px) 1fr', minHeight: 440 }}>
         {/* 左侧资产库 */}
         <aside
           className="flex flex-col gap-2 rounded-lg overflow-hidden"
@@ -442,22 +688,12 @@ export function DouyinPublishPanel() {
             </span>
             <button type="button" className="btn btn-ghost text-[10px]" onClick={() => { void refreshAssets() }}>刷新</button>
           </div>
-          <div className="flex-1 overflow-y-auto px-2 pb-2 grid gap-1.5" style={{ maxHeight: 460 }}>
+          <div className="flex-1 overflow-y-auto px-2 pb-2 grid gap-1.5" style={{ maxHeight: 500 }}>
             <button
               type="button"
               className={`btn justify-start text-left text-[11px] ${tab === 'stage' ? 'btn-primary' : 'btn-ghost'}`}
               data-testid="dy-tab-stage"
-              onClick={() => {
-                setTab('stage')
-                saveUi({ tab: 'stage', selectedSlug: selected })
-                setTitle(projectName || '成片')
-                setCaption('仅供参考，不构成投资建议。')
-                setTags('财经,A股')
-                setSlug(defaultSlug(projectName || '成片'))
-                setCoverPath('')
-                setCoverPreview('')
-                setVideoPath(lastDone?.path ?? '')
-              }}
+              onClick={() => { void prepareStageFromLatest() }}
             >
               + 新投放成片
             </button>
@@ -466,6 +702,7 @@ export function DouyinPublishPanel() {
             ) : assets.map((a) => {
               const on = selected === a.slug && tab === 'publish'
               const thumb = coverSrc(a)
+              const vName = fileBase(a.video_path)
               return (
                 <button
                   key={a.id}
@@ -477,6 +714,7 @@ export function DouyinPublishPanel() {
                     background: on ? 'var(--accent-dim)' : 'var(--surface-0)',
                   }}
                   onClick={() => { void selectAsset(a.slug) }}
+                  title={a.video_path || '无视频'}
                 >
                   <div className="flex gap-2 p-1.5">
                     <div
@@ -491,12 +729,17 @@ export function DouyinPublishPanel() {
                     </div>
                     <div className="min-w-0 flex-1 py-0.5">
                       <div className="text-[12px] font-medium truncate">{a.title || a.slug}</div>
-                      <div className="text-[10px] truncate mt-0.5" style={{ color: 'var(--text-muted)' }} title={a.slug}>
-                        {a.slug}
+                      <div
+                        className="text-[10px] truncate mt-0.5"
+                        style={{ color: vName ? 'var(--text-primary)' : 'var(--accent)' }}
+                        title={a.video_path || undefined}
+                      >
+                        {vName || '无视频文件'}
                       </div>
-                      <div className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                      <div className="text-[10px] mt-0.5 truncate" style={{ color: 'var(--text-muted)' }}>
                         {a.kind === 'video' ? '视频' : '纯图'}
                         {a.cover_path ? ' · 有封面' : ' · 缺封面'}
+                        {a.video_bytes ? ` · ${formatBytes(a.video_bytes)}` : ''}
                       </div>
                     </div>
                   </div>
@@ -519,10 +762,7 @@ export function DouyinPublishPanel() {
           {tab === 'publish' && !selectedAsset ? (
             <div className="rounded-lg p-6 text-center" style={{ border: '1px dashed var(--border)' }}>
               <p className="text-[13px]" style={{ color: 'var(--text-muted)' }}>从左侧选一条资产，进入对应发布页</p>
-              <button type="button" className="btn btn-primary mt-3" onClick={() => {
-                setTab('stage')
-                saveUi({ tab: 'stage' })
-              }}>
+              <button type="button" className="btn btn-primary mt-3" onClick={() => { void prepareStageFromLatest() }}>
                 去投放新成片
               </button>
             </div>
@@ -530,14 +770,124 @@ export function DouyinPublishPanel() {
 
           {(tab === 'publish' && selectedAsset) || tab === 'stage' ? (
             <>
-              <div className="flex items-baseline justify-between gap-2">
+              <div className="flex items-baseline justify-between gap-2 flex-wrap">
                 <h3 className="text-[14px] font-medium m-0" style={{ fontFamily: 'var(--font-display)' }}>
                   {tab === 'publish' ? '发布页' : '新投放'}
+                  {tab === 'publish' && selectedAsset ? (
+                    <span className="text-[12px] font-normal ml-2" style={{ color: 'var(--text-muted)' }}>
+                      {selectedAsset.slug}
+                    </span>
+                  ) : null}
                 </h3>
-                {tab === 'publish' && selectedAsset ? (
-                  <span className="text-[11px] truncate" style={{ color: 'var(--text-muted)' }} title={selectedAsset.folder || selectedAsset.slug}>
-                    {selectedAsset.slug}
+                {sourceNote ? (
+                  <span className="text-[11px] truncate max-w-[50%]" style={{ color: 'var(--accent)' }} title={sourceNote}>{sourceNote}</span>
+                ) : null}
+              </div>
+
+              {exportMismatch ? (
+                <div
+                  className="rounded-lg px-3 py-2 flex flex-wrap items-center gap-2"
+                  style={{ border: '1px solid var(--accent)', background: 'var(--accent-dim)' }}
+                  data-testid="dy-export-mismatch"
+                >
+                  <span className="text-[12px] flex-1 min-w-0">
+                    最近导出是 <b>{lastDone?.name || fileBase(lastDone?.path)}</b>，与当前投放视频不同
                   </span>
+                  <button
+                    type="button"
+                    className="btn btn-primary text-[11px]"
+                    onClick={() => { void prepareStageFromLatest() }}
+                  >
+                    改用刚导出的成片
+                  </button>
+                </div>
+              ) : null}
+
+              {/* 当前成片：始终可见，避免找不到「投的是哪个视频」 */}
+              <div
+                className="rounded-lg px-3 py-2.5 grid gap-1.5"
+                style={{
+                  border: `1px solid ${videoMissing ? 'var(--accent)' : 'var(--border)'}`,
+                  background: 'var(--surface-2)',
+                }}
+                data-testid="dy-active-video"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                    {tab === 'publish' ? '当前投放视频' : '将要投放的视频'}
+                  </span>
+                  {tab === 'stage' ? (
+                    <button type="button" className="btn btn-ghost text-[10px]" onClick={() => { void pickVideo() }}>
+                      浏览…
+                    </button>
+                  ) : activeVideoPath || selectedAsset?.folder ? (
+                    <button
+                      type="button"
+                      className="btn btn-ghost text-[10px]"
+                      title={activeVideoPath || selectedAsset?.folder}
+                      onClick={() => {
+                        const target = activeVideoPath || selectedAsset?.folder
+                        if (target) void desktop()?.revealPath?.(target)
+                      }}
+                    >
+                      在资源管理器中显示
+                    </button>
+                  ) : null}
+                </div>
+                {videoMissing ? (
+                  <div className="text-[13px]" style={{ color: 'var(--accent)' }}>
+                    未绑定视频文件
+                    {tab === 'stage' ? ' — 请选择成片或点下方最近导出' : ' — 这条资产只有封面/图，推发布页选片会失败'}
+                  </div>
+                ) : (
+                  <>
+                    <div className="text-[14px] font-medium truncate" title={activeVideoPath} data-testid="dy-active-video-name">
+                      {activeVideoName}
+                    </div>
+                    <div className="text-[10px] truncate" style={{ color: 'var(--text-muted)' }} title={activeVideoPath}>
+                      {activeVideoPath}
+                    </div>
+                  </>
+                )}
+                {tab === 'stage' && recentExports.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5 pt-1" data-testid="dy-recent-exports">
+                    <span className="text-[10px] self-center" style={{ color: 'var(--text-muted)' }}>最近导出</span>
+                    {recentExports.map((j) => {
+                      const on = videoPath === j.path
+                      return (
+                        <button
+                          key={j.id}
+                          type="button"
+                          className="btn text-[10px]"
+                          style={{
+                            borderColor: on ? 'var(--accent)' : 'var(--border)',
+                            background: on ? 'var(--accent-dim)' : 'transparent',
+                          }}
+                          title={j.path}
+                          onClick={() => {
+                            setVideoPath(j.path!)
+                            setVideoLocked(true)
+                          }}
+                        >
+                          {j.name || fileBase(j.path)}
+                        </button>
+                      )
+                    })}
+                  </div>
+                ) : null}
+                {tab === 'stage' ? (
+                  <div className="flex gap-2 pt-0.5">
+                    <input
+                      className="input flex-1 text-[11px]"
+                      data-testid="dy-video"
+                      value={videoPath}
+                      onChange={(e) => {
+                        setVideoPath(e.target.value)
+                        setVideoLocked(true)
+                      }}
+                      placeholder="mp4 本机路径"
+                    />
+                  </div>
                 ) : null}
               </div>
 
@@ -558,32 +908,78 @@ export function DouyinPublishPanel() {
                       <span className="text-[11px] px-2 text-center" style={{ color: 'var(--text-muted)' }}>竖封面 3:4</span>
                     )}
                   </div>
-                  <button type="button" className="btn btn-ghost text-[11px]" data-testid="dy-ai-cover" disabled={busy} onClick={() => { void makeCover() }}>
-                    AI 生成封面
+                  <button
+                    type="button"
+                    className="btn btn-ghost text-[11px]"
+                    data-testid="dy-ai-cover"
+                    disabled={coverBusy}
+                    onClick={() => { void makeCover() }}
+                  >
+                    {coverBusy ? '封面生成中…' : 'AI 生成封面'}
                   </button>
-                  <button type="button" className="btn btn-ghost text-[11px]" onClick={() => { void pickCover() }}>换本机图</button>
+                  <button type="button" className="btn btn-ghost text-[11px]" disabled={coverBusy} onClick={() => { void pickCover() }}>
+                    换本机图
+                  </button>
+                  {coverMsg ? (
+                    <div className="text-[10px] leading-snug" style={{ color: /失败|错误|超时|请先/.test(coverMsg) ? 'var(--accent)' : 'var(--text-muted)' }}>
+                      {coverMsg}
+                    </div>
+                  ) : null}
                 </div>
 
                 <div className="grid gap-2 content-start">
                   <div className="flex flex-wrap gap-2">
-                    <button type="button" className="btn btn-ghost text-[11px]" data-testid="dy-ai-meta" disabled={busy} onClick={() => { void writeMeta() }}>
-                      AI 写文案
+                    <button
+                      type="button"
+                      className="btn btn-ghost text-[11px]"
+                      data-testid="dy-ai-meta"
+                      disabled={metaBusy}
+                      onClick={() => { void writeMeta() }}
+                    >
+                      {metaBusy ? '文案生成中…' : 'AI 写文案'}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost text-[11px]"
+                      data-testid="dy-ai-parallel"
+                      disabled={metaBusy || coverBusy}
+                      title="文案与封面同时跑，互不等待"
+                      onClick={() => { void runMetaAndCoverParallel() }}
+                    >
+                      {metaBusy && coverBusy ? '并行中…' : '文案+封面并行'}
                     </button>
                     {tab === 'stage' ? (
-                      <button type="button" className="btn btn-primary text-[11px]" data-testid="dy-ai-all" disabled={busy} onClick={() => { void stage({ withAi: true }) }}>
-                        {busy ? '处理中…' : '一键：文案+封面+投放'}
+                      <button
+                        type="button"
+                        className="btn btn-primary text-[11px]"
+                        data-testid="dy-ai-all"
+                        disabled={actionBusy || metaBusy || coverBusy}
+                        onClick={() => { void stage({ withAi: true }) }}
+                      >
+                        {actionBusy || (metaBusy && coverBusy) ? '处理中…' : '一键：文案+封面+投放'}
                       </button>
                     ) : (
-                      <button type="button" className="btn btn-ghost text-[11px]" data-testid="dy-save-meta" disabled={busy} onClick={() => { void (async () => {
-                        setBusy(true)
-                        const ok = await savePublishMeta()
-                        if (ok) setMsg('文案已写回资产')
-                        setBusy(false)
-                      })() }}>
+                      <button
+                        type="button"
+                        className="btn btn-ghost text-[11px]"
+                        data-testid="dy-save-meta"
+                        disabled={actionBusy || metaBusy}
+                        onClick={() => { void (async () => {
+                          setActionBusy(true)
+                          const ok = await savePublishMeta()
+                          if (ok) setMsg('文案已写回资产')
+                          setActionBusy(false)
+                        })() }}
+                      >
                         保存文案
                       </button>
                     )}
                   </div>
+                  {metaMsg ? (
+                    <div className="text-[10px]" style={{ color: /失败|错误|超时/.test(metaMsg) ? 'var(--accent)' : 'var(--text-muted)' }}>
+                      {metaMsg}
+                    </div>
+                  ) : null}
 
                   <div className="field">
                     <label>标题</label>
@@ -607,23 +1003,17 @@ export function DouyinPublishPanel() {
               {tab === 'stage' ? (
                 <>
                   <div className="field">
-                    <label>成片视频</label>
-                    <div className="flex gap-2">
-                      <input className="input flex-1" data-testid="dy-video" value={videoPath} onChange={(e) => setVideoPath(e.target.value)} placeholder="mp4 路径" />
-                      <button type="button" className="btn btn-ghost" onClick={() => { void pickVideo() }}>浏览</button>
-                    </div>
-                    {lastDone?.path ? (
-                      <button type="button" className="btn btn-ghost text-[11px] justify-start mt-1" onClick={() => setVideoPath(lastDone.path!)}>
-                        用最近导出：{lastDone.name}
-                      </button>
-                    ) : null}
-                  </div>
-                  <div className="field">
                     <label>文件夹名</label>
                     <input data-testid="dy-slug" value={slug} onChange={(e) => setSlug(e.target.value)} />
                   </div>
-                  <button type="button" className="btn btn-ghost" data-testid="dy-stage" disabled={busy} onClick={() => { void stage() }}>
-                    仅投放（用当前文案/封面）
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    data-testid="dy-stage"
+                    disabled={actionBusy || anyBusy}
+                    onClick={() => { void stage() }}
+                  >
+                    仅投放（用当前文案/封面）· {activeVideoName || '无视频'}
                   </button>
                 </>
               ) : (
@@ -633,18 +1023,19 @@ export function DouyinPublishPanel() {
                 >
                   <div className="text-[12px] font-medium">发到手机</div>
                   <p className="text-[11px] m-0" style={{ color: 'var(--text-muted)' }}>
+                    将推送：<strong style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{activeVideoName || '（无视频）'}</strong>
                     {readyPhones.length
-                      ? `当前机：${phoneSerial || readyPhones[0].serial}。填好后请你自己点「发作品」。`
-                      : '先连接并授权手机，再推送。'}
+                      ? ` → ${phoneSerial || readyPhones[0].serial}。填好后请你自己点「发作品」。`
+                      : '。先连接并授权手机，再推送。'}
                   </p>
                   <div className="flex flex-wrap gap-2">
-                    <button type="button" className="btn btn-ghost text-[11px]" data-testid="dy-push" disabled={busy || !readyPhones.length} onClick={() => { void runAdb('push') }}>
+                    <button type="button" className="btn btn-ghost text-[11px]" data-testid="dy-push" disabled={actionBusy || !readyPhones.length || videoMissing} onClick={() => { void runAdb('push') }}>
                       1. 推相册
                     </button>
-                    <button type="button" className="btn btn-ghost text-[11px]" data-testid="dy-stage-adb" disabled={busy || !readyPhones.length} onClick={() => { void runAdb('stage') }}>
+                    <button type="button" className="btn btn-ghost text-[11px]" data-testid="dy-stage-adb" disabled={actionBusy || !readyPhones.length || videoMissing} onClick={() => { void runAdb('stage') }}>
                       2. 推到发布页
                     </button>
-                    <button type="button" className="btn btn-primary text-[11px]" data-testid="dy-fill" disabled={busy || !readyPhones.length} onClick={() => { void runAdb('fill') }}>
+                    <button type="button" className="btn btn-primary text-[11px]" data-testid="dy-fill" disabled={actionBusy || !readyPhones.length} onClick={() => { void runAdb('fill') }}>
                       3. 填标题简介
                     </button>
                   </div>
@@ -654,7 +1045,7 @@ export function DouyinPublishPanel() {
           ) : null}
 
           {msg ? (
-            <div className="text-[12px]" style={{ color: /失败|错误|超时|未检测/.test(msg) ? 'var(--accent)' : 'var(--text-muted)' }}>
+            <div className="text-[12px]" style={{ color: /失败|错误|超时|未检测|无视频/.test(msg) ? 'var(--accent)' : 'var(--text-muted)' }}>
               {msg}
             </div>
           ) : null}

@@ -432,6 +432,8 @@ def render(req: dict, progress: Progress) -> dict:
         raise ValueError(f"spec 必须为 {RENDER_SPEC}")
     if req.get("mode") == "scene-clips":
         return render_scene_clips(req, progress)
+    if req.get("mode") == "plate":
+        return render_plate(req)
 
     p = req.get("params") or {}
     W, H = canvas_size(p)
@@ -583,6 +585,8 @@ def render_scene_clips(req: dict, progress: Progress) -> dict:
     out_dir = Path(req["outDir"])
     outputs = req.get("outputs") or {}
     prefix = str(outputs.get("prefix") or req.get("jobId") or "chalk")
+    # 宿主可指定共用的手图文件名（同一成片所有镜头共用一张）
+    hand_name = str(outputs.get("hand") or f"{prefix}_hand.png")
     sid = str(scene.get("id") or "s1")
     work = out_dir / f"_{prefix}_{sid}_work"
     shutil.rmtree(work, ignore_errors=True)
@@ -612,7 +616,7 @@ def render_scene_clips(req: dict, progress: Progress) -> dict:
             r = stage.renderer(single, ann, work, budget=n)
             r.crop, r.stamp_hand, r.tips = crop, False, []
             if hand is None and r.tip is not None:
-                hand = save_hand(out_dir / f"{prefix}_hand.png", r.tip)
+                hand = save_hand(out_dir / hand_name, r.tip)
             stage.run(r, du + DRAW_TAIL_MS, work)
             stage.close()
             if not last_frame_png(out_dir / video, out_dir / hold, ffmpeg):
@@ -639,6 +643,25 @@ def render_scene_clips(req: dict, progress: Progress) -> dict:
         "hand": hand,
         "scene": {"id": sid, "startMs": start, "endMs": int(scene["endMs"]), "layout": preset, "elements": clips},
     }
+
+
+def render_plate(req: dict) -> dict:
+    """整片底板：黑板报仓库的黑板底图，铺满画布（cover 裁切）；成片宿主把它放在最底层轨道"""
+    p = req.get("params") or {}
+    W, H = canvas_size(p)
+    src = BLACKBOARD_ROOT / "assets" / "chalkboard-bg-black.png"
+    if not src.is_file():
+        raise FileNotFoundError(f"找不到黑板底图 {src}")
+    img = load_bgr(src)
+    h, w = img.shape[:2]
+    s = max(W / w, H / h)
+    img = cv2.resize(img, (max(W, round(w * s)), max(H, round(h * s))), interpolation=cv2.INTER_AREA if s < 1 else cv2.INTER_CUBIC)
+    y0, x0 = (img.shape[0] - H) // 2, (img.shape[1] - W) // 2
+    out_dir = Path(req["outDir"])
+    outputs = req.get("outputs") or {}
+    name = str(outputs.get("plate") or f"{outputs.get('prefix') or req.get('jobId') or 'chalk'}_plate.png")
+    save_png(out_dir / name, img[y0:y0 + H, x0:x0 + W])
+    return {"plate": name, "width": W, "height": H}
 
 
 def main() -> int:

@@ -59,16 +59,32 @@ def adb(*args: str, check: bool = True, timeout: float = 8) -> subprocess.Comple
 
 
 def load_config() -> dict:
-    return json.loads(CONFIG.read_text(encoding="utf-8"))
+    if not CONFIG.is_file():
+        return {}
+    try:
+        return json.loads(CONFIG.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
 
 
 def list_phones() -> list[dict]:
     rows = []
-    for line in adb("devices", "-l").stdout.splitlines()[1:]:
+    try:
+        out = adb("devices", "-l", check=False, timeout=5)
+    except FileNotFoundError as e:
+        raise
+    except subprocess.TimeoutExpired:
+        return rows
+    text = (out.stdout or "") + ("\n" + out.stderr if out.stderr else "")
+    for line in text.splitlines():
+        if not line.strip() or line.lower().startswith("list of devices"):
+            continue
         parts = line.split()
         if len(parts) < 2:
             continue
         serial, state = parts[0], parts[1]
+        if serial == "*":
+            continue
         meta = {}
         for p in parts[2:]:
             if ":" in p:
@@ -552,18 +568,24 @@ def emit(obj: dict) -> None:
 
 
 def api_phones() -> dict:
+    """列出 USB 设备。默认不查抖音进程（省时间）；需要时传 check_douyin=1。"""
     global SERIAL
+    check_dy = os.environ.get("TODO_DOUYIN_CHECK_PID", "").strip() in ("1", "true", "yes")
+    try:
+        listed = list_phones()
+    except FileNotFoundError as e:
+        return {"ok": False, "phones": [], "error": str(e), "draft": load_config(), "adb": ADB}
     phones = []
-    for p in list_phones():
+    for p in listed:
         row = {**p, "douyin": False, "page": p["state"]}
-        if p["state"] == "device":
+        if check_dy and p["state"] == "device":
             SERIAL = p["serial"]
             try:
-                row["douyin"] = bool(adb("shell", "pidof", PKG, check=False, timeout=3).stdout.strip())
-            except subprocess.TimeoutExpired:
+                row["douyin"] = bool(adb("shell", "pidof", PKG, check=False, timeout=1.5).stdout.strip())
+            except (subprocess.TimeoutExpired, Exception):
                 row["douyin"] = False
         phones.append(row)
-    return {"ok": True, "phones": phones, "draft": load_config()}
+    return {"ok": True, "phones": phones, "draft": load_config(), "adb": ADB}
 
 
 def api_inspect(serial: str) -> dict:

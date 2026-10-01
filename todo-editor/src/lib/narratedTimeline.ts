@@ -6,7 +6,8 @@
  *   放回默认排版位置，同一元素位同一条轨；技能参数要手时给书写片段开「粉笔手书写」入场动画（不占时间轴）
  * 同一产物只入轨一次：放过的记在片段上和工程里（放完立刻存盘），重启 / 刷新不会重复放，
  * 没来得及存就刷新的会重新补上，用户删掉的也不会被放回来。
- * 以后的扩展按同一个约定出阶段产物（params.partial）就能直接复用。
+ * 黑板手绘 3.x 起改走成片（production）管线，入轨见 productionTimeline.ts；这里只服务 2.x 的老任务。
+ * 主窗的这个计时器同时负责成片的轮询对账。
  */
 import { useApp, type GroupLanes } from '../store'
 import type { MediaItem } from '../types'
@@ -14,6 +15,7 @@ import { aiFetch, aiUrl } from './aiFetch'
 import { importAiJob, isSameAiMedia, jobGroupSlot, shouldImport } from './aiJobImport'
 import type { TimelinePlacement } from './aiSkills'
 import { elementTransform, setChalkHand } from './chalkHand'
+import { pollProductions } from './productionTimeline'
 import { isStoreAuthority } from './storeSync'
 
 export type NarratedClipElement = {
@@ -114,7 +116,7 @@ function folderFor(j: NarratedJob) {
   const st = useApp.getState()
   if (!st.folders.some((f) => f.id === id)) {
     const title = j.params.output?.plan?.title
-    useApp.setState({ folders: [...st.folders, { id, name: `${j.params.skill?.name ?? 'AI'} ${title || j.id.slice(-4)}` }] })
+    useApp.setState({ folders: [...st.folders, { id, name: `${j.params.skill?.name ?? 'AI'} ${title || j.id.slice(-4)}`, parentId: null }] })
   }
   return id
 }
@@ -215,6 +217,7 @@ export function startNarratedTimelineSync() {
   if (host[TIMER_KEY] != null) window.clearInterval(host[TIMER_KEY])
   const tick = async () => {
     if (!useApp.getState().started) return
+    void pollProductions().catch(() => { /* 下一轮再查 */ })
     try {
       const r = await aiFetch('/api/ai-jobs?limit=40')
       const data = await r.json()

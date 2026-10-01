@@ -4,7 +4,8 @@
  *   elements（默认）：规划器 + 素材模板，宿主按 规划 → 元素生图 → 渲染 执行（server/skills/chalk-hand/PROTOCOL.md）
  *   tts：输入即口播文案，宿主只调 TTS_timeline 出 wav + 逐字时间戳，无渲染端（server/skills/tts-voice/PROTOCOL.md）
  *   subtitle：输入是一条已完成的 tts 配音，渲染端按它的逐字时间戳切条对时并烧录（server/skills/voice-subtitle/PROTOCOL.md）
- *   narrated：输入是口播，宿主 配音 → 按短语时间戳分板拆元素 → 元素生图 → 渲染端逐板对时书写并混入配音（server/skills/chalk-hand/PROTOCOL.md §5）
+ *   narrated：输入是口播，宿主 配音 → 按短语时间戳分板拆元素 → 元素生图 → 渲染端逐板对时书写并混入配音（旧版，只留给老任务重试）
+ *   production：长口播成片，宿主按 分段 → 配音 → 分镜 → 素材 → 渲染 → 字幕 分层生成，可局部重做（server/production/PROTOCOL.md）
  *
  * 目录：server/skills/<name>/skill.json（内置）、$TODO_DATA_DIR/skills/<name>/skill.json（用户，同 id 覆盖内置）
  */
@@ -29,9 +30,9 @@ const DATA_DIR = process.env.TODO_DATA_DIR
 export const BUILTIN_SKILL_DIR = path.join(ROOT, 'server', 'skills')
 export const USER_SKILL_DIR = path.join(DATA_DIR, 'skills')
 
-export const PARAM_GROUPS = ['scene', 'voice', 'text', 'timing', 'stroke', 'output']
-export const PIPELINES = ['elements', 'tts', 'subtitle', 'narrated']
-const INPUT_MAX = { elements: 1000, tts: 5000, subtitle: 5000, narrated: 3600 }
+export const PARAM_GROUPS = ['story', 'scene', 'voice', 'text', 'timing', 'stroke', 'output']
+export const PIPELINES = ['elements', 'tts', 'subtitle', 'narrated', 'production']
+const INPUT_MAX = { elements: 1000, tts: 5000, subtitle: 5000, narrated: 3600, production: 20000 }
 /** narrated：整条口播最多拆几块黑板、总共画几个元素（每个元素一次生图） */
 /** 10 分钟口播约 40~75 块黑板 */
 export const NARRATED_MAX_SCENES = 80
@@ -155,9 +156,9 @@ export function validateSkillPack(raw, packDir) {
     }
   }
 
-  if (pipeline === 'elements' || pipeline === 'narrated') {
+  if (pipeline === 'elements' || pipeline === 'narrated' || pipeline === 'production') {
     validateElementsPipeline(raw)
-    if (pipeline === 'narrated' && raw.planner.countParam != null) fail('planner.countParam', 'narrated 管线按口播自动定元素数')
+    if (pipeline !== 'elements' && raw.planner.countParam != null) fail('planner.countParam', `${pipeline} 管线按口播自动定元素数`)
   } else {
     if (raw.planner != null) fail('planner', `${pipeline} 管线不使用规划器`)
     if (raw.assets != null) fail('assets', `${pipeline} 管线不生成素材`)
@@ -397,7 +398,7 @@ export function buildPlannerMessages(pack, prompt, params) {
   return [{ role: 'system', content: system }, { role: 'user', content: String(prompt).slice(0, pack.input.maxLength) }]
 }
 
-async function chatPlanner(config, messages) {
+export async function chatPlanner(config, messages) {
   if (!config?.apiKey) throw new Error('请先配置 API Key')
   const res = await fetch(`${normalizeBaseUrl(config.baseUrl)}/v1/chat/completions`, {
     method: 'POST',
@@ -415,7 +416,7 @@ async function chatPlanner(config, messages) {
 
 export async function planSkill(config, entry, prompt, params) {
   if (!entry.pack.planner) throw new Error(`技能「${entry.pack.name}」不需要规划`)
-  if (entry.pack.pipeline === 'narrated') throw new Error(`技能「${entry.pack.name}」按配音时间自动拆分，不支持预先规划`)
+  if (entry.pack.pipeline !== 'elements') throw new Error(`技能「${entry.pack.name}」按配音时间自动拆分，不支持预先规划`)
   const raw = await chatPlanner(config, buildPlannerMessages(entry.pack, prompt, params))
   const count = entry.pack.planner.countParam ? params[entry.pack.planner.countParam] : 0
   return sanitizePlan(raw, entry.pack, { count })

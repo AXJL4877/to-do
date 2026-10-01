@@ -46,21 +46,25 @@ async function roundtrip(method, url, body) {
 
 const CHALK = 'builtin.chalk-hand'
 const ELEM = 'selfcheck.chalk-elements'
+const NARR = 'selfcheck.chalk-narrated'
 const VOICE = 'builtin.voice-subtitle'
 const TTS = 'builtin.tts-voice'
 const chalkDir = path.join(USER_SKILL_DIR, 'chalk-elements')
 const voiceDir = path.join(BUILTIN_SKILL_DIR, 'voice-subtitle')
 const ttsDir = path.join(BUILTIN_SKILL_DIR, 'tts-voice')
-mkdirSync(chalkDir, { recursive: true })
-copyFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'chalk-elements.skill.json'), path.join(chalkDir, 'skill.json'))
-writeFileSync(path.join(chalkDir, 'render.py'), [
-  'import importlib.util, sys',
-  `spec = importlib.util.spec_from_file_location("chalk_hand_render", ${JSON.stringify(path.join(BUILTIN_SKILL_DIR, 'chalk-hand', 'render.py'))})`,
-  'core = importlib.util.module_from_spec(spec)',
-  'spec.loader.exec_module(core)',
-  'sys.exit(core.main())',
-  '',
-].join('\n'))
+// 夹具包复用黑板手绘的渲染端：elements（单幅）和 narrated（2.x 口播，只留给老任务重试）
+for (const [dir, fixture] of [[chalkDir, 'chalk-elements'], [path.join(USER_SKILL_DIR, 'chalk-narrated'), 'chalk-narrated']]) {
+  mkdirSync(dir, { recursive: true })
+  copyFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', `${fixture}.skill.json`), path.join(dir, 'skill.json'))
+  writeFileSync(path.join(dir, 'render.py'), [
+    'import importlib.util, sys',
+    `spec = importlib.util.spec_from_file_location("chalk_hand_render", ${JSON.stringify(path.join(BUILTIN_SKILL_DIR, 'chalk-hand', 'render.py'))})`,
+    'core = importlib.util.module_from_spec(spec)',
+    'spec.loader.exec_module(core)',
+    'sys.exit(core.main())',
+    '',
+  ].join('\n'))
+}
 const raw = () => JSON.parse(readFileSync(path.join(chalkDir, 'skill.json'), 'utf8'))
 const rawVoice = () => JSON.parse(readFileSync(path.join(voiceDir, 'skill.json'), 'utf8'))
 const rawTts = () => JSON.parse(readFileSync(path.join(ttsDir, 'skill.json'), 'utf8'))
@@ -73,8 +77,8 @@ assert(pub, '列表中应有黑板手绘')
 const pubText = JSON.stringify(pub)
 assert(!pubText.includes('"system"') && !pubText.includes('template') && !pubText.includes('"prompt":'), '公开描述不应含提示词')
 assert(pub.output.mime === 'video/webm' && pub.previews.length >= 1, '输出 webm 且有预览图')
-assert(pub.pipeline === 'narrated' && pub.planner?.maxElements === 4 && pub.name === '黑板手绘', '黑板手绘走 narrated 管线（输入口播）')
-assert(listed.skills.filter((s) => s.pipeline === 'narrated').length === 1, '口播黑板只有黑板手绘一个包')
+assert(pub.pipeline === 'production' && pub.planner?.maxElements === 4 && pub.name === '黑板手绘' && pub.input.maxLength === 12000, '黑板手绘走 production 管线（长口播成片）')
+assert(listed.skills.find((s) => s.id === NARR)?.pipeline === 'narrated', 'narrated 自检夹具已装载')
 assert(listed.skills.find((s) => s.id === ELEM)?.pipeline === 'elements', 'elements 自检夹具已装载')
 const pubVoice = listed.skills.find((s) => s.id === VOICE)
 assert(pubVoice?.pipeline === 'subtitle' && pubVoice.planner === null && pubVoice.assets === null, '字幕走 subtitle 管线、无规划器 / 素材')
@@ -169,9 +173,8 @@ assert(ap.includes('a big tree') && !/\{\{|\}\}/.test(ap) && /Avoid:/.test(ap), 
 assert(ap !== assetPrompt(pack, { label: '树', draw: 'a big tree', role: 'hero' }, defaults), '配色选项影响素材提示词')
 assert(assetAspect({ size: '1080x1920' }, 1) === '9:16' && assetAspect({ size: '1080x1920' }, 3) === '1:1', '画幅')
 
-// 6a. 黑板手绘（口播）：短语表 / 分板整理 / 时间表
+// 6a. 黑板手绘 2.x（口播 narrated）：短语表 / 分板整理 / 时间表
 {
-  const NARR = CHALK
   const np = getSkillEntry(NARR)
   throws(() => compileSkillById(NARR, { prompt: '你好', params: { duration: 8 } }), /没有参数 "duration"/, '口播版不再收单幅时长')
   assert(compileSkillById(NARR, { prompt: 'x'.repeat(3000) }).prompt.length === 3000, '口播 3000 字内可入队')
@@ -230,6 +233,242 @@ assert(cleanScript('  第一段 {x}\r\n\r\n\r\n第二段\t 内容  ') === '第�
   assert(ttsNames('s_a').audio === 's_a_voice.wav' && subtitleNames('s_a').subtitles === 's_a_subtitles.json', '配音 / 字幕文件命名')
   assert(parseSynthStdout('warn\n{"ok":true,"audio":"a.wav","duration":2}').duration === 2, 'TTS stdout 取最后一行 JSON')
   assert(parseSynthStdout('Traceback boom').ok === false, 'TTS 非 JSON 输出视为失败')
+}
+
+// 6c. 成片（production）：分段层 / 文档编辑 / 分层增量运行（全部用假服务，不调云端、不跑渲染端）
+{
+  const { segmentScript, splitUnits, GLUE_RE, charCount } = await import('../server/production/segment.mjs')
+  const { loadProduction } = await import('../server/production/doc.mjs')
+  const { ProductionCanceled, requestCancel, runProduction } = await import('../server/production/runner.mjs')
+  const { productionEntry } = await import('../server/production/job.mjs')
+  const { AI_OUT } = await import('../server/aiJobs.mjs')
+  mkdirSync(AI_OUT, { recursive: true })
+
+  const tulip = cleanScript([
+    '大家好，我是小薇。今天聊一个三百多年前的故事：一株郁金香，能换一栋房子。',
+    '',
+    '十七世纪的荷兰，是全世界最有钱的地方。商人们把船开到亚洲，运回香料和丝绸，口袋里的金币越来越多。钱多了，就得找地方花。',
+    '这时候，一种从土耳其来的花进了荷兰。它叫郁金香，颜色鲜艳，花瓣上还会长出火焰一样的条纹。所以，贵族们开始抢着买。',
+    '',
+    '---',
+    '后来，连普通人也进场了。木匠、面包师、扫烟囱的，都把积蓄拿去买球根。价格一个月翻一倍，没人关心花本身，大家只关心明天能卖多少钱。这叫博傻，你买它不是因为它值钱，而是相信会有更傻的人接盘。',
+    '一六三七年二月，一场拍卖会上突然没人出价了。恐慌像瘟疫一样传开，价格几天之内跌掉九成。于是，很多人一夜之间倾家荡产。',
+  ].join('\n'))
+  const flat = (s) => s.replace(/\s|---/g, '')
+
+  // 分段层：覆盖全文、不超上限、不在承接词前切、--- 是强边界
+  for (const mode of ['paragraph', 'length']) {
+    const r = await segmentScript(tulip, { mode, target: 120, max: 200 })
+    assert(flat(r.segments.map((s) => s.text).join('')) === flat(tulip), `分段（${mode}）：各段拼起来就是原文`)
+    assert(r.segments.every((s) => charCount(s.text) <= 200), `分段（${mode}）：每段不超过 200 字`)
+    assert(r.segments.slice(1).every((s) => !GLUE_RE.test(s.text)), `分段（${mode}）：不在承接词前切开 → ${r.segments.map((s) => s.text.slice(0, 6)).join(' | ')}`)
+    assert(r.segments.some((s) => s.text.startsWith('后来')), `分段（${mode}）：--- 之后一定换段`)
+  }
+  {
+    const units = splitUnits(tulip, 108)
+    const glue = units.findIndex((u) => u.text.startsWith('所以'))
+    const r = await segmentScript(tulip, { mode: 'semantic', target: 120, max: 200, chat: async () => ({ title: '郁金香', cast: [], segments: [{ start: 0 }, { start: glue }] }) })
+    assert(r.source === 'ai' && r.segments.every((s) => !s.text.startsWith('所以')), 'AI 分段：切在「所以」前会被挪开')
+    const f = await segmentScript(tulip, { mode: 'semantic', target: 120, max: 200, chat: async () => { throw new Error('boom') } })
+    assert(f.source === 'fallback' && /boom/.test(f.notes) && flat(f.segments.map((s) => s.text).join('')) === flat(tulip), 'AI 分段失败：退回按段落切')
+  }
+
+  // 假服务：配音按句 / 逗号出短语时间戳；分镜每段两块黑板（第二块从第二句开始）
+  const calls = { synth: 0, chat: 0, image: 0, render: 0, plate: 0, cues: 0 }
+  const take = () => { const c = { ...calls }; for (const k of Object.keys(calls)) calls[k] = 0; return c }
+  let boardSystem = ''
+  let onRender = null
+  let failImage = null
+  const services = {
+    async synth(text, o) {
+      calls.synth++
+      let t = 0.1
+      const sentences = text.split(/(?<=[。！？])/).map((s) => s.trim()).filter(Boolean).map((s) => {
+        const phrases = s.split(/(?<=[，、；：])/).filter(Boolean).map((p) => {
+          const d = Math.max(0.4, p.length * 0.18)
+          const ph = { text: p, start: +t.toFixed(3), end: +(t + d).toFixed(3) }
+          t += d + 0.05
+          return ph
+        })
+        t += 0.2
+        return { text: s, phrases }
+      })
+      writeFileSync(o.audioFile, 'RIFF')
+      writeFileSync(o.textFile, text)
+      writeFileSync(o.timingFile, JSON.stringify({ text, duration: +t.toFixed(3), sentences }))
+    },
+    async chat(messages) {
+      calls.chat++
+      const lines = messages[1].content.split('\n')
+      if (messages[0].content.includes('剪辑编辑')) {
+        const n = lines.filter((l) => /^\[\d+\]/.test(l)).length
+        return { title: '郁金香泡沫', cast: [{ name: '荷兰商人', look: 'stick-figure merchant in a tall black hat' }], segments: [{ start: 0, title: '起' }, { start: Math.floor(n / 2), title: '落' }] }
+      }
+      boardSystem = messages[0].content
+      const second = lines.findIndex((l, i) => i > 0 && lines[i - 1] === '')
+      const at = second > 0 ? Number(/^\[(\d+)\]/.exec(lines[second])[1]) : null
+      // 描述按本段第一个短语区分（同描述的元素会共用一张图）；段尾追加文字不改变描述
+      const tag = [...lines[0]].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) >>> 0, 7)
+      const el = (k, a) => ({ at: a, label: `元素${k}`, draw: `tulip sketch number ${k} for ${tag}`, role: k % 2 ? 'hero' : 'support' })
+      return { scenes: at ? [{ start: 0, elements: [el(1, 0), el(2, 0)] }, { start: at, elements: [el(3, at)] }] : [{ start: 0, elements: [el(1, 0)] }], notes: 'mock' }
+    },
+    async image(req, out) {
+      calls.image++
+      if (failImage && req.prompt.includes(failImage)) { failImage = null; throw new Error('生图超时') }
+      writeFileSync(out, 'PNG')
+    },
+    async render(_entry, requestFile) {
+      const r = JSON.parse(readFileSync(requestFile, 'utf8'))
+      if (r.mode === 'plate') {
+        calls.plate++
+        writeFileSync(path.join(r.outDir, r.outputs.plate), 'PNG')
+        return { plate: r.outputs.plate, width: 1920, height: 1080 }
+      }
+      if (r.mode === 'cues') {
+        calls.cues++
+        const timing = JSON.parse(readFileSync(r.timing, 'utf8'))
+        const cues = timing.sentences.map((s) => ({ text: s.text, start: s.phrases[0].start, end: s.phrases.at(-1).end, keywords: [] }))
+        writeFileSync(path.join(r.outDir, r.outputs.subtitles), JSON.stringify(cues))
+        return { subtitles: r.outputs.subtitles }
+      }
+      calls.render++
+      if (onRender) await onRender(r)
+      assert(r.mode === 'scene-clips' && r.scene.elements.every((e) => existsSync(e.image)), '渲染请求：逐镜头、元素图已落盘')
+      writeFileSync(path.join(r.outDir, r.outputs.hand), 'PNG')
+      const elements = r.scene.elements.map((e) => {
+        const video = `${r.outputs.prefix}_${r.scene.id}_${e.id}.webm`
+        const hold = `${r.outputs.prefix}_${r.scene.id}_${e.id}_hold.png`
+        writeFileSync(path.join(r.outDir, video), 'WEBM')
+        writeFileSync(path.join(r.outDir, hold), 'PNG')
+        return { id: e.id, label: e.label, role: e.role, box: [0, 0, 100, 100], crop: [0, 0, 100, 100], startMs: e.atMs, durationMs: 500, frames: 15, video, hold, tip: [] }
+      })
+      return { rev: 2, alpha: true, width: 1920, height: 1080, fps: 30, hand: { file: r.outputs.hand, width: 200, height: 300, tipX: 0.1, tipY: 0.1 }, scene: { id: r.scene.id, startMs: r.scene.startMs, endMs: r.scene.endMs, layout: 'auto', elements } }
+    },
+  }
+
+  const created = JSON.parse((await roundtrip('POST', '/api/ai-productions', { skillId: CHALK, script: tulip, params: { variants: 2, tail: 1 }, run: false })).body)
+  assert(created.ok && created.job === null && created.production.segments.length === 0 && created.production.params.variants === 2, '新建成片：只存全文和参数')
+  const pid = created.production.id
+  const entry = productionEntry(CHALK)
+  const run = async (opts = {}) => {
+    await runProduction(loadProduction(pid), { entry, outDir: AI_OUT, services, phase() {} }, opts)
+    return loadProduction(pid)
+  }
+  const els = (d) => d.segments.flatMap((s) => s.boards.flatMap((b) => b.elements))
+  const boards = (d) => d.segments.flatMap((s) => s.boards)
+  const edit = async (ops) => {
+    const r = JSON.parse((await roundtrip('POST', `/api/ai-productions/${pid}/edit`, { ops })).body)
+    assert(r.ok, `编辑失败：${r.error}`)
+    return r.production
+  }
+
+  // 一键成片：分段 → 每段配音 → 分镜 → 候选图 → 逐镜头渲染 + 字幕 + 底板
+  let doc = await run()
+  let c = take()
+  assert(doc.title === '郁金香泡沫' && doc.cast[0].name === '荷兰商人' && doc.segments.length === 2, `首跑：AI 分段定片名与角色 → ${doc.segments.length} 段`)
+  assert(boardSystem.includes('stick-figure merchant in a tall black hat') && boardSystem.includes('上一段结尾'), '分镜提示词带角色外观和上下文')
+  assert(c.synth === 2 && c.chat === 3 && c.cues === 2 && c.plate === 1, `首跑：两段配音 / 一次分段 + 两次分镜 / 字幕 / 底板 → ${JSON.stringify(c)}`)
+  assert(c.image === els(doc).length * 2 && els(doc).every((e) => e.variants.length === 2 && e.variants.every((v) => v.file)), '首跑：每个元素两张候选')
+  assert(c.render === boards(doc).length && boards(doc).every((b) => b.render?.result.elements.length === b.elements.length), '首跑：每个镜头渲一次')
+  assert(doc.status.phase === '完成' && !doc.status.running && doc.lock === null && doc.plate?.file && doc.hand?.file, `首跑：状态完成、解锁 → ${doc.status.phase}`)
+  assert(doc.segments.every((s) => s.subtitles.cues.length > 0) && doc.segments[0].voice.phrases.length > 0, '首跑：每段有字幕条和短语时间戳')
+  let view = JSON.parse((await roundtrip('GET', `/api/ai-productions/${pid}`)).body).production
+  assert(view.segments.every((s) => !s.dirty.voice && !s.dirty.plan && s.boards.every((b) => !b.dirty && b.elements.every((e) => !e.dirty))), '视图：全部已生成')
+  assert(view.segments[0].voice.audioUrl.startsWith('/ai-generated/') && view.segments[0].boards[0].render.result.elements[0].video.startsWith('/ai-generated/'), '视图：文件名换成 URL')
+  assert(view.status.running === false && view.queuedJobId === null, '视图：没有排队 / 在跑的任务')
+
+  // 重跑：什么都不重做
+  doc = await run()
+  c = take()
+  assert(Object.values(c).every((n) => n === 0), `重跑：全部命中缓存 → ${JSON.stringify(c)}`)
+
+  // 改一个元素的描述，只重做这一个元素：一张新图 + 它所在镜头重渲
+  const e0 = els(doc)[0]
+  view = await edit([{ op: 'setElement', element: e0.id, patch: { draw: 'a tulip bulb on a golden scale' } }])
+  const ve0 = view.segments[0].boards[0].elements[0]
+  assert(ve0.dirty && view.segments[0].boards[0].dirty && !view.segments[1].boards[0].dirty && ve0.variants.length === 3 && ve0.pick === 2, '改描述：新开候选并标出待生成')
+  doc = await run({ scope: { elements: [e0.id] } })
+  c = take()
+  assert(c.image === 1 && c.render === 1 && c.synth === 0 && c.chat === 0, `改描述：只生一张图、重渲一个镜头 → ${JSON.stringify(c)}`)
+
+  // 再来一张 → 选回第一张（锁定）：不生图、只重渲
+  view = await edit([{ op: 'addVariant', element: e0.id }])
+  doc = await run({ scope: { elements: [e0.id] } })
+  c = take()
+  assert(c.image === 1 && c.render === 1 && els(doc)[0].variants.length === 4, `再来一张：一张图 → ${JSON.stringify(c)}`)
+  view = await edit([{ op: 'pickVariant', element: e0.id, variant: els(doc)[0].variants[0].id }])
+  doc = await run()
+  c = take()
+  assert(c.image === 0 && c.render === 1 && els(doc)[0].pick === 0 && els(doc)[0].variants[0].locked, `选候选：不生图、只重渲 → ${JSON.stringify(c)}`)
+
+  // 上传自己的图
+  const up = JSON.parse((await roundtrip('POST', `/api/ai-productions/${pid}/upload`, { element: e0.id, dataUrl: 'data:image/png;base64,iVBORw0KGgo=' })).body)
+  assert(up.ok && up.production.segments[0].boards[0].elements[0].variants.at(-1).source === 'upload', '上传候选')
+  doc = await run()
+  c = take()
+  assert(c.image === 0 && c.render === 1, `上传：不生图、只重渲 → ${JSON.stringify(c)}`)
+
+  // 改第二段的文案：只重配这一段、重拆分镜；描述没变的元素沿用候选图
+  const seg2 = doc.segments[1]
+  await edit([{ op: 'setSegmentText', segment: seg2.id, text: `${seg2.text}没人想到，泡沫破得这么快。` }])
+  doc = await run()
+  c = take()
+  assert(c.synth === 1 && c.chat === 1 && c.image === 0 && c.cues === 1 && c.render === doc.segments[1].boards.length, `改文案：只重做第二段、图复用 → ${JSON.stringify(c)}`)
+
+  // 改书写速度：只重渲，不重配、不生图
+  await edit([{ op: 'setParams', params: { drawSpeed: 2 } }])
+  doc = await run()
+  c = take()
+  assert(c.render === boards(doc).length && c.synth + c.chat + c.image + c.cues + c.plate === 0 && doc.params.variants === 2, `改参数：只重渲 → ${JSON.stringify(c)}`)
+
+  // 停止：已开始的那个镜头渲完，其余不再开始；再跑补齐剩下的
+  await edit([{ op: 'setParams', params: { tone: 'ink' } }])
+  onRender = async () => { requestCancel(pid) }
+  let stopped = false
+  await run().catch((e) => { stopped = e instanceof ProductionCanceled })
+  onRender = null
+  doc = loadProduction(pid)
+  c = take()
+  assert(stopped && c.render === 1 && doc.status.phase === '已停止' && doc.lock === null, `停止：只渲完正在渲的那块 → ${JSON.stringify(c)} ${doc.status.phase}`)
+  doc = await run()
+  c = take()
+  assert(c.render === boards(doc).length - 1, `停止后再跑：补齐剩下的镜头 → ${JSON.stringify(c)}`)
+
+  // 局部失败：成功的保留，失败的标出来；重试只补失败的
+  const e3 = els(doc).find((e) => e.draw.startsWith('tulip sketch number 3'))
+  await edit([{ op: 'setElement', element: e3.id, patch: { draw: 'a crashing price chart' } }])
+  failImage = 'a crashing price chart'
+  let failed = ''
+  await run().catch((e) => { failed = e.message })
+  doc = loadProduction(pid)
+  c = take()
+  assert(/1 处失败/.test(failed) && doc.status.failed[0].layer === 'asset' && c.render === 0, `局部失败：报出失败的元素 → ${failed}`)
+  doc = await run()
+  c = take()
+  assert(c.image === 1 && c.render === 1 && doc.status.failed.length === 0, `重试：只补失败的 → ${JSON.stringify(c)}`)
+
+  // 拆段：新段重配，原段重配（文本变了），另一段不动
+  const s1 = doc.segments[0]
+  await edit([{ op: 'splitSegment', segment: s1.id, at: s1.text.indexOf('十七世纪') }])
+  doc = await run()
+  c = take()
+  assert(doc.segments.length === 3 && c.synth === 2 && doc.segments[0].id === s1.id, `拆段：两段重配 → ${JSON.stringify(c)}`)
+
+  // 编辑校验 / 路由
+  const bad = JSON.parse((await roundtrip('POST', `/api/ai-productions/${pid}/edit`, { ops: [{ op: 'removeBoard', board: 'b999' }] })).body)
+  assert(!bad.ok && /找不到镜头/.test(bad.error), '编辑：找不到节点')
+  const badOp = JSON.parse((await roundtrip('POST', `/api/ai-productions/${pid}/edit`, { ops: [{ op: 'nuke' }] })).body)
+  assert(!badOp.ok && /不支持的编辑操作/.test(badOp.error), '编辑：未知操作')
+  const badParam = JSON.parse((await roundtrip('POST', `/api/ai-productions/${pid}/edit`, { ops: [{ op: 'setParams', params: { variants: 9 } }] })).body)
+  assert(!badParam.ok && /候选图/.test(badParam.error), '编辑：参数按技能包校验')
+  const missing = await roundtrip('GET', '/api/ai-productions/p_nope_0000')
+  assert(missing.statusCode === 404, '路由：不存在的成片 404')
+  const list = JSON.parse((await roundtrip('GET', `/api/ai-productions?ids=${pid}`)).body)
+  assert(list.ok && list.items.length === 1 && list.items[0].segments === 3 && list.items[0].duration > 0, '路由：摘要列表')
+  const tooLong = JSON.parse((await roundtrip('POST', '/api/ai-productions', { skillId: CHALK, script: '字'.repeat(12001), run: false })).body)
+  assert(!tooLong.ok && /最多 12000/.test(tooLong.error), '新建：全文上限')
+  const del = JSON.parse((await roundtrip('DELETE', `/api/ai-productions/${pid}`)).body)
+  assert(del.ok && (await roundtrip('GET', `/api/ai-productions/${pid}`)).statusCode === 404, '路由：删除成片')
 }
 
 // 7. 渲染端协议行
@@ -324,7 +563,7 @@ if (RENDER) {
     ] }))
     writeFileSync(path.join(out, elementImageName(id, 0)), chalkImage(ring))
     writeFileSync(path.join(out, elementImageName(id, 1)), chalkImage(box))
-    const c = compileSkillById(CHALK, { prompt: '太阳升起，照亮大地。盒子打开。', params: { drawSpeed: 2, tail: 0.5, quality: 'draft' } })
+    const c = compileSkillById(NARR, { prompt: '太阳升起，照亮大地。盒子打开。', params: { drawSpeed: 2, tail: 0.5, quality: 'draft' } })
     const plan = { title: '自检', scenes: [
       { start: 0, elements: [{ at: 0, label: '太阳', draw: 'sun', role: 'hero', weight: 1.5 }] },
       { start: 2, elements: [{ at: 2, label: '盒子', draw: 'box', role: 'hero', weight: 1.5 }] },
@@ -332,7 +571,7 @@ if (RENDER) {
     const phases = []
     const snaps = []
     const t0 = Date.now()
-    const job = { id, params: { skill: c.meta, request: { skillId: CHALK, prompt: c.prompt, params: c.params, plan } } }
+    const job = { id, params: { skill: c.meta, request: { skillId: NARR, prompt: c.prompt, params: c.params, plan } } }
     const o = await executeSkillJob(job, {
       outDir: out, config: {}, phase: (s) => phases.push(s), withRetry: (fn) => fn(),
       saveParams: (p) => snaps.push(JSON.parse(JSON.stringify(p.partial ?? null))),

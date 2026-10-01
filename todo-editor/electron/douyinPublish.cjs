@@ -411,10 +411,206 @@ function status(rootOverride) {
 }
 
 function pythonBin() {
-  const local = process.env.USERPROFILE
-    && path.join(process.env.USERPROFILE, 'AppData/Local/Programs/Python/Python314/python.exe')
-  if (local && fs.existsSync(local)) return local
+  const home = process.env.USERPROFILE || process.env.HOME || ''
+  const cands = [
+    process.env.TODO_PYTHON,
+    home && path.join(home, 'AppData/Local/Programs/Python/Python314/python.exe'),
+    home && path.join(home, 'AppData/Local/Programs/Python/Python313/python.exe'),
+    home && path.join(home, 'AppData/Local/Programs/Python/Python312/python.exe'),
+    home && path.join(home, 'AppData/Local/Programs/Python/Python311/python.exe'),
+    'py',
+    'python',
+    'python3',
+  ].filter(Boolean)
+  for (const c of cands) {
+    if (c === 'py' || c === 'python' || c === 'python3') return c
+    if (fs.existsSync(c)) return c
+  }
   return 'python'
+}
+
+/** 解析本机 adb.exe（与 publish.py 同一套候选） */
+function resolveAdbExe() {
+  const which = () => {
+    try {
+      const r = require('node:child_process').execSync(
+        process.platform === 'win32' ? 'where adb' : 'which adb',
+        { encoding: 'utf8', windowsHide: true, timeout: 5000 },
+      )
+      return r.split(/\r?\n/).map((s) => s.trim()).find((s) => s && fs.existsSync(s)) || ''
+    } catch { return '' }
+  }
+  const home = process.env.USERPROFILE || process.env.HOME || ''
+  const cands = [
+    which(),
+    home && path.join(home, 'AppData/Local/Microsoft/WinGet/Links/adb.exe'),
+    home && path.join(home, 'AppData/Local/Android/Sdk/platform-tools/adb.exe'),
+    process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Android/Sdk/platform-tools/adb.exe'),
+  ].filter(Boolean)
+  // WinGet Packages 下任意 PlatformTools
+  try {
+    const pkg = path.join(home, 'AppData/Local/Microsoft/WinGet/Packages')
+    if (fs.existsSync(pkg)) {
+      for (const name of fs.readdirSync(pkg)) {
+        if (!/PlatformTools/i.test(name)) continue
+        const exe = path.join(pkg, name, 'platform-tools', 'adb.exe')
+        if (fs.existsSync(exe)) cands.push(exe)
+      }
+    }
+  } catch { /* */ }
+  for (const c of cands) {
+    if (c && fs.existsSync(c)) return c
+  }
+  return 'adb'
+}
+
+function adbRaw(args, timeoutMs = 8000) {
+  const adb = resolveAdbExe()
+  return new Promise((resolve) => {
+    const child = spawn(adb, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
+    let out = ''
+    let err = ''
+    const t = setTimeout(() => {
+      try { child.kill() } catch { /* */ }
+      resolve({ ok: false, out, err: err || 'adb 超时', adb })
+    }, timeoutMs)
+    child.stdout.on('data', (d) => { out += d })
+    child.stderr.on('data', (d) => { err += d })
+    child.on('error', (e) => {
+      clearTimeout(t)
+      resolve({ ok: false, out, err: e.message || String(e), adb })
+    })
+    child.on('close', (code) => {
+      clearTimeout(t)
+      resolve({ ok: code === 0, out, err, adb, code })
+    })
+  })
+}
+
+/**
+ * Windows：看当前真正插着的安卓/MTP 设备，以及 ADB 接口是否 Present。
+ * 用来区分「线插了但调试没开」和「完全没插」。
+ */
+function probeWindowsUsb() {
+  if (process.platform !== 'win32') {
+    return Promise.resolve({ ok: true, phones: [], adbPresent: false })
+  }
+  // -PresentOnly 很快；只认 WPD/USBDevice 上的手机名，避免把蓝牙耳机、硬盘算进来
+  const ps = `
+$ErrorActionPreference='SilentlyContinue'
+$rows = @()
+$adbPresent = $false
+Get-PnpDevice -PresentOnly | ForEach-Object {
+  $name = [string]$_.FriendlyName
+  $cls = [string]$_.Class
+  if (-not $name) { return }
+  if ($cls -match 'Bluetooth|DiskDrive|MEDIA|System|AudioEndpoint|Net|Processor|HDC|SCSIAdapter') { return }
+  if ($name -match 'FreeClip|Headset|Hands-Free|Avrcp|MZVL|SSD|Keyboard|Mouse|Camera|Hub') { return }
+  $isAdb = $name -match '(?i)^ADB Interface$' -or ($cls -eq 'USBDevice' -and $name -match '(?i)ADB')
+  $isPhone = $cls -match '^(WPD|USBDevice|AndroidUsbDeviceClass)$' -and ($name -match '(?i)Android|Redmi|Xiaomi|OPPO|OnePlus|realme|vivo|iQOO|HUAWEI|Honor|Samsung Galaxy|Pixel|Meizu|手机|Phone')
+  if (-not ($isAdb -or $isPhone)) { return }
+  if ($isAdb) { $script:adbPresent = $true }
+  $rows += [pscustomobject]@{ name=$name; status=[string]$_.Status; class=$cls; adb=[bool]$isAdb }
+}
+@{ ok=$true; adbPresent=$adbPresent; phones=$rows } | ConvertTo-Json -Compress -Depth 4
+`.trim()
+  return new Promise((resolve) => {
+    const child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', ps], {
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    let out = ''
+    let err = ''
+    const timer = setTimeout(() => {
+      try { child.kill() } catch { /* */ }
+      resolve({ ok: false, phones: [], adbPresent: false, error: 'USB 探测超时' })
+    }, 8000)
+    child.stdout.on('data', (d) => { out += d })
+    child.stderr.on('data', (d) => { err += d })
+    child.on('error', () => {
+      clearTimeout(timer)
+      resolve({ ok: false, phones: [], adbPresent: false })
+    })
+    child.on('close', () => {
+      clearTimeout(timer)
+      try {
+        const j = JSON.parse(out.trim() || '{}')
+        const phones = Array.isArray(j.phones) ? j.phones : (j.phones ? [j.phones] : [])
+        resolve({
+          ok: true,
+          adbPresent: !!j.adbPresent,
+          phones: phones.map((p) => ({
+            name: String(p.name || ''),
+            status: String(p.status || ''),
+            class: String(p.class || ''),
+            adb: !!p.adb,
+          })).filter((p) => p.name),
+        })
+      } catch {
+        resolve({ ok: false, phones: [], adbPresent: false, raw: (out || err).slice(0, 500) })
+      }
+    })
+  })
+}
+
+function buildPhoneHint(adbList, usb) {
+  const ready = (adbList || []).filter((p) => p.state === 'device')
+  if (ready.length) return null
+  const unauthorized = (adbList || []).filter((p) => p.state === 'unauthorized')
+  if (unauthorized.length) {
+    return '手机已识别，但未授权 USB 调试：请看手机弹窗点「允许」，勾选一律允许后点刷新'
+  }
+  const offline = (adbList || []).filter((p) => p.state === 'offline')
+  if (offline.length) {
+    return '设备 offline：请拔插数据线，手机通知栏改成「文件传输 / MTP」，再点「重启 adb」'
+  }
+  const plugged = (usb?.phones || []).filter((p) => !p.adb)
+  const names = [...new Set(plugged.map((p) => p.name))].slice(0, 3)
+  if (usb?.adbPresent) {
+    return '已看到 ADB 接口，但 adb 列表为空：点「重启 adb」；仍不行则关掉再打开手机「USB 调试」'
+  }
+  if (names.length) {
+    return `电脑已看到「${names.join(' / ')}」，但调试通道未开。请打开开发者选项→USB 调试，通知栏选文件传输，弹窗点允许，然后刷新`
+  }
+  return '未检测到手机。请用数据线连接，打开 USB 调试，并在手机上点「允许调试」'
+}
+
+async function listPhonesWithHint(opts = {}) {
+  const restart = !!opts.restartAdb
+  if (restart) {
+    await adbRaw(['kill-server'], 8000)
+    await adbRaw(['start-server'], 10000)
+  }
+  const [pyResult, usb] = await Promise.all([
+    runPublish({ ...opts, action: 'phones' }),
+    probeWindowsUsb(),
+  ])
+  const phones = Array.isArray(pyResult.phones) ? pyResult.phones : []
+  // adb 空但 USB 插着：自动重启一次 daemon 再扫
+  if (!phones.length && !restart && (usb.adbPresent || (usb.phones || []).length)) {
+    await adbRaw(['kill-server'], 8000)
+    await adbRaw(['start-server'], 10000)
+    const again = await runPublish({ ...opts, action: 'phones' })
+    const phones2 = Array.isArray(again.phones) ? again.phones : []
+    const hint = buildPhoneHint(phones2, usb)
+    return {
+      ...again,
+      ok: again.ok !== false,
+      phones: phones2,
+      usb,
+      hint,
+      error: phones2.length ? undefined : (hint || again.error),
+    }
+  }
+  const hint = buildPhoneHint(phones, usb)
+  return {
+    ...pyResult,
+    ok: pyResult.ok !== false || phones.length > 0,
+    phones,
+    usb,
+    hint,
+    error: phones.length ? undefined : (hint || pyResult.error),
+  }
 }
 
 function runPublish(opts) {
@@ -425,36 +621,47 @@ function runPublish(opts) {
   // publish.py：-s 必须在子命令前；json 子命令 phones|push|fill|stage|…
   let action = String(opts.action || 'phones')
   if (action === 'status') action = 'phones'
-  const args = ['-X', 'utf8', p.publishPy]
+  const py = pythonBin()
+  const args = py === 'py'
+    ? ['-3', '-X', 'utf8', p.publishPy]
+    : ['-X', 'utf8', p.publishPy]
   const serial = opts.serial ? String(opts.serial).trim() : ''
   if (serial && serial !== '-s') args.push('-s', serial)
   args.push('json', action)
   const extraPath = [
     process.env.USERPROFILE && path.join(process.env.USERPROFILE, 'AppData/Local/Microsoft/WinGet/Links'),
     process.env.USERPROFILE && path.join(process.env.USERPROFILE, 'AppData/Local/Android/Sdk/platform-tools'),
+    process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Android/Sdk/platform-tools'),
   ].filter(Boolean).join(path.delimiter)
 
+  const timeoutMs = action === 'phones' ? 15000 : 120000
+
   return new Promise((resolve) => {
-    const child = spawn(pythonBin(), args, {
+    const child = spawn(py, args, {
       cwd: p.root,
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
       env: {
         ...process.env,
         PATH: extraPath + path.delimiter + (process.env.PATH || ''),
+        TODO_DOUYIN_CHECK_PID: action === 'phones' ? '' : (process.env.TODO_DOUYIN_CHECK_PID || ''),
       },
     })
     let out = ''
     let err = ''
     const timer = setTimeout(() => {
       try { child.kill() } catch { /* */ }
-      resolve({ ok: false, error: 'publish.py 超时' })
-    }, 120000)
+      resolve({ ok: false, error: `publish.py 超时（${action}）`, python: py })
+    }, timeoutMs)
     child.stdout.on('data', (d) => { out += d })
     child.stderr.on('data', (d) => { err += d })
     child.on('error', (e) => {
       clearTimeout(timer)
-      resolve({ ok: false, error: e.message || String(e) })
+      resolve({
+        ok: false,
+        error: `无法启动 Python（${py}）：${e.message || e}。可设置 TODO_PYTHON 指向 python.exe`,
+        python: py,
+      })
     })
     child.on('close', (code) => {
       clearTimeout(timer)
@@ -462,8 +669,9 @@ function runPublish(opts) {
       const briefErr = () => {
         const t = (err || out).trim()
         const m = t.match(/CalledProcessError:[^\n]+/)
-          || t.match(/error:\s*.+$/im)
+          || t.match(/FileNotFoundError:[^\n]+/)
           || t.match(/找不到[^\n]+/)
+          || t.match(/error:\s*.+$/im)
         return (m ? m[0] : t).slice(-400) || `publish.py 退出码 ${code}`
       }
       try {
@@ -475,10 +683,11 @@ function runPublish(opts) {
             code,
             error: String(j.error || briefErr()),
             stderr: err.slice(-500),
+            python: py,
           })
           return
         }
-        resolve({ ok: true, ...j, code, stderr: err.slice(-500) })
+        resolve({ ok: true, ...j, code, stderr: err.slice(-500), python: py })
       } catch {
         resolve({
           ok: false,
@@ -486,6 +695,7 @@ function runPublish(opts) {
           raw: out.slice(-2000),
           error: briefErr(),
           stderr: err.slice(-500),
+          python: py,
         })
       }
     })
@@ -514,6 +724,9 @@ module.exports = {
   saveAssetMeta,
   revealInbox,
   runPublish,
+  listPhonesWithHint,
+  probeWindowsUsb,
+  resolveAdbExe,
   readDraft,
   paths,
   resolveRoot,

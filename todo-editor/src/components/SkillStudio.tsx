@@ -140,7 +140,7 @@ export function SkillStudio(props: Props) {
   const [error, setError] = useState<string | null>(null)
   const [plannedFor, setPlannedFor] = useState<string | null>(plan ? prompt : null)
 
-  const narrated = pack.pipeline === 'narrated'
+  const narrated = pack.pipeline === 'narrated' || pack.pipeline === 'production'
   const max = pack.planner?.maxElements ?? 1
   const countParam = pack.planner?.countParam
   const countParamDef = pack.params.find((p) => p.id === countParam)
@@ -210,7 +210,7 @@ export function SkillStudio(props: Props) {
       alpha ? '透明通道' : optionLabel(pack, 'background', params),
       `书写 ${params.drawSpeed ?? 1}×`,
       '时长跟随配音',
-    ].join(' · ')
+    ].filter(Boolean).join(' · ')
     : [
       optionLabel(pack, 'size', params),
       `${duration}s`,
@@ -249,7 +249,9 @@ export function SkillStudio(props: Props) {
               />
               {narrated ? (
                 <p className="m-0 text-[11px] leading-relaxed" style={{ color: 'var(--text-muted)' }}>
-                  生成时先配音拿到逐字时间，再由 AI 按语句换板、给每块黑板拆元素，讲到哪个词就在那一刻起笔。
+                  {pack.pipeline === 'production'
+                    ? 'AI 先按意思把全文切成口播段，每段单独配音拿到逐字时间，再拆成几块黑板、讲到哪个词就在那一刻起笔；生成后每段、每块黑板、每个元素都能单独改、单独重做。'
+                    : '生成时先配音拿到逐字时间，再由 AI 按语句换板、给每块黑板拆元素，讲到哪个词就在那一刻起笔。'}
                   {prompt.trim() ? ` 共 ${prompt.trim().length} 字。` : ''}
                 </p>
               ) : <div>

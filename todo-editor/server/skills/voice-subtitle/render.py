@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """字幕渲染端（todo-skill-render/1 · subtitle 管线）。
 
-mode=script：文案 + 配音的 TTS 逐字时间戳；mode=asr：没有文案，用 burn-subtitles 的 ASR 识别逐字文本和时间（转简体、按停顿补标点）。
+mode=script：文案 + 配音的 TTS 逐字时间戳；mode=asr：没有文案，用 burn-subtitles 的 ASR 识别逐字文本和时间（转简体、按停顿补标点）；
+mode=cues：同 script，但只输出对好时的字幕条 JSON，不编码视频。
 → burn-subtitles（气口切窗 + 关键词 ASS）→ 透明画布硬烧 → VP9 alpha WebM（不带音频）。
 切条 / 对齐 / 识别只调用 burn-subtitles 本体，位置由 BURN_SUBTITLES_DIR 指定。
 
@@ -254,6 +255,15 @@ def render(req: dict) -> dict:
         [{"text": c.text, "start": round(c.start, 3), "end": round(c.end, 3), "keywords": c.keywords} for c in cues],
         ensure_ascii=False, indent=2,
     ), encoding="utf-8")
+
+    # mode=cues：只要对好时的字幕条（成片宿主做成编辑器里可改的文字片段），不烧录
+    if req.get("mode") == "cues":
+        if not req.get("keepWork"):
+            shutil.rmtree(work, ignore_errors=True)
+        return {
+            "subtitles": subs_name, "ass": ass.name, "width": W, "height": H, "fps": fps,
+            "duration": duration, "cues": len(cues), "font": bs.FONT, "fontSize": fs, "text": script,
+        }
 
     # 2. 透明画布硬烧：libass 直接画进 alpha，VP9 保留透明通道；配音在时间轴上单独一轨，这里不带音频
     subs_vf = f"ass='{filter_path(ass)}:fontsdir={filter_path(bs.FONTS_DIR)}:alpha=1'"

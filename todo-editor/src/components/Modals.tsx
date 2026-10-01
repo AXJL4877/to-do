@@ -9,6 +9,7 @@ import { SHORTCUTS } from '../lib/shortcuts'
 import { usePreviewSuspend } from '../hooks/usePreviewSuspend'
 import { WatermarkDesigner } from './WatermarkDesigner'
 import { DouyinPublishPanel } from './DouyinPublishPanel'
+import { setDouyinPendingVideo } from '../lib/douyinPending'
 
 function MoreActions() {
   const setModal = useApp((s) => s.setModal)
@@ -31,7 +32,11 @@ function MoreActions() {
       items: [
         { id: 'loudness', label: '一键调音', testid: 'btn-loudness-more', run: () => { void useApp.getState().levelAudioLoudness(); setModal(null) } },
         { id: 'watermark', label: '水印设计…', testid: 'btn-watermark-more', run: () => setModal('watermark') },
-        { id: 'douyin', label: '抖音发布台…', testid: 'btn-douyin-more', run: () => setModal('douyin') },
+        { id: 'douyin', label: '抖音发布台…', testid: 'btn-douyin-more', run: () => {
+          const last = [...useApp.getState().exportQueue].reverse().find((j) => j.status === 'done' && j.path && !j.audioOnly)
+          if (last?.path) setDouyinPendingVideo(last.path)
+          setModal('douyin')
+        } },
         { id: 'trim', label: '修剪', run: () => { useApp.getState().setTool('trim'); setModal(null) } },
         { id: 'slip', label: '滑动', run: () => { useApp.getState().setTool('slip'); setModal(null) } },
         { id: 'magnetic', label: magnetic ? '关闭磁性' : '开启磁性', run: () => { useApp.getState().setMagnetic(!magnetic); setModal(null) } },
@@ -386,7 +391,10 @@ export function Modals() {
                           type="button"
                           className="btn btn-ghost justify-start text-[11px]"
                           data-testid={`export-douyin-${j.id}`}
-                          onClick={() => useApp.getState().setModal('douyin')}
+                          onClick={() => {
+                            setDouyinPendingVideo(j.path)
+                            useApp.getState().setModal('douyin')
+                          }}
                         >
                           投放到抖音发布台…
                         </button>

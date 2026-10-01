@@ -4,6 +4,7 @@
  *   tts：文案 → 配音（TTS_timeline），产出 <id>_voice.wav + <id>_timing.json，已存在则重试直接复用。
  *   subtitle：取一条 tts 任务的文案 / 配音 / 时间戳 → 渲染（按逐字时间戳切条 + 透明底烧录）。
  *   narrated：口播 → 配音 → 按短语时间戳分板拆元素 → 元素生图 ∥ 逐板渲染成时间轴片段；阶段产物随时写进 params.partial 供前端流式入轨。各步产物落盘，重试复用。
+ *   production：交给 server/production/（分层生成 + 局部重做），任务里只带成片 id 和范围。
  */
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
@@ -54,7 +55,7 @@ export function parseRenderLine(line) {
   try { return { tag: m[1], data: JSON.parse(m[2]) } } catch { return null }
 }
 
-function runRenderer(entry, requestFile, { timeoutSec, onProgress }) {
+export function runRenderer(entry, requestFile, { timeoutSec, onProgress }) {
   const script = path.join(entry.dir, entry.pack.runtime.entry)
   return new Promise((resolve, reject) => {
     const child = spawn(PYTHON, [script, '--request', requestFile], {
@@ -101,8 +102,12 @@ function runRenderer(entry, requestFile, { timeoutSec, onProgress }) {
  * @returns {Promise<object>} todo-skill-output/1 清单
  */
 export async function executeSkillJob(job, ctx) {
+  if (job.params.request?.productionId) {
+    const { executeProductionJob } = await import('./production/job.mjs')
+    return executeProductionJob(job, ctx)
+  }
   const entry = getSkillEntry(job.params.request.skillId)
-  // 黑板手绘 1.x 是 elements 管线，按入队时的管线重试老任务
+  // 黑板手绘 1.x 是 elements 管线、2.x 是 narrated 管线，按入队时的管线重试老任务
   const pipeline = job.params.skill?.pipeline ?? (job.params.request.plan?.elements ? 'elements' : entry.pack.pipeline)
   const run = { tts: executeTtsJob, subtitle: executeSubtitleJob, narrated: executeNarratedJob }[pipeline] ?? executeElementsJob
   return run(job, entry, ctx)
@@ -208,7 +213,7 @@ const NARRATED_IMAGE_CONCURRENCY = Math.max(1, Math.min(8, Number(process.env.TO
  * 生一张元素图到 out。提交即扣费，所以网络波动只重试下载；提交返回的地址先落盘（out.url.json），
  * 下载失败后任务重试会先拿这个地址再下一次，地址失效才重新提交。
  */
-async function generateElementImage(config, withRetry, request, out) {
+export async function generateElementImage(config, withRetry, request, out) {
   const tmp = `${out}.part`
   const pending = `${out}.url.json`
   if (existsSync(pending)) {

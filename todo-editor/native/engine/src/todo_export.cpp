@@ -880,7 +880,9 @@ int todo_cmd_export(const wchar_t *graph_path, const wchar_t *out_path) {
     else if (audio_labs.size() > 1) {
       std::string mix;
       for (const auto &l : audio_labs) mix += l;
-      mix += "amix=inputs=" + std::to_string(audio_labs.size()) + ":duration=longest:dropout_transition=0[aout]";
+      /* normalize=0: adelay silence still counts as inputs; default normalize=1 divides by N */
+      mix += "amix=inputs=" + std::to_string(audio_labs.size()) +
+             ":duration=longest:dropout_transition=0:normalize=0[aout]";
       filters.push_back(mix);
     }
 
@@ -1063,7 +1065,8 @@ int todo_cmd_export(const wchar_t *graph_path, const wchar_t *out_path) {
   } else if (audio_labs.size() > 1) {
     std::string mix;
     for (const auto &l : audio_labs) mix += l;
-    mix += "amix=inputs=" + std::to_string(audio_labs.size()) + ":duration=longest:dropout_transition=0[aout]";
+    mix += "amix=inputs=" + std::to_string(audio_labs.size()) +
+           ":duration=longest:dropout_transition=0:normalize=0[aout]";
     filters.push_back(mix);
   }
 

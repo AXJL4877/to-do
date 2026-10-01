@@ -8,7 +8,9 @@
 | `todo-skill-render/1` | 宿主 | 渲染端（`render.py`） | `<jobId>_request.json` + stdout 协议行 |
 | `todo-skill-output/1` | 宿主 | 调用方（UI / CLI / 其它 agent） | `<jobId>.json` |
 
-黑板手绘（`builtin.chalk-hand` 2.x）走 `narrated` 管线：**输入口播** → 配音拿逐字时间 → LLM 按语句分板、拆元素 → 元素生图 → 渲染端说到哪画到哪并混入配音，见 **§5**；本包参数见 §2。
+黑板手绘（`builtin.chalk-hand` **3.x**）走 `production` 管线：**长口播（≤12000 字）** → AI 分段 → 每段配音 + 分镜 + 生图 + 字幕 → 渲染端按镜头出书写片段，可局部修改、单独重做某段 / 镜头 / 元素、每个元素多张候选图。框架（文档、各层、编辑操作、接口、入轨规则、怎么接入新扩展）见 [`../../production/PROTOCOL.md`](../../production/PROTOCOL.md)；本文 §5.3 的 `scene-clips` 渲染协议仍是本包渲染端的接口，另加 `mode: "plate"`（黑板底板图）。本包参数见 §2。
+
+2.x 的 `narrated` 管线（一次性口播任务，§5）仍保留给其它技能包，自检夹具见 [`scripts/fixtures/chalk-narrated.skill.json`](../../../scripts/fixtures/chalk-narrated.skill.json)。
 
 §1、§3 以 `elements` 管线（一句话 → 单幅黑板，黑板手绘 1.x 的形态）讲通用协议：宿主执行 **规划**（LLM 把提示词拆成元素）→ **素材**（每个元素生一张黑底粉笔图）→ **渲染**（本地进程按蒙版逐元素书写）。写这类包可以照 [`scripts/fixtures/chalk-elements.skill.json`](../../../scripts/fixtures/chalk-elements.skill.json)（自检夹具，参数 `elements` `duration` `hold` 等），渲染端同样是本目录的 `render.py`。下文 elements 示例里的 `author.my-chalk` 指这样一个包。配音 / 字幕管线见 [`../tts-voice/PROTOCOL.md`](../tts-voice/PROTOCOL.md)、[`../voice-subtitle/PROTOCOL.md`](../voice-subtitle/PROTOCOL.md)。
 
@@ -71,9 +73,12 @@ npm run skill -- fetch  <jobId> --out ./out --wait
 |---|---|---|---|---|---|
 | 配音 | `voice` | select | `mizai` `clone` | mizai | 咪仔 / 火山声音复刻 2.0 |
 | 配音 | `cloneId` | text | `S_…` | — | 仅 `voice=clone` |
-| 画面 | `scenes` | number | 0~80，步长 1 | 0 | 黑板数；0 = AI 按话题换板（约每 8~15 秒一块） |
+| 分段与分镜 | `split` | select | `semantic` `paragraph` `length` | semantic | 长文案怎么切成口播段：AI 按意群 / 按空行 / 按字数；单独一行 `---` 一定切开 |
+| 分段与分镜 | `segmentChars` | number | 60~200，步长 10 | 120 | 每段目标字数（每段一条配音） |
+| 分段与分镜 | `boardSec` | number | 5~30 秒，步长 1 | 10 | 大约多久换一块黑板 |
+| 分段与分镜 | `variants` | number | 1~4，步长 1 | 1 | 每个元素先出几张候选图 |
 | 画面 | `layout` | select | `auto` `hero_left` `diagonal_fall` `conveyor_wave` `fork_right` `stack_rise` `climax_right` `grid` | auto | 元素的默认排版（入轨后可随意拖动缩放）；竖屏自动退化为网格 |
-| 画面 | `size` | select | `1280x720` `1920x1080` `1080x1920` `1080x1080` | 1280x720 | 画幅 |
+| 画面 | `size` | select | `1280x720` `1920x1080` `1080x1920` `1080x1080` | 1920x1080 | 画幅 |
 | 画面 | `tone` | select | `chalk` `ink` | chalk | 白粉笔或深色墨线（叠浅色画面用）；产物一律透明底 |
 | 画面 | `palette` | select | `color` `mono` | color | 彩色粉笔点缀 / 纯白；影响生图提示词 |
 | 节奏 | `drawSpeed` | number | 0.5~3×，步长 0.25 | 1 | 书写速度（§5.3）；总时长跟随配音 |
@@ -84,6 +89,9 @@ npm run skill -- fetch  <jobId> --out ./out --wait
 | 笔触 | `stroke` | select | `skeleton` `grid` | skeleton | 沿线条骨架书写 / 块状扫写 |
 | 笔触 | `fill` | select | `wipe` `none` | wipe | 写完淡入颜色 / 只描线。淡入占元素书写时长的 1/10，这段不落笔尖、不出手 |
 | 输出 | `quality` | select | `high` `standard` `draft` | standard | VP9 CRF 24 / 31 / 38 |
+| 输出 | `plate` | select | `board` `none` | board | 是否在最底层铺一张黑板底图（铺满整片） |
+| 输出 | `subtitles` | select | `on` `off` | on | 是否自动出字幕条（按文案 + 逐字时间对时，不走语音识别） |
+| 输出 | `subtitleChars` | number | 8~30，步长 1 | 18 | 每条字幕最多几个字 |
 
 elements 夹具没有配音 / `scenes` / `drawSpeed` / `tail`，换成 `elements`（0~6，0 = AI 决定）、`duration`（3~30 秒）、`hold`（写完停留 0~5 秒）。
 
@@ -189,7 +197,8 @@ elements 夹具没有配音 / `scenes` / `drawSpeed` / `tail`，换成 `elements
 
 - 顶层只允许：`spec id name version author description tags previews pipeline input output params quick planner assets runtime`。
 - `quick`（可选）：0~6 个 `params` 里的 id，编辑器 Skill 侧栏直接露出这些参数，其余进工作台；省略时侧栏取前几个可见参数。
-- `pipeline`：`elements`（默认）、`narrated`（本包，§5）、`tts`、`subtitle`。`elements` 必须有 `planner` + `assets`，`input.maxLength` ≤1000；`narrated` 同样要 `planner` + `assets`，`input.maxLength` ≤3000，不许带 `countParam`；`tts` / `subtitle` 不许带这两项，`input.maxLength` ≤5000。
+- `pipeline`：`elements`（默认）、`narrated`（§5）、`production`（本包，见成片框架协议）、`tts`、`subtitle`。`elements` 必须有 `planner` + `assets`，`input.maxLength` ≤1000；`narrated` / `production` 同样要 `planner` + `assets`，不许带 `countParam`，`input.maxLength` 分别 ≤3000 / ≤20000；`tts` / `subtitle` 不许带这两项，`input.maxLength` ≤5000。`/api/ai-skill-plan` 只支持 `elements`。
+- `group` 另可用 `story`（分段与分镜，`production` 管线用）。
 - `id` 形如 `author.skill-name`；`version` 为 `x.y.z`。
 - `params[]`：`select`（1~16 个选项，值 `[a-zA-Z0-9_.:-]{1,32}`，可带 `prompt` 片段）或 `number`（`min max step default`，可带 `unit`）；`group` ∈ `scene voice text timing stroke output`；`when` 只能依赖其它 select。
 - `planner.countParam`：须是 `min=0 step=1 max≤maxElements` 的 number 参数。

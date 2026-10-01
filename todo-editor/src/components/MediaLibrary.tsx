@@ -1,7 +1,12 @@
-import { useMemo, useRef, useState } from 'react'
+/**
+ * 媒体库：标签栏 + 文件夹树（媒体/音频）+ 各功能面板。
+ * 文件夹支持嵌套、拖素材进夹、网页浏览器截图入库。
+ */
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Upload, Type, Star, Camera, Sparkles, MoreHorizontal, Film,
   Music, Blend, Wand2, Aperture, Zap, CaseSensitive, History, Trash2, Square, Blocks, Mic, Image as ImageIcon,
+  Folder, FolderPlus, FolderOpen, ChevronRight, ChevronDown, Globe, Pencil,
 } from 'lucide-react'
 import { useApp } from '../store'
 import { parseMediaFiles, filesFromDataTransfer } from '../lib/importFiles'
@@ -12,9 +17,10 @@ import { SkillsPanel } from './SkillsPanel'
 import { VoicePanel } from './VoicePanel'
 import { beginDockDrag, defaultPanelDock, shouldIgnoreDockClick } from '../lib/panelDock'
 import { beginMediaDrag, finishMediaDrag } from '../lib/mediaDrag'
+import { desktop } from '../lib/desktop'
 import clsx from 'clsx'
 import type { LucideIcon } from 'lucide-react'
-import type { MediaItem } from '../types'
+import type { MediaFolder, MediaItem } from '../types'
 
 /** 主页只露出高频；其余进「更多」 */
 const PRIMARY = ['media', 'text', 'preset', 'skill', 'voice', 'ai'] as const
@@ -33,6 +39,9 @@ const ICONS: Record<LibTab, LucideIcon> = {
 }
 
 const SOLID_SWATCHES = ['#000000', '#FFFFFF', '#1F2937', '#F5F2EC', '#E11D48', '#F59E0B', '#10B981', '#2563EB', '#7C3AED', '#00FF00']
+/** 虚拟「全部」：不对应真实 folderId，只是筛选 */
+const FOLDER_ALL = '__all__'
+const SYSTEM_FOLDERS = new Set(['f_all', 'f_broll', 'f_audio', 'f_sticker', 'f_web'])
 
 /** 背景：纯色 / 本地图片 → 添加到播放头最底层视频轨；选中对应片段时直接改色 / 换图 */
 function BackgroundRow() {
@@ -217,8 +226,192 @@ function MediaThumb({ m }: { m: MediaItem }) {
   )
 }
 
+function folderDescendants(folders: MediaFolder[], rootId: string): Set<string> {
+  const kids = new Map<string | null, string[]>()
+  for (const f of folders) {
+    const p = f.parentId ?? null
+    if (!kids.has(p)) kids.set(p, [])
+    kids.get(p)!.push(f.id)
+  }
+  const out = new Set<string>([rootId])
+  const stack = [rootId]
+  while (stack.length) {
+    const id = stack.pop()!
+    for (const c of kids.get(id) ?? []) {
+      if (!out.has(c)) { out.add(c); stack.push(c) }
+    }
+  }
+  return out
+}
+
+function FolderTree({
+  selectedId, onSelect, dropTarget, onDropMedia, onHoverFolder,
+}: {
+  selectedId: string
+  onSelect: (id: string) => void
+  dropTarget: string | null
+  onDropMedia: (folderId: string, mediaId: string) => void
+  onHoverFolder: (folderId: string | null) => void
+}) {
+  const folders = useApp((s) => s.folders)
+  const media = useApp((s) => s.media)
+  const addFolder = useApp((s) => s.addFolder)
+  const renameFolder = useApp((s) => s.renameFolder)
+  const removeFolder = useApp((s) => s.removeFolder)
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({ f_all: true, f_broll: true })
+  const [renaming, setRenaming] = useState<string | null>(null)
+  const [renameVal, setRenameVal] = useState('')
+
+  const counts = useMemo(() => {
+    const c = new Map<string, number>()
+    for (const m of media) c.set(m.folderId, (c.get(m.folderId) ?? 0) + 1)
+    return c
+  }, [media])
+
+  const childrenOf = useMemo(() => {
+    const map = new Map<string | null, MediaFolder[]>()
+    for (const f of folders) {
+      const p = f.parentId ?? null
+      if (!map.has(p)) map.set(p, [])
+      map.get(p)!.push(f)
+    }
+    for (const list of map.values()) list.sort((a, b) => a.name.localeCompare(b.name, 'zh'))
+    return map
+  }, [folders])
+
+  function startRename(f: MediaFolder) {
+    setRenaming(f.id)
+    setRenameVal(f.name)
+  }
+
+  function commitRename() {
+    if (renaming) renameFolder(renaming, renameVal)
+    setRenaming(null)
+  }
+
+  function renderNode(f: MediaFolder, depth: number) {
+    const kids = childrenOf.get(f.id) ?? []
+    const open = expanded[f.id] !== false
+    const active = selectedId === f.id
+    const count = counts.get(f.id) ?? 0
+    return (
+      <div key={f.id}>
+        <div
+          className={clsx('media-folder-row', active && 'active', dropTarget === f.id && 'drop')}
+          style={{ paddingLeft: 6 + depth * 12 }}
+          data-testid={`folder-${f.id}`}
+          onClick={() => onSelect(f.id)}
+          onDragOver={(e) => {
+            if (![...e.dataTransfer.types].includes('application/todo-media-id')) return
+            e.preventDefault()
+            e.dataTransfer.dropEffect = 'move'
+            onHoverFolder(f.id)
+          }}
+          onDragLeave={() => onHoverFolder(null)}
+          onDrop={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            const mid = e.dataTransfer.getData('application/todo-media-id')
+            if (mid) onDropMedia(f.id, mid)
+            onHoverFolder(null)
+          }}
+        >
+          {kids.length ? (
+            <button
+              type="button"
+              className="media-folder-chevron"
+              aria-label={open ? '折叠' : '展开'}
+              onClick={(e) => { e.stopPropagation(); setExpanded((s) => ({ ...s, [f.id]: !open })) }}
+            >
+              {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+            </button>
+          ) : <span className="media-folder-chevron" />}
+          {open && kids.length ? <FolderOpen size={12} className="shrink-0 opacity-70" /> : <Folder size={12} className="shrink-0 opacity-70" />}
+          {renaming === f.id ? (
+            <input
+              className="media-folder-rename"
+              value={renameVal}
+              autoFocus
+              data-testid={`folder-rename-${f.id}`}
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => setRenameVal(e.target.value)}
+              onBlur={commitRename}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') commitRename()
+                if (e.key === 'Escape') setRenaming(null)
+              }}
+            />
+          ) : (
+            <span className="truncate flex-1 text-left">{f.name}</span>
+          )}
+          {count > 0 && <span className="media-folder-count">{count}</span>}
+          <button
+            type="button"
+            className="media-folder-act"
+            title="重命名"
+            aria-label="重命名"
+            onClick={(e) => { e.stopPropagation(); startRename(f) }}
+          >
+            <Pencil size={10} />
+          </button>
+          {!SYSTEM_FOLDERS.has(f.id) && (
+            <button
+              type="button"
+              className="media-folder-act"
+              title="删除文件夹"
+              aria-label="删除文件夹"
+              data-testid={`folder-del-${f.id}`}
+              onClick={(e) => {
+                e.stopPropagation()
+                if (confirm(`删除文件夹「${f.name}」？素材会移到上级。`)) removeFolder(f.id)
+              }}
+            >
+              <Trash2 size={10} />
+            </button>
+          )}
+        </div>
+        {open && kids.map((c) => renderNode(c, depth + 1))}
+      </div>
+    )
+  }
+
+  return (
+    <div className="media-folder-tree" data-testid="media-folder-tree">
+      <div
+        className={clsx('media-folder-row', selectedId === FOLDER_ALL && 'active', dropTarget === FOLDER_ALL && 'drop')}
+        data-testid="folder-all"
+        onClick={() => onSelect(FOLDER_ALL)}
+      >
+        <span className="media-folder-chevron" />
+        <Folder size={12} className="shrink-0 opacity-70" />
+        <span className="truncate flex-1 text-left">全部</span>
+        <span className="media-folder-count">{media.length}</span>
+      </div>
+      {(childrenOf.get(null) ?? []).map((f) => renderNode(f, 0))}
+      <button
+        type="button"
+        className="media-folder-add"
+        data-testid="folder-add"
+        onClick={() => {
+          const parent = selectedId !== FOLDER_ALL ? selectedId : null
+          const name = prompt('新文件夹名称', '新建文件夹')
+          if (!name?.trim()) return
+          const id = addFolder(name.trim(), parent)
+          if (id) {
+            setExpanded((s) => (parent ? { ...s, [parent]: true } : s))
+            onSelect(id)
+          }
+        }}
+      >
+        <FolderPlus size={12} />新建文件夹
+      </button>
+    </div>
+  )
+}
+
 export function MediaLibrary() {
   const media = useApp((s) => s.media)
+  const folders = useApp((s) => s.folders)
   const libraryTab = useApp((s) => s.libraryTab) as LibTab
   const selectedMediaId = useApp((s) => s.selectedMediaId)
   const fonts = useApp((s) => s.fonts)
@@ -227,7 +420,8 @@ export function MediaLibrary() {
   const importMedia = useApp((s) => s.importMedia)
   const addClipFromMedia = useApp((s) => s.addClipFromMedia)
   const removeMedia = useApp((s) => s.removeMedia)
-  const addTextClip = useApp((s) => s.addTextClip)
+  const moveMedia = useApp((s) => s.moveMedia)
+  const ensureFolder = useApp((s) => s.ensureFolder)
   const addTransition = useApp((s) => s.addTransition)
   const addEffect = useApp((s) => s.addEffect)
   const captureFrame = useApp((s) => s.captureFrame)
@@ -241,29 +435,77 @@ export function MediaLibrary() {
   const fileRef = useRef<HTMLInputElement>(null)
   const [dragOver, setDragOver] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
+  const [folderId, setFolderId] = useState(FOLDER_ALL)
+  const [folderDrop, setFolderDrop] = useState<string | null>(null)
+
+  // 网页截图 → 自动进「网页截图」文件夹
+  useEffect(() => {
+    const d = desktop()
+    if (!d?.onBrowserShot) return
+    return d.onBrowserShot((shot) => {
+      ensureFolder('f_web', '网页截图', null)
+      const [id] = importMedia([{
+        name: shot.name,
+        url: shot.url,
+        path: shot.path,
+        kind: 'image',
+        duration: useApp.getState().settings.stillDuration || 5,
+        width: shot.width,
+        height: shot.height,
+        hasAudio: false,
+        folderId: 'f_web',
+      }])
+      setLibraryTab('media')
+      setFolderId('f_web')
+      if (id) setSelectedMedia(id)
+    })
+  }, [ensureFolder, importMedia, setLibraryTab, setSelectedMedia])
+
+  const folderScope = useMemo(() => {
+    if (folderId === FOLDER_ALL) return null
+    return folderDescendants(folders, folderId)
+  }, [folders, folderId])
 
   const list = useMemo(() => {
-    if (libraryTab === 'audio') return media.filter((m) => m.kind === 'audio')
-    if (libraryTab === 'recent') return [...media].reverse().slice(0, 12)
-    return media.filter((m) => m.kind !== 'audio')
-  }, [media, libraryTab])
+    let base: MediaItem[]
+    if (libraryTab === 'audio') base = media.filter((m) => m.kind === 'audio')
+    else if (libraryTab === 'recent') base = [...media].reverse().slice(0, 12)
+    else base = media.filter((m) => m.kind !== 'audio')
+    if (folderScope && (libraryTab === 'media' || libraryTab === 'audio')) {
+      base = base.filter((m) => folderScope.has(m.folderId))
+    }
+    return base
+  }, [media, libraryTab, folderScope])
 
   const inSecondary = (SECONDARY as readonly string[]).includes(libraryTab)
   const MoreIcon = inSecondary ? ICONS[libraryTab] : MoreHorizontal
   const moreLabel = inSecondary ? LABELS[libraryTab] : '更多'
+  const showFolders = libraryTab === 'media' || libraryTab === 'audio'
 
   async function onFiles(files: FileList | File[] | null) {
     if (!files?.length) return
     const parsed = await parseMediaFiles([...files])
-    importMedia(parsed)
+    const dest = folderId !== FOLDER_ALL && folders.some((f) => f.id === folderId) ? folderId : undefined
+    importMedia(parsed.map((p) => (dest ? { ...p, folderId: dest } : p)))
   }
 
   async function onDrop(e: React.DragEvent) {
     e.preventDefault()
     setDragOver(false)
+    setFolderDrop(null)
     const mediaId = e.dataTransfer.getData('application/todo-media-id')
     if (mediaId) return
     await onFiles(filesFromDataTransfer(e.dataTransfer))
+  }
+
+  async function openBrowser() {
+    const d = desktop()
+    if (!d?.openBrowserWindow) {
+      useApp.getState().setToast('请在桌面版中使用内置浏览器')
+      return
+    }
+    ensureFolder('f_web', '网页截图', null)
+    await d.openBrowserWindow()
   }
 
   return (
@@ -290,6 +532,9 @@ export function MediaLibrary() {
       >
         <span className="eyebrow">媒体库</span>
         <div className="flex gap-1">
+          <button className="icon-btn" data-testid="btn-open-browser" onClick={() => void openBrowser()} title="内置浏览器（截图进媒体库）" aria-label="浏览器">
+            <Globe size={13} />
+          </button>
           <button className="icon-btn" data-testid="btn-capture-frame" onClick={captureFrame} title="AI 截帧（SQLite，不进媒体库）" aria-label="截帧"><Camera size={13} /></button>
           <button className="icon-btn active" data-testid="btn-import" onClick={() => fileRef.current?.click()} title="导入" aria-label="导入">
             <Upload size={13} />
@@ -370,7 +615,7 @@ export function MediaLibrary() {
         )}
       </div>
 
-      <div className="flex-1 overflow-y-auto p-2 min-h-0" onClick={() => moreOpen && setMoreOpen(false)}>
+      <div className="flex-1 overflow-hidden p-2 min-h-0 flex flex-col" onClick={() => moreOpen && setMoreOpen(false)}>
         {libraryTab === 'ai' && panelDock.ai === 'tab' && (
           aiFloat && aiFloatKind === 'window' ? (
             <div className="grid place-items-center gap-2 py-8 px-2 text-center" data-testid="ai-popped-placeholder">
@@ -419,69 +664,85 @@ export function MediaLibrary() {
         )}
         {libraryTab === 'media' && <BackgroundRow />}
         {(['media', 'audio', 'recent'].includes(libraryTab) || (libraryTab === 'ai' && panelDock.ai !== 'tab')) && (
-          list.length === 0 ? (
-            <div className="h-full min-h-[120px] grid place-items-center text-[12px] text-center px-2" style={{ color: 'var(--text-muted)' }} data-testid="media-empty">
-              拖入或点击导入
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 gap-1.5" data-testid="media-grid">
-              {list.map((m) => (
-                <div
-                  key={m.id}
-                  className={clsx(
-                    'group relative rounded-lg overflow-hidden border cursor-grab active:cursor-grabbing',
-                    selectedMediaId === m.id && 'ring-2',
-                  )}
-                  style={{ borderColor: 'var(--border)', '--tw-ring-color': 'var(--accent)' } as React.CSSProperties}
-                  data-testid={`media-item-${m.id}`}
-                  draggable
-                  onClick={() => setSelectedMedia(m.id)}
-                  onDoubleClick={() => addClipFromMedia(m.id)}
-                  onDragStart={(e) => beginMediaDrag(e.dataTransfer, m.id)}
-                  onDragEnd={finishMediaDrag}
-                  title={m.name}
-                >
-                  <div className="aspect-video w-full overflow-hidden" style={{ background: 'var(--surface-2)' }}>
-                    <MediaThumb m={m} />
-                  </div>
-                  <div
-                    className="absolute inset-x-0 bottom-0 px-1.5 py-1 truncate text-[10px] font-medium"
-                    style={{
-                      color: '#F5F2EC',
-                      background: 'linear-gradient(transparent, hsl(220 20% 8% / 0.75))',
-                    }}
-                  >
-                    {m.offline ? '⚠ ' : ''}{m.name}
-                  </div>
-                  <div className="absolute top-1 right-1 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button
-                      type="button"
-                      className="icon-btn"
-                      style={{ width: 22, height: 22, background: 'hsl(220 20% 8% / 0.55)', color: '#F5F2EC' }}
-                      data-testid={`fav-${m.id}`}
-                      title="收藏"
-                      onClick={(e) => { e.stopPropagation(); toggleFavorite(m.id) }}
-                    >
-                      <Star size={11} fill={m.favorite ? 'currentColor' : 'none'} />
-                    </button>
-                    <button
-                      type="button"
-                      className="icon-btn"
-                      style={{ width: 22, height: 22, background: 'hsl(220 20% 8% / 0.55)', color: '#F5F2EC' }}
-                      data-testid={`del-media-${m.id}`}
-                      title="从媒体库删除"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        removeMedia(m.id)
-                      }}
-                    >
-                      <Trash2 size={11} />
-                    </button>
-                  </div>
+          <div className={clsx('flex-1 min-h-0', showFolders && 'media-browser')}>
+            {showFolders && (
+              <FolderTree
+                selectedId={folderId}
+                onSelect={setFolderId}
+                dropTarget={folderDrop}
+                onHoverFolder={setFolderDrop}
+                onDropMedia={(fid, mid) => { moveMedia([mid], fid); setFolderDrop(null) }}
+              />
+            )}
+            <div className="media-grid-pane overflow-y-auto min-h-0">
+              {list.length === 0 ? (
+                <div className="h-full min-h-[120px] grid place-items-center text-[12px] text-center px-2" style={{ color: 'var(--text-muted)' }} data-testid="media-empty">
+                  拖入或点击导入
                 </div>
-              ))}
+              ) : (
+                <div className="grid grid-cols-2 gap-1.5" data-testid="media-grid">
+                  {list.map((m) => (
+                    <div
+                      key={m.id}
+                      className={clsx(
+                        'group relative rounded-lg overflow-hidden border cursor-grab active:cursor-grabbing',
+                        selectedMediaId === m.id && 'ring-2',
+                      )}
+                      style={{ borderColor: 'var(--border)', '--tw-ring-color': 'var(--accent)' } as React.CSSProperties}
+                      data-testid={`media-item-${m.id}`}
+                      draggable
+                      onClick={() => setSelectedMedia(m.id)}
+                      onDoubleClick={() => addClipFromMedia(m.id)}
+                      onDragStart={(e) => {
+                        beginMediaDrag(e.dataTransfer, m.id)
+                        setFolderDrop(null)
+                      }}
+                      onDragEnd={() => { finishMediaDrag(); setFolderDrop(null) }}
+                      title={m.name}
+                    >
+                      <div className="aspect-video w-full overflow-hidden" style={{ background: 'var(--surface-2)' }}>
+                        <MediaThumb m={m} />
+                      </div>
+                      <div
+                        className="absolute inset-x-0 bottom-0 px-1.5 py-1 truncate text-[10px] font-medium"
+                        style={{
+                          color: '#F5F2EC',
+                          background: 'linear-gradient(transparent, hsl(220 20% 8% / 0.75))',
+                        }}
+                      >
+                        {m.offline ? '⚠ ' : ''}{m.name}
+                      </div>
+                      <div className="absolute top-1 right-1 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          style={{ width: 22, height: 22, background: 'hsl(220 20% 8% / 0.55)', color: '#F5F2EC' }}
+                          data-testid={`fav-${m.id}`}
+                          title="收藏"
+                          onClick={(e) => { e.stopPropagation(); toggleFavorite(m.id) }}
+                        >
+                          <Star size={11} fill={m.favorite ? 'currentColor' : 'none'} />
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          style={{ width: 22, height: 22, background: 'hsl(220 20% 8% / 0.55)', color: '#F5F2EC' }}
+                          data-testid={`del-media-${m.id}`}
+                          title="从媒体库删除"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            removeMedia(m.id)
+                          }}
+                        >
+                          <Trash2 size={11} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-          )
+          </div>
         )}
       </div>
     </aside>

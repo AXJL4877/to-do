@@ -103,7 +103,8 @@ export interface MediaItem {
   aiUrl?: string
 }
 
-export interface MediaFolder { id: string; name: string }
+/** 媒体库文件夹；parentId 为空表示根级。系统文件夹（f_all / f_broll / f_audio / f_sticker / f_web）不可删除 */
+export interface MediaFolder { id: string; name: string; parentId?: string | null }
 
 export interface TransitionRef { type: TransitionType; duration: number }
 
@@ -189,6 +190,10 @@ export interface ClipMeta {
     lane?: number
     /** 任务内产物的唯一键：同一产物只入轨一次 */
     key?: string
+    /** 成片产物的版本（生成层的输入指纹）：版本变了就原位换成新产物 */
+    rev?: string
+    /** 入轨时自动排的位置（变换签名）；和当前不同说明用户挪过，换新产物时保留用户的位置 */
+    layout?: string
     /** 粉笔元素的书写片段：可套「粉笔手书写」入场动画 */
     chalk?: ChalkStroke
     /** 旧版独立粉笔手片段所属元素 id；打开时会并回元素的 chalk.on 并删除该片段 */
@@ -241,7 +246,14 @@ export interface ProjectSettings {
   safeFrame: boolean; magnetic: boolean; snap: boolean
   /** 流式入轨的 AI 任务已放过的产物键（任务 id → 键），跟片段一起存进工程：刷新丢了片段也就没有记录，会重新补上 */
   aiPlaced?: Record<string, string[]>
+  /**
+   * 本工程用到的成片（成片 id → 入轨记录）：t0 为整片起点，auto 为是否自动入轨，
+   * placed 为每个产物键最后一次放上时的版本（片段被删而版本没变 = 用户删的，不再放回）
+   */
+  aiProductions?: Record<string, ProductionPlacement>
 }
+
+export interface ProductionPlacement { t0: number; auto: boolean; placed: Record<string, string>; createdAt: number }
 
 export interface Prefs {
   defaultDuration: number; cachePath: string

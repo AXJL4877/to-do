@@ -74,6 +74,64 @@ function isStillImage(c) {
 }
 
 /**
+ * 成片最终响度：短视频平台听感约 -12 LUFS（比播客 -16 更响）。
+ * 挂在完整导出之后，C++ / JS 两条后端都能吃到。
+ */
+function applyPlatformLoudness(outPath, opts = {}) {
+  const ffmpeg = resolveFfmpeg(opts.nativeBin)
+  const ext = path.extname(outPath) || '.mp4'
+  const tmp = path.join(
+    path.dirname(outPath),
+    `.todo-loud-${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`,
+  )
+  // I=-12 / TP=-1.5：抖音/短视频常用区间，比素材原响度更稳
+  const af = 'loudnorm=I=-12:TP=-1.5:LRA=11:print_format=summary'
+  /** @type {string[]} */
+  const args = ['-y', '-hide_banner', '-loglevel', 'error', '-i', outPath]
+  if (opts.audioOnly) {
+    args.push('-af', af, '-c:a', 'aac', '-b:a', '192k', '-vn', tmp)
+  } else {
+    args.push('-c:v', 'copy', '-af', af, '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', tmp)
+  }
+  return new Promise((resolve) => {
+    let stderr = ''
+    let child
+    try {
+      child = spawn(ffmpeg, args, { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] })
+    } catch (err) {
+      resolve({ ok: false, error: err.message || 'loudnorm 启动失败' })
+      return
+    }
+    child.stderr.setEncoding('utf8')
+    child.stderr.on('data', (c) => { stderr += c })
+    child.on('error', (err) => {
+      try { fs.unlinkSync(tmp) } catch { /* */ }
+      resolve({ ok: false, error: err.message || 'loudnorm 失败' })
+    })
+    child.on('close', (code) => {
+      if (code === 0 && fs.existsSync(tmp)) {
+        try {
+          fs.renameSync(tmp, outPath)
+          resolve({ ok: true, path: outPath })
+        } catch (e) {
+          try {
+            fs.copyFileSync(tmp, outPath)
+            fs.unlinkSync(tmp)
+            resolve({ ok: true, path: outPath })
+          } catch (e2) {
+            try { fs.unlinkSync(tmp) } catch { /* */ }
+            resolve({ ok: false, error: e2.message || e.message || '替换成片失败' })
+          }
+        }
+      } else {
+        try { fs.unlinkSync(tmp) } catch { /* */ }
+        resolve({ ok: false, error: (stderr || `loudnorm 退出 ${code}`).trim().slice(0, 300) })
+      }
+    })
+  })
+}
+
+/**
  * Prefer C++ `todo-media-engine export`; falls back to ffmpeg-cli JS.
  * @param {object} seq EditGraph-like sequence
  * @param {string} outPath
@@ -84,6 +142,9 @@ async function exportSequence(seq, outPath, opts = {}) {
     const { prepareAlphaVideos } = require('./alphaVideoExport.cjs')
     seq = await prepareAlphaVideos(seq, { ffmpeg: resolveFfmpeg(opts.nativeBin), onProgress: opts.onProgress })
   } catch (e) { return { ok: false, error: e.message || '透明视频预处理失败' } }
+
+  /** @type {{ ok: boolean, path?: string, error?: string, backend?: string, ffmpeg?: string }} */
+  let result
   if (!seq.audioOnly && (seq.clips || []).some(c => c.enabled !== false && c.text)) {
     let prepared
     try {
@@ -95,13 +156,29 @@ async function exportSequence(seq, outPath, opts = {}) {
       })
     } catch (e) { return { ok: false, error: e.message || '字幕渲染失败' } }
     try {
-      return await exportPreparedSequence(prepared.sequence, outPath, {
+      result = await exportPreparedSequence(prepared.sequence, outPath, {
         ...opts,
         onProgress: (p, stage) => opts.onProgress?.(20 + Math.max(0, p - 10) * (80 / 90), stage),
       })
     } finally { prepared.cleanup() }
+  } else {
+    result = await exportPreparedSequence(seq, outPath, opts)
   }
-  return exportPreparedSequence(seq, outPath, opts)
+
+  if (!result?.ok || !result.path || !fs.existsSync(result.path)) return result
+
+  // 有音轨才做平台响度；失败不挡导出（保留原片）
+  opts.onProgress?.(96, '统一成片响度…')
+  const loud = await applyPlatformLoudness(result.path, {
+    nativeBin: opts.nativeBin,
+    audioOnly: !!(seq.audioOnly || opts.audioOnly),
+  })
+  if (loud.ok) {
+    opts.onProgress?.(100)
+    return { ...result, loudness: '≈-12 LUFS' }
+  }
+  opts.onProgress?.(100)
+  return result
 }
 
 function exportPreparedSequence(seq, outPath, opts = {}) {
@@ -344,7 +421,11 @@ function exportViaFfmpegCli(seq, outPath, opts = {}) {
   if (audioLabs.length === 1) {
     filters.push(`${audioLabs[0]}anull[aout]`)
   } else if (audioLabs.length > 1) {
-    filters.push(`${audioLabs.join('')}amix=inputs=${audioLabs.length}:duration=longest:dropout_transition=0[aout]`)
+    // normalize=0：不要按输入数压音量。adelay 后静音轨仍算作输入，默认 normalize=1
+    // 会把 N 段旁白整体除以 N，导出比预览小声很多。
+    filters.push(
+      `${audioLabs.join('')}amix=inputs=${audioLabs.length}:duration=longest:dropout_transition=0:normalize=0[aout]`,
+    )
   }
 
   if (audioOnly && audioLabs.length === 0) {

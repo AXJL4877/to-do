@@ -17,10 +17,17 @@ import {
   cancelAiJob,
   enqueueAiJob,
   getAiJob,
+  cancelProductionRun,
+  enqueueProductionRun,
+  isJobRunning,
   kickWorker,
   listAiJobs,
+  liveProductionStatus,
   retryAiJob,
 } from './aiJobs.mjs'
+import { deleteProduction, listProductions, loadProduction } from './production/doc.mjs'
+import { createProduction, editProduction, productionEntry, uploadVariant } from './production/job.mjs'
+import { publicView } from './production/runner.mjs'
 import { listModels } from './huniuClient.mjs'
 import { readAiConfig, writeAiConfig } from './huniuConfig.mjs'
 import { listStylePacks, stylePreviewPath } from './stylePacks.mjs'
@@ -58,6 +65,8 @@ function mimeFor(name) {
   if (n.endsWith('.mp4')) return 'video/mp4'
   if (n.endsWith('.webm')) return 'video/webm'
   if (n.endsWith('.json')) return 'application/json; charset=utf-8'
+  if (n.endsWith('.wav')) return 'audio/wav'
+  if (n.endsWith('.mp3')) return 'audio/mpeg'
   return 'application/octet-stream'
 }
 
@@ -86,6 +95,82 @@ function serveAiGenerated(req, res, url) {
   if (req.method === 'HEAD') res.end()
   else res.end(buf)
   return true
+}
+
+const productionCtx = { isRunning: isJobRunning, outDir: AI_OUT }
+
+function viewOf(doc) {
+  return liveProductionStatus(publicView(doc, productionEntry(doc.skillId), AI_OUT))
+}
+
+/**
+ * 成片（server/production/PROTOCOL.md）：
+ *   GET    /api/ai-productions?ids=a,b     摘要列表
+ *   POST   /api/ai-productions             新建 { skillId, script, params?, title?, run?, stopAfter?, autoTimeline?, placement?, placeAt? }
+ *   GET    /api/ai-productions/<id>        整份文档（带 url 与「待生成」标记）
+ *   POST   /api/ai-productions/<id>/edit   { ops: [...] }
+ *   POST   /api/ai-productions/<id>/run    { scope?, stopAfter? }
+ *   POST   /api/ai-productions/<id>/cancel
+ *   POST   /api/ai-productions/<id>/upload { element, dataUrl }
+ *   DELETE /api/ai-productions/<id>
+ */
+async function handleProductions(req, res, url) {
+  const [pathname, query = ''] = url.split('?')
+  const rest = pathname.slice('/api/ai-productions'.length).split('/').filter(Boolean).map(decodeURIComponent)
+  const body = req.method === 'POST' ? JSON.parse((await readBody(req)) || '{}') : {}
+  try {
+    if (!rest.length) {
+      if (req.method === 'GET') {
+        const ids = new URLSearchParams(query).get('ids')?.split(',').filter(Boolean)
+        sendJson(res, 200, { ok: true, items: listProductions(ids).map(liveProductionStatus) })
+        return
+      }
+      if (req.method === 'POST') {
+        const doc = createProduction(body)
+        const job = body.run === false ? null : enqueueProductionRun(doc.id, body)
+        sendJson(res, 200, { ok: true, production: viewOf(loadProduction(doc.id)), job })
+        return
+      }
+    } else {
+      const [id, action] = rest
+      if (!action && req.method === 'GET') {
+        sendJson(res, 200, { ok: true, production: viewOf(loadProduction(id)) })
+        return
+      }
+      if (!action && req.method === 'DELETE') {
+        const doc = loadProduction(id)
+        if (isJobRunning(doc.lock?.jobId)) throw new Error('正在生成，先停止再删除')
+        cancelProductionRun(id, null)
+        sendJson(res, 200, { ok: deleteProduction(id) })
+        return
+      }
+      if (req.method === 'POST' && action === 'edit') {
+        if (!Array.isArray(body.ops)) throw new Error('ops 须为数组')
+        editProduction(id, body.ops, productionCtx)
+        sendJson(res, 200, { ok: true, production: viewOf(loadProduction(id)) })
+        return
+      }
+      if (req.method === 'POST' && action === 'run') {
+        const job = enqueueProductionRun(id, body)
+        sendJson(res, 200, { ok: true, job, production: viewOf(loadProduction(id)) })
+        return
+      }
+      if (req.method === 'POST' && action === 'cancel') {
+        const doc = loadProduction(id)
+        sendJson(res, 200, cancelProductionRun(id, doc.lock?.jobId))
+        return
+      }
+      if (req.method === 'POST' && action === 'upload') {
+        uploadVariant(id, body.element, body.dataUrl, productionCtx)
+        sendJson(res, 200, { ok: true, production: viewOf(loadProduction(id)) })
+        return
+      }
+    }
+    sendJson(res, 405, { ok: false, error: 'method not allowed' })
+  } catch (e) {
+    const msg = String(e instanceof Error ? e.message : e)
+    sendJson(res, /^找不到成片/.test(msg) ? 404 : 400, { ok: false, error: msg })
+  }
 }
 
 /** @returns {Promise<boolean>} true 表示已处理 */
@@ -257,6 +342,11 @@ export async function handleAiHttp(req, res) {
       return true
     }
 
+    if (url.startsWith('/api/ai-productions')) {
+      await handleProductions(req, res, url)
+      return true
+    }
+
     if (url === '/api/ai-skills' || url.startsWith('/api/ai-skills?')) {
       if (req.method !== 'GET') {
         sendJson(res, 405, { ok: false, error: 'GET only' })
@@ -350,7 +440,7 @@ export async function handleAiHttp(req, res) {
           kind: 'image',
           prompt,
           size: '3:4',
-          quality: body.quality === '1K' ? '1K' : '2K',
+          quality: body.quality === '2K' ? '2K' : '1K',
           model: body.model || 'gpt-image-2',
           purpose: 'douyin-cover',
           imageDataUrl: typeof body.imageDataUrl === 'string' ? body.imageDataUrl : undefined,

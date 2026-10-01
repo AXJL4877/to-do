@@ -27,6 +27,7 @@ import { TimelineLabels } from './TimelineLabels'
 import { TimelineFloatLaunch } from './TimelineFloat'
 import { indexClips } from '../lib/sequenceIndex'
 import { useTimelineGeometryZoom } from '../lib/useTimelineGeometryZoom'
+import { setDouyinPendingVideo } from '../lib/douyinPending'
 import clsx from 'clsx'
 import type { RefObject } from 'react'
 
@@ -83,6 +84,7 @@ export function Timeline({
   const monitorCompose = useApp((s) => s.monitorCompose)
   const setPropTab = useApp((s) => s.setPropTab)
   const setModal = useApp((s) => s.setModal)
+  const exportQueue = useApp((s) => s.exportQueue)
   const timelineH = useApp((s) => s.layout.timelineH)
   const setLayout = useApp((s) => s.setLayout)
   const popout = isTimelinePopout()
@@ -982,7 +984,7 @@ export function Timeline({
           className="btn shrink-0 text-[10px] flex items-center gap-1"
           data-testid="btn-loudness"
           onClick={() => { void levelAudioLoudness() }}
-          title="一键调音：把音频响度统一到约 -16 LUFS。有选中则只调选中，否则整条时间线；可撤销"
+          title="一键调音：把音频响度统一到约 -12 LUFS（短视频平台）。有选中则只调选中，否则整条时间线；可撤销"
         >
           <AudioLines size={12} />一键调音
         </button>
@@ -997,8 +999,12 @@ export function Timeline({
         <button
           className="btn shrink-0 text-[10px] flex items-center gap-1"
           data-testid="btn-douyin"
-          onClick={() => setModal('douyin')}
-          title="投放到抖音发布台（inbox），打开发布页填稿；不点发作品"
+          onClick={() => {
+            const last = [...exportQueue].reverse().find((j) => j.status === 'done' && j.path && !j.audioOnly)
+            if (last?.path) setDouyinPendingVideo(last.path)
+            setModal('douyin')
+          }}
+          title="投放到抖音发布台（优先最近导出成片）；不点发作品"
         >
           抖音
         </button>

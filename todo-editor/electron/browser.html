@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; connect-src 'self'" />
+  <title>TO DO · 浏览器</title>
+  <style>
+    :root {
+      --bg: #F2EEE8;
+      --bar: #E8E2D8;
+      --border: #D4CBC0;
+      --text: #2A241C;
+      --muted: #7A6F63;
+      --accent: #C45C26;
+      --accent-dim: #C45C2618;
+      --btn: #FFFCF8;
+      --smart: #2563EB;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--text);
+      font: 13px/1.4 "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+    #chrome {
+      height: 48px; display: flex; align-items: center; gap: 6px; padding: 0 10px;
+      background: var(--bar); border-bottom: 1px solid var(--border); -webkit-app-region: no-drag;
+    }
+    button {
+      height: 30px; min-width: 30px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--border);
+      background: var(--btn); color: var(--text); cursor: pointer; font: inherit; white-space: nowrap;
+    }
+    button:hover { border-color: var(--accent); color: var(--accent); }
+    button:disabled { opacity: 0.4; cursor: default; border-color: var(--border); color: var(--muted); }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+    button.primary:hover { filter: brightness(1.05); color: #fff; }
+    button.primary:disabled { filter: none; }
+    button.active-shot { background: var(--accent); border-color: var(--accent); color: #fff; }
+    #url {
+      flex: 1; height: 30px; border-radius: 8px; border: 1px solid var(--border); padding: 0 12px;
+      background: #fff; color: var(--text); font: inherit; outline: none; min-width: 80px;
+    }
+    #url:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-dim); }
+    #kbd {
+      font-size: 11px; color: var(--muted); padding: 0 4px; white-space: nowrap;
+    }
+    #kbd kbd {
+      display: inline-block; padding: 1px 5px; border-radius: 4px; border: 1px solid var(--border);
+      background: #fff; font: 11px ui-monospace, Consolas, monospace; color: var(--text);
+    }
+    #stage { position: relative; width: 100%; height: calc(100% - 70px); background: #fff; }
+    webview { display: flex; width: 100%; height: 100%; }
+    #overlay {
+      display: none; position: absolute; inset: 0; z-index: 5;
+      cursor: crosshair; background: rgba(20, 16, 12, 0.22);
+    }
+    #overlay.on { display: block; }
+    #march {
+      display: none; position: absolute; border: 2px solid var(--accent);
+      box-shadow: 0 0 0 9999px rgba(20, 16, 12, 0.35); pointer-events: none;
+    }
+    #boxes { position: absolute; inset: 0; pointer-events: none; }
+    .smart-box {
+      position: absolute; border: 2px solid rgba(37, 99, 235, 0.8); border-radius: 4px;
+      pointer-events: auto; cursor: pointer; background: transparent;
+    }
+    .smart-box:hover, .smart-box.hot {
+      border-color: var(--accent); background: rgba(196, 92, 38, 0.12);
+    }
+    .smart-box span {
+      position: absolute; left: 0; top: 0; transform: translateY(-100%);
+      padding: 1px 6px; font-size: 10px; background: var(--smart); color: #fff;
+      border-radius: 4px 4px 0 0; pointer-events: none; white-space: nowrap;
+    }
+    .smart-box:hover span, .smart-box.hot span { background: var(--accent); }
+    #banner {
+      display: none; position: absolute; left: 50%; top: 10px; transform: translateX(-50%);
+      z-index: 6; padding: 6px 12px; border-radius: 999px;
+      background: rgba(42, 36, 28, 0.92); color: #F5F2EC; font-size: 12px; white-space: nowrap;
+      pointer-events: none; box-shadow: 0 4px 16px rgba(0,0,0,.25);
+    }
+    #banner.on { display: block; }
+    #status {
+      height: 22px; display: flex; align-items: center; gap: 8px; padding: 0 10px;
+      font-size: 11px; color: var(--muted); background: var(--bg); border-top: 1px solid var(--border);
+    }
+    #status .ok { color: #2F6B3A; }
+    #status .err { color: #B42318; }
+  </style>
+</head>
+<body>
+  <div id="chrome">
+    <button type="button" id="back" title="后退" aria-label="后退" disabled>←</button>
+    <button type="button" id="forward" title="前进" aria-label="前进" disabled>→</button>
+    <button type="button" id="reload" title="刷新" aria-label="刷新">↻</button>
+    <input id="url" type="text" spellcheck="false" placeholder="输入网址，回车前往" value="https://www.bing.com" />
+    <button type="button" id="go" title="前往">前往</button>
+    <span id="kbd"><kbd>F1</kbd> 截图</span>
+    <button type="button" id="shot-toggle" class="primary" title="F1：开启/关闭截图模式">截图</button>
+  </div>
+  <div id="stage">
+    <webview id="view" src="https://www.bing.com" partition="persist:todo-browser" allowpopups></webview>
+    <div id="overlay">
+      <div id="boxes"></div>
+      <div id="march"></div>
+    </div>
+    <div id="banner">F1 截图模式 · 点蓝框或拖拽框选 · Esc 退出</div>
+  </div>
+  <div id="status"><span id="hint">就绪 · 按 F1 进入截图模式</span><span id="msg"></span></div>
+  <script src="./browser-shell.js"></script>
+</body>
+</html>

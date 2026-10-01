@@ -35,14 +35,17 @@ export function buildDouyinMetaMessages({ projectName, script, hint }) {
     '{',
     '  "title": "不超过18字的吸睛标题，可作封面大标题，不要标点堆砌",',
     '  "caption": "80~160字简介：说清看点，结尾必须含「仅供参考，不构成投资建议」",',
-    '  "tags": ["话题1","话题2",...] 3~6 个中文话题，不要带 #",',
+    '  "tags": ["话题1","话题2",...] 3~6 个中文话题，不要带 #',
     '}',
-    '要求：口语化、有信息量；不要夸大收益；不要承诺赚钱；不要写联系方式/二维码。',
+    '要求：口语化、有信息量；紧扣给定的项目主题与口播原文；不要夸大收益；不要承诺赚钱；不要写联系方式/二维码。',
+    '禁止：抛开口播另起炉灶、写成别的题材、用近期热点替换本片主题。',
   ].join('\n')
   const user = [
-    `项目/成片名：${clean(projectName, 80) || '未命名成片'}`,
+    `项目主题/成片名：${clean(projectName, 80) || '未命名成片'}`,
     hint ? `补充说明：${clean(hint, 200)}` : '',
-    script ? `口播/文稿摘录：\n${clean(script, 1200)}` : '（暂无口播稿）',
+    script
+      ? `本工程口播/文稿（简介与封面必须围绕这些内容，不要改题材）：\n${clean(script, 2400)}`
+      : '（暂无口播稿——请仅根据项目主题写中性标题，不要编造具体新闻事件）',
   ].filter(Boolean).join('\n')
   return [{ role: 'system', content: system }, { role: 'user', content: user }]
 }
@@ -50,7 +53,7 @@ export function buildDouyinMetaMessages({ projectName, script, hint }) {
 export async function designDouyinMeta(config, body = {}) {
   if (!config?.apiKey) throw new Error('请先配置 API Key（AI 设置）')
   const projectName = clean(body.projectName || body.title, 80)
-  const script = clean(body.script, 1200)
+  const script = clean(body.script, 2400)
   const hint = clean(body.hint, 200)
   const res = await fetch(`${normalizeBaseUrl(config.baseUrl)}/v1/chat/completions`, {
     method: 'POST',

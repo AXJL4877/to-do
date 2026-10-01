@@ -20,6 +20,9 @@ import { composeContinuationRef, normalizeFrames, resolveFfmpeg, sliceSprite, wr
 import { H3_QUALITIES, ensureH3, h3Download, h3Generate, h3UploadImage } from './h3Client.mjs'
 import { compileSkillJob, getSkillEntry } from './skillPacks.mjs'
 import { elementImageName, executeSkillJob } from './skillJobs.mjs'
+import { loadProduction } from './production/doc.mjs'
+import { createProduction, mergeScope, productionEntry, productionJobParams } from './production/job.mjs'
+import { requestCancel } from './production/runner.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const DATA_DIR = process.env.TODO_DATA_DIR
@@ -83,6 +86,7 @@ const updateJob = db.prepare(`
 `)
 const setPhase = db.prepare(`UPDATE ai_jobs SET phase=?, updated_at=? WHERE id=?`)
 const setParams = db.prepare(`UPDATE ai_jobs SET params=?, updated_at=? WHERE id=?`)
+const setQueuedParams = db.prepare(`UPDATE ai_jobs SET params=?, updated_at=? WHERE id=? AND status='queued'`)
 const deleteJob = db.prepare('DELETE FROM ai_jobs WHERE id=?')
 const cancelQueued = db.prepare(`DELETE FROM ai_jobs WHERE id=? AND status='queued'`)
 const ackDone = db.prepare(`
@@ -288,8 +292,65 @@ function subtitleSource(body) {
   return source
 }
 
+/**
+ * 成片运行入队：同一成片已有排队中的运行就合并范围（不重复排两次），否则新开一条。
+ * body: { scope?, stopAfter?, autoTimeline?, placement?, placeAt? }
+ */
+export function enqueueProductionRun(productionId, body = {}) {
+  const doc = loadProduction(productionId)
+  const entry = productionEntry(doc.skillId)
+  const params = productionJobParams(doc, entry, body)
+  const queued = queuedProductionJob(doc.id)
+  if (queued) {
+    const req = queued.params.request
+    req.scope = mergeScope(req.scope, params.request.scope)
+    // 有一方要完整生成，就不再停在分镜
+    req.stopAfter = req.stopAfter && params.request.stopAfter ? req.stopAfter : null
+    if (setQueuedParams.run(JSON.stringify(queued.params), Date.now(), queued.id).changes) return rowToJob(getJob.get(queued.id))
+  }
+  const id = `s_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`
+  const now = Date.now()
+  insertJob.run(id, 'skill', doc.title, JSON.stringify(params), null, now, now)
+  kickWorker()
+  return rowToJob(getJob.get(id))
+}
+
+function queuedProductionJob(productionId) {
+  return listQueued.all().map(rowToJob).find((j) => j.params.request?.productionId === productionId) ?? null
+}
+
+export function isJobRunning(jobId) {
+  return !!jobId && getJob.get(jobId)?.status === 'running'
+}
+
+/**
+ * 文档里的 status 由运行器写；worker 崩了或重启后它会停在 running。
+ * 这里按任务表纠正，并补上「有没有排队」。
+ */
+export function liveProductionStatus(view) {
+  const queued = queuedProductionJob(view.id)
+  const running = isJobRunning(view.lock?.jobId)
+  let status = view.status ?? null
+  if (status?.running && !running) status = { ...status, running: false, phase: '已中断' }
+  return { ...view, status, queuedJobId: queued?.id ?? null, runningJobId: running ? view.lock.jobId : null }
+}
+
+/** 停止成片：排队中的直接撤掉；在跑的通知运行器停（等当前步骤收尾） */
+export function cancelProductionRun(productionId, jobId) {
+  const queued = queuedProductionJob(productionId)
+  if (queued) cancelQueued.run(queued.id)
+  const running = isJobRunning(jobId)
+  if (running) requestCancel(productionId)
+  return { ok: true, dequeued: !!queued, stopping: running }
+}
+
 function enqueueSkillJob(body) {
   const entry = getSkillEntry(body.skillId)
+  // 成片类技能：老入口（/api/ai-jobs、CLI）也能用，口播即全文，先建文档再排一次完整运行
+  if (entry.pack.pipeline === 'production') {
+    const doc = createProduction({ skillId: entry.pack.id, script: body.prompt, params: body.params, title: body.title })
+    return enqueueProductionRun(doc.id, body)
+  }
   const source = entry.pack.pipeline === 'subtitle' ? subtitleSource(body) : null
   // 语音识别没有文案，任务标题用素材名；渲染端不读它
   const prompt = !source ? body.prompt : source.mode === 'asr' ? `语音识别 · ${source.name}` : source.text
@@ -371,12 +432,16 @@ const LANE_LIMIT = {
   h3: 1,
   // 技能渲染吃满 CPU，本地串行
   skill: 1,
+  // 成片一跑就是几十分钟，单独一条道，不堵字幕 / 配音这类短任务；内部渲染另有并发闸
+  production: 1,
 }
-const laneRunning = { cloud: 0, h3: 0, skill: 0 }
+const laneRunning = { cloud: 0, h3: 0, skill: 0, production: 0 }
 let staleCleared = false
 
 function laneOf(row) {
-  if (row.kind === 'skill') return 'skill'
+  if (row.kind === 'skill') {
+    try { return JSON.parse(row.params || '{}').request?.productionId ? 'production' : 'skill' } catch { return 'skill' }
+  }
   if (row.kind !== 'video') return 'cloud'
   try { return JSON.parse(row.params || '{}').engine === 'h3' ? 'h3' : 'cloud' } catch { return 'cloud' }
 }
@@ -411,6 +476,11 @@ async function runSkillJob(job) {
   params.duration = output.duration
   params.output = output
   setParams.run(JSON.stringify(params), Date.now(), job.id)
+  // 成片没有单个结果文件，产物全在成片文档里，编辑器按文档入轨
+  if (output.production) {
+    updateJob.run('done', output.phase || '完成', null, null, null, output.duration, null, Date.now(), job.id)
+    return
+  }
   const result = output.video ?? output.audio
   updateJob.run(
     'done', output.alpha ? '完成 · 透明通道' : '完成', path.basename(result), result, output.video ? 'video' : 'audio',

@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import {
-  type Camera3D, type Clip, type ClipMeta, type Keyframe, type EffectPreset, type ExportJob, type MediaItem, type ProjectSettings, type Sequence,
+  type Camera3D, type Clip, type ClipMeta, type Keyframe, type EffectPreset, type ExportJob, type MediaItem, type MediaFolder, type ProjectSettings, type Sequence,
   type Tool, type Track, type TrackKind, type Transform2D, type Transform3D, type TransitionType,
   defaultAudio, defaultColor, defaultScene3d, defaultText, defaultTransform, defaultTransform3d, uid,
 } from './types'
@@ -557,11 +557,45 @@ function defaultSettings(): ProjectSettings {
   }
 }
 
-function defaultFolders() {
+const SYSTEM_FOLDER_IDS = new Set(['f_all', 'f_broll', 'f_audio', 'f_sticker', 'f_web'])
+
+function defaultFolders(): MediaFolder[] {
   return [
-    { id: 'f_all', name: '全部' }, { id: 'f_broll', name: 'B-roll' },
-    { id: 'f_audio', name: '音频' }, { id: 'f_sticker', name: '贴纸' },
+    { id: 'f_all', name: '未分类', parentId: null },
+    { id: 'f_broll', name: 'B-roll', parentId: null },
+    { id: 'f_audio', name: '音频', parentId: null },
+    { id: 'f_sticker', name: '贴纸', parentId: null },
+    { id: 'f_web', name: '网页截图', parentId: null },
   ]
+}
+
+/** 打开工程时补齐系统文件夹、规范 parentId，避免旧工程缺字段 */
+function normalizeFolders(raw: unknown): MediaFolder[] {
+  const list = Array.isArray(raw) ? raw : []
+  const out: MediaFolder[] = []
+  const seen = new Set<string>()
+  for (const f of list) {
+    if (!f || typeof f !== 'object') continue
+    const id = String((f as MediaFolder).id || '')
+    const name = String((f as MediaFolder).name || '').trim().slice(0, 48)
+    if (!id || !name || seen.has(id)) continue
+    seen.add(id)
+    const parentId = (f as MediaFolder).parentId ? String((f as MediaFolder).parentId) : null
+    out.push({ id, name, parentId: parentId === id ? null : parentId })
+  }
+  for (const sys of defaultFolders()) {
+    if (!seen.has(sys.id)) out.push(sys)
+    else {
+      const hit = out.find((x) => x.id === sys.id)
+      if (hit && sys.id === 'f_all' && hit.name === '全部') hit.name = '未分类'
+    }
+  }
+  // 断掉指向不存在父级的引用
+  const ids = new Set(out.map((f) => f.id))
+  for (const f of out) {
+    if (f.parentId && !ids.has(f.parentId)) f.parentId = null
+  }
+  return out
 }
 
 type Snap = { sequences: Sequence[]; activeSeqId: string }
@@ -628,7 +662,7 @@ export type AppStore = {
     shortcuts: Record<string, string>
   }
   media: MediaItem[]
-  folders: { id: string; name: string }[]
+  folders: MediaFolder[]
   sequences: Sequence[]
   activeSeqId: string
   selectedClipIds: string[]
@@ -737,7 +771,17 @@ export type AppStore = {
   updateSelectedTransform3d: (p: Partial<Transform3D>, opts?: { record?: boolean }) => void
   exportProgramFrame: () => Promise<void>
   importMedia: (files: { name: string; url: string; path?: string; kind: MediaItem['kind']; duration: number; width?: number; height?: number; hasAudio?: boolean; alpha?: boolean; folderId?: string }[], opts?: { silent?: boolean }) => string[]
-  addFolder: (name: string) => void
+  /** 新建文件夹；parentId 为空则挂在根级。返回新 id */
+  addFolder: (name: string, parentId?: string | null) => string | null
+  renameFolder: (id: string, name: string) => void
+  /** 删除文件夹：子文件夹上移，素材归入其父级（或未分类） */
+  removeFolder: (id: string) => void
+  /** 把文件夹挪到新父级下（防环） */
+  moveFolder: (id: string, parentId: string | null) => void
+  /** 把素材移入指定文件夹 */
+  moveMedia: (ids: string[], folderId: string) => void
+  /** 确保某 id 的文件夹存在（AI / 网页截图等自动建夹用） */
+  ensureFolder: (id: string, name: string, parentId?: string | null) => void
   toggleFavorite: (id: string) => void
   removeMedia: (id: string) => void
   relinkMedia: (id: string, url: string, path?: string) => void
@@ -815,6 +859,8 @@ export type AppStore = {
     text?: Partial<NonNullable<Clip['text']>>
     transform?: Partial<Clip['transform']>
     source?: NonNullable<Clip['meta']>['source']
+    /** 自动入轨用：不记撤销、不改选中 */
+    quiet?: boolean
   }) => void
   /**
    * AI 任务流式产出的分层片段（时间为时间线绝对秒）：同一任务同 lane 的片段共用轨道，lane 小的在上层；
@@ -846,7 +892,7 @@ export type AppStore = {
   setWorkArea: (a: number, b: number) => void
   toggleTrack: (id: string, key: 'locked' | 'muted' | 'solo' | 'hidden') => void
   tidyTimeline: () => void
-  /** 一键调音：把片段响度统一到约 -16 LUFS（有选中则只调选中，否则整条时间线） */
+  /** 一键调音：把片段响度统一到约 -12 LUFS（短视频平台听感；有选中则只调选中，否则整条时间线） */
   levelAudioLoudness: () => Promise<void>
   /** 把选中图层合成透明底 PNG（水印设计器里的「从选中层合成」） */
   saveSelectionAsWatermark: (opts?: { placeOnTimeline?: boolean }) => Promise<void>
@@ -1624,7 +1670,7 @@ export const useApp = create<AppStore>((set, get) => {
           setClean({
             projectId: id, projectName: d.name, projectPath: d.path ?? null,
             settings: { ...defaultSettings(), ...(data.settings as ProjectSettings) }, media,
-            folders: data.folders ?? get().folders,
+            folders: normalizeFolders(data.folders ?? get().folders),
             sequences,
             activeSeqId,
             prefs: data.prefs ?? get().prefs, presets: data.presets ?? [], fonts: data.fonts ?? get().fonts,
@@ -1755,7 +1801,7 @@ export const useApp = create<AppStore>((set, get) => {
         projectId: id, projectName: name, projectPath: openedPath,
         settings: { ...defaultSettings(), ...(data.settings as ProjectSettings) },
         media,
-        folders: (data.folders as AppStore['folders']) ?? get().folders,
+        folders: normalizeFolders((data.folders as AppStore['folders']) ?? get().folders),
         sequences, activeSeqId: String(data.activeSeqId || sequences[0]?.id),
         prefs: (data.prefs as AppStore['prefs']) ?? get().prefs,
         presets: (data.presets as EffectPreset[]) ?? get().presets,
@@ -1924,7 +1970,72 @@ export const useApp = create<AppStore>((set, get) => {
       return items.map((i) => i.id)
     },
 
-    addFolder(name) { set({ folders: [...get().folders, { id: uid('folder'), name }] }) },
+    addFolder(name, parentId) {
+      const n = String(name ?? '').trim().slice(0, 48)
+      if (!n) return null
+      const folders = get().folders
+      const parent = parentId && folders.some((f) => f.id === parentId) ? parentId : null
+      const id = uid('folder')
+      set({ folders: [...folders, { id, name: n, parentId: parent }] })
+      queueMicrotask(() => get().saveProject({ silent: true }))
+      return id
+    },
+    renameFolder(id, name) {
+      const n = String(name ?? '').trim().slice(0, 48)
+      if (!n || !get().folders.some((f) => f.id === id)) return
+      set({ folders: get().folders.map((f) => (f.id === id ? { ...f, name: n } : f)) })
+      queueMicrotask(() => get().saveProject({ silent: true }))
+    },
+    removeFolder(id) {
+      if (SYSTEM_FOLDER_IDS.has(id)) { notify('系统文件夹不能删除'); return }
+      const folders = get().folders
+      const hit = folders.find((f) => f.id === id)
+      if (!hit) return
+      const parentId = hit.parentId ?? null
+      const fallback = parentId && folders.some((f) => f.id === parentId) ? parentId : 'f_all'
+      set({
+        folders: folders
+          .filter((f) => f.id !== id)
+          .map((f) => (f.parentId === id ? { ...f, parentId } : f)),
+        media: get().media.map((m) => (m.folderId === id ? { ...m, folderId: fallback } : m)),
+      })
+      notify(`已删除文件夹「${hit.name}」`)
+      queueMicrotask(() => get().saveProject({ silent: true }))
+    },
+    moveFolder(id, parentId) {
+      if (SYSTEM_FOLDER_IDS.has(id) && parentId) { notify('系统文件夹请留在根级'); return }
+      const folders = get().folders
+      if (!folders.some((f) => f.id === id)) return
+      if (parentId === id) return
+      if (parentId && !folders.some((f) => f.id === parentId)) return
+      // 防把父级塞进自己的子孙
+      if (parentId) {
+        let p: string | null | undefined = parentId
+        const byId = new Map(folders.map((f) => [f.id, f]))
+        while (p) {
+          if (p === id) { notify('不能移到自己的子文件夹里'); return }
+          p = byId.get(p)?.parentId ?? null
+        }
+      }
+      set({ folders: folders.map((f) => (f.id === id ? { ...f, parentId: parentId ?? null } : f)) })
+      queueMicrotask(() => get().saveProject({ silent: true }))
+    },
+    moveMedia(ids, folderId) {
+      if (!ids.length) return
+      if (!get().folders.some((f) => f.id === folderId)) return
+      const setIds = new Set(ids)
+      set({ media: get().media.map((m) => (setIds.has(m.id) ? { ...m, folderId } : m)) })
+      queueMicrotask(() => get().saveProject({ silent: true }))
+    },
+    ensureFolder(id, name, parentId) {
+      const folders = get().folders
+      const hit = folders.find((f) => f.id === id)
+      const n = String(name ?? '').trim().slice(0, 48) || id
+      const parent = parentId && folders.some((f) => f.id === parentId) ? parentId : null
+      if (!hit) set({ folders: [...folders, { id, name: n, parentId: parent }] })
+      else if (hit.name !== n) set({ folders: folders.map((f) => (f.id === id ? { ...f, name: n } : f)) })
+    },
+
     toggleFavorite(id) {
       set({ media: get().media.map((m) => (m.id === id ? { ...m, favorite: !m.favorite } : m)) })
     },
@@ -2863,10 +2974,10 @@ export const useApp = create<AppStore>((set, get) => {
       set({ selectedClipIds: [clip.id], propTab: 'text' })
     },
 
-    addSubtitleCues({ cues, linkTo, text, transform, source }) {
+    addSubtitleCues({ cues, linkTo, text, transform, source, quiet }) {
       const rows = cues.filter((q) => q.text.trim() && q.end > q.start)
       if (!rows.length) return
-      get().pushHistory()
+      if (!quiet) get().pushHistory()
       let sequence = get().seq()
       const anchor = linkTo ? sequence.clips.find((c) => c.id === linkTo) : undefined
       const first = Math.min(...rows.map((q) => q.start))
@@ -2894,7 +3005,7 @@ export const useApp = create<AppStore>((set, get) => {
         clips: [...sq.clips, ...subs],
         workOut: Math.max(sq.workOut, last),
       }))
-      set({ selectedClipIds: subs.map((c) => c.id) })
+      if (!quiet) set({ selectedClipIds: subs.map((c) => c.id) })
     },
 
     addAiLayerClips(items, { jobId, kind, linkTo, history = true }) {
@@ -3132,7 +3243,7 @@ export const useApp = create<AppStore>((set, get) => {
         return
       }
       notify(`正在分析 ${candidates.length} 段声音…`)
-      const TARGET_LUFS = -16
+      const TARGET_LUFS = -12
       const patches: Record<string, Partial<Clip>> = {}
       let okN = 0
       let skipN = 0
@@ -3146,7 +3257,7 @@ export const useApp = create<AppStore>((set, get) => {
           skipN++
           continue
         }
-        const gainDb = Math.max(-60, Math.min(12, Math.round((TARGET_LUFS - r.lufs) * 10) / 10))
+        const gainDb = Math.max(-60, Math.min(18, Math.round((TARGET_LUFS - r.lufs) * 10) / 10))
         patches[c.id] = {
           audio: { ...c.audio, gainDb },
           keyframes: c.keyframes.volume?.length

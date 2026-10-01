@@ -24,6 +24,10 @@ let mainWindow = null
 let timelineWindow = null
 /** @type {BrowserWindow | null} */
 let aiWindow = null
+/** @type {BrowserWindow | null} */
+let browserWindow = null
+/** @type {import('electron').WebContents | null} */
+let browserGuest = null
 /** @type {import('child_process').ChildProcess | null} */
 let aiServerProc = null
 /** @type {string} */
@@ -124,6 +128,7 @@ function createWindow() {
     mainWindow = null
     if (timelineWindow && !timelineWindow.isDestroyed()) timelineWindow.close()
     if (aiWindow && !aiWindow.isDestroyed()) aiWindow.close()
+    if (browserWindow && !browserWindow.isDestroyed()) browserWindow.close()
   })
   // 点节目区时仍把弹出时间轴压在主窗前面（不抢焦点）
   win.on('focus', () => {
@@ -145,6 +150,10 @@ function createWindow() {
       }
       if (pop === 'ai') {
         openAiWindow()
+        return { action: 'deny' }
+      }
+      if (pop === 'browser') {
+        openBrowserWindow()
         return { action: 'deny' }
       }
     } catch { /* */ }
@@ -302,6 +311,106 @@ function closeAiWindow() {
     return { ok: true }
   }
   return { ok: true, alreadyClosed: true }
+}
+
+async function openBrowserWindow(startUrl) {
+  if (browserWindow && !browserWindow.isDestroyed()) {
+    browserWindow.show()
+    browserWindow.focus()
+    if (startUrl && browserGuest && !browserGuest.isDestroyed()) {
+      try { browserGuest.loadURL(String(startUrl)) } catch { /* */ }
+    }
+    return { ok: true, reused: true }
+  }
+
+  const win = new BrowserWindow({
+    width: 1100,
+    height: 760,
+    minWidth: 640,
+    minHeight: 480,
+    title: 'TO DO · 浏览器',
+    backgroundColor: '#F2EEE8',
+    icon: appIconPath(),
+    webPreferences: {
+      preload: path.join(__dirname, 'browser-preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      webviewTag: true,
+      backgroundThrottling: false,
+    },
+    show: true,
+  })
+
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    const b = mainWindow.getBounds()
+    win.setPosition(Math.max(40, b.x + 80), Math.max(40, b.y + 40))
+  }
+
+  browserWindow = win
+  browserGuest = null
+  win.webContents.on('did-attach-webview', (_e, guest) => {
+    browserGuest = guest
+    guest.setWindowOpenHandler(({ url }) => {
+      try { guest.loadURL(url) } catch { /* */ }
+      return { action: 'deny' }
+    })
+    // 网页内按 F1 也进入截图（焦点常在 webview 里）
+    guest.on('before-input-event', (event, input) => {
+      if (input.type === 'keyDown' && input.key === 'F1') {
+        event.preventDefault()
+        if (browserWindow && !browserWindow.isDestroyed()) {
+          browserWindow.webContents.send('todo-browser:toggle-shot')
+        }
+      }
+    })
+  })
+  win.on('closed', () => {
+    browserWindow = null
+    browserGuest = null
+  })
+
+  const html = path.join(__dirname, 'browser.html')
+  await win.loadFile(html)
+  if (startUrl) {
+    win.webContents.once('did-finish-load', () => {
+      if (browserGuest && !browserGuest.isDestroyed()) {
+        try { browserGuest.loadURL(String(startUrl)) } catch { /* */ }
+      }
+    })
+  }
+  if (!win.isDestroyed()) {
+    win.show()
+    win.focus()
+  }
+  return { ok: true, reused: false }
+}
+
+function closeBrowserWindow() {
+  if (browserWindow && !browserWindow.isDestroyed()) {
+    browserWindow.close()
+    return { ok: true }
+  }
+  return { ok: true, alreadyClosed: true }
+}
+
+/** 把 dataURL 落到项目素材目录（与 save-media-asset 同路径规则） */
+function writeMediaAsset(name, dataUrl) {
+  const safe = path.basename(String(name || `asset_${Date.now()}.png`))
+  if (!safe) return { ok: false, error: 'invalid name' }
+  const b64 = String(dataUrl || '').replace(/^data:image\/\w+;base64,/, '')
+  if (!b64 || b64 === String(dataUrl || '')) return { ok: false, error: '无效图片数据' }
+  const destDir = currentProjectDir
+    ? path.join(currentProjectDir, PROJECT_SUBDIRS.ai)
+    : path.join(userDataPaths().cache, 'assets')
+  try {
+    fs.mkdirSync(destDir, { recursive: true })
+    const dest = path.join(destDir, safe)
+    fs.writeFileSync(dest, Buffer.from(b64, 'base64'))
+    return { ok: true, path: dest, url: pathToFileURL(dest).href, name: safe }
+  } catch (e) {
+    return { ok: false, error: e.message || String(e) }
+  }
 }
 
 /** 当前打开的项目文件夹（工程文件所在目录）；没开项目时导出 / 代理回落到 userData */
@@ -871,6 +980,87 @@ app.whenReady().then(async () => {
   ipcMain.handle('desktop:timeline-window-alive', () => ({ ok: timelineWindowAlive() }))
   ipcMain.handle('desktop:open-ai-window', async () => openAiWindow())
   ipcMain.handle('desktop:close-ai-window', () => closeAiWindow())
+  ipcMain.handle('desktop:open-browser-window', async (_e, payload = {}) => openBrowserWindow(payload?.url))
+  ipcMain.handle('desktop:close-browser-window', () => closeBrowserWindow())
+  ipcMain.handle('desktop:browser-detect-boxes', async () => {
+    if (!browserGuest || browserGuest.isDestroyed()) {
+      return { ok: false, boxes: [], error: '浏览器页面还没就绪' }
+    }
+    try {
+      const { buildDetectScript } = require('./browser-detect-inject.cjs')
+      const r = await browserGuest.executeJavaScript(buildDetectScript(), true)
+      if (!r || typeof r !== 'object') return { ok: false, boxes: [] }
+      return { ok: !!r.ok, boxes: Array.isArray(r.boxes) ? r.boxes : [], error: r.error }
+    } catch (e) {
+      return { ok: false, boxes: [], error: e.message || String(e) }
+    }
+  })
+  ipcMain.handle('desktop:browser-capture-import', async (_e, payload = {}) => {
+    if (!browserGuest || browserGuest.isDestroyed()) {
+      return { ok: false, error: '浏览器页面还没就绪' }
+    }
+    try {
+      const mode = String(payload?.mode || 'page')
+      const rectIn = payload?.rect && typeof payload.rect === 'object' ? payload.rect : null
+
+      // 先整页抓图，再按外壳坐标裁切（避开 capturePage(rect) 在部分 DPI 下偏移）
+      const full = await browserGuest.capturePage()
+      const fullSize = full.getSize()
+      if (!fullSize.width || !fullSize.height) return { ok: false, error: '截到的画面是空的' }
+
+      let img = full
+      let label = String(payload?.label || (mode === 'page' ? '整页' : '框选'))
+
+      if (rectIn && mode !== 'page') {
+        const viewW = Math.max(1, Number(payload?.viewWidth) || 0)
+        const viewH = Math.max(1, Number(payload?.viewHeight) || 0)
+        // 外壳 overlay 坐标是 CSS 像素；NativeImage 是物理像素
+        const scaleX = viewW > 0 ? fullSize.width / viewW : 1
+        const scaleY = viewH > 0 ? fullSize.height / viewH : scaleX
+        const crop = {
+          x: Math.max(0, Math.round((Number(rectIn.x) || 0) * scaleX)),
+          y: Math.max(0, Math.round((Number(rectIn.y) || 0) * scaleY)),
+          width: Math.max(1, Math.round((Number(rectIn.width) || 0) * scaleX)),
+          height: Math.max(1, Math.round((Number(rectIn.height) || 0) * scaleY)),
+        }
+        if (crop.x + crop.width > fullSize.width) crop.width = fullSize.width - crop.x
+        if (crop.y + crop.height > fullSize.height) crop.height = fullSize.height - crop.y
+        if (crop.width < 2 || crop.height < 2) return { ok: false, error: '选区太小' }
+        img = full.crop(crop)
+      }
+
+      const size = img.getSize()
+      if (!size.width || !size.height) return { ok: false, error: '截到的区域是空的' }
+      const dataUrl = img.toDataURL()
+
+      const host = (() => {
+        try { return new URL(String(payload?.pageUrl || '')).hostname.replace(/^www\./, '') || 'web' }
+        catch { return 'web' }
+      })()
+      const stamp = new Date()
+      const pad = (n) => String(n).padStart(2, '0')
+      const tag = label.replace(/[\\/:*?"<>|]+/g, '_').slice(0, 24) || '截图'
+      const name = `网页_${host}_${tag}_${stamp.getFullYear()}${pad(stamp.getMonth() + 1)}${pad(stamp.getDate())}_${pad(stamp.getHours())}${pad(stamp.getMinutes())}${pad(stamp.getSeconds())}.png`
+      const saved = writeMediaAsset(name, dataUrl)
+      if (!saved.ok) return saved
+      const shot = {
+        name: saved.name,
+        path: saved.path,
+        url: saved.url,
+        width: size.width,
+        height: size.height,
+        title: String(payload?.title || ''),
+        pageUrl: String(payload?.pageUrl || ''),
+        label: tag,
+      }
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('desktop:browser-shot', shot)
+      }
+      return { ok: true, ...shot }
+    } catch (e) {
+      return { ok: false, error: e.message || String(e) }
+    }
+  })
 
   const { extractWaveformPeaks, extractWaveformPeaksFromBuffer } = require('./waveformPeaks.cjs')
   ipcMain.handle('desktop:waveform-peaks', async (_e, payload = {}) => {
@@ -890,22 +1080,7 @@ app.whenReady().then(async () => {
 
   /** 把 dataURL 图片落到当前项目 ai-generated/（无项目则 userData/cache），作透明水印等素材 */
   ipcMain.handle('desktop:save-media-asset', async (_e, payload = {}) => {
-    const name = path.basename(String(payload?.name || `asset_${Date.now()}.png`))
-    if (!name || name !== String(payload?.name || name)) return { ok: false, error: 'invalid name' }
-    const dataUrl = String(payload?.dataUrl || '')
-    const b64 = dataUrl.replace(/^data:image\/\w+;base64,/, '')
-    if (!b64 || b64 === dataUrl) return { ok: false, error: '无效图片数据' }
-    const destDir = currentProjectDir
-      ? path.join(currentProjectDir, PROJECT_SUBDIRS.ai)
-      : path.join(userDataPaths().cache, 'assets')
-    try {
-      fs.mkdirSync(destDir, { recursive: true })
-      const dest = path.join(destDir, name)
-      fs.writeFileSync(dest, Buffer.from(b64, 'base64'))
-      return { ok: true, path: dest, url: pathToFileURL(dest).href }
-    } catch (e) {
-      return { ok: false, error: e.message || String(e) }
-    }
+    return writeMediaAsset(String(payload?.name || `asset_${Date.now()}.png`), String(payload?.dataUrl || ''))
   })
 
   const douyin = require('./douyinPublish.cjs')
@@ -917,7 +1092,18 @@ app.whenReady().then(async () => {
   ipcMain.handle('desktop:douyin-stage-asset', (_e, payload = {}) => douyin.stageAsset(payload || {}))
   ipcMain.handle('desktop:douyin-attach-cover', (_e, payload = {}) => douyin.attachCover(payload || {}))
   ipcMain.handle('desktop:douyin-save-meta', (_e, payload = {}) => douyin.saveAssetMeta(payload || {}))
-  ipcMain.handle('desktop:douyin-publish', (_e, payload = {}) => douyin.runPublish(payload || {}))
+  ipcMain.handle('desktop:douyin-publish', async (_e, payload = {}) => {
+    const body = payload || {}
+    const action = String(body.action || 'phones')
+    if (action === 'phones' || action === 'status' || action === 'restart-adb') {
+      return douyin.listPhonesWithHint({
+        ...body,
+        action: 'phones',
+        restartAdb: action === 'restart-adb' || !!body.restartAdb,
+      })
+    }
+    return douyin.runPublish(body)
+  })
   ipcMain.handle('desktop:pick-image', async () => {
     const { canceled, filePaths } = await dialog.showOpenDialog({
       title: '选择封面图（须生图自带大标题，禁止后期贴字）',

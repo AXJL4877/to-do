@@ -167,6 +167,19 @@ export type DesktopApi = {
   openAiWindow?: () => Promise<{ ok: boolean; reused?: boolean }>
   closeAiWindow?: () => Promise<{ ok: boolean; alreadyClosed?: boolean }>
   onAiWindowClosed?: (cb: () => void) => () => void
+  /** 打开内置浏览器；url 可选 */
+  openBrowserWindow?: (url?: string) => Promise<{ ok: boolean; reused?: boolean }>
+  closeBrowserWindow?: () => Promise<{ ok: boolean; alreadyClosed?: boolean }>
+  /** 浏览器截图已落盘，主窗应 importMedia */
+  onBrowserShot?: (cb: (shot: {
+    name: string
+    path: string
+    url: string
+    width: number
+    height: number
+    title?: string
+    pageUrl?: string
+  }) => void) => () => void
   postStoreSync?: (msg: unknown) => void
   onStoreSync?: (cb: (msg: unknown) => void) => () => void
   /** 跨窗拖素材：源窗 dragend 时问主进程光标是否在时间轴窗上 */
@@ -199,6 +212,7 @@ export type DesktopApi = {
     ok: boolean
     path?: string
     url?: string
+    name?: string
     error?: string
   }>
   pickImageFile?: () => Promise<{ ok: boolean; canceled?: boolean; path?: string; url?: string }>
@@ -280,9 +294,10 @@ export type DesktopApi = {
     root?: string
   }) => Promise<{ ok: boolean; slug?: string; meta?: unknown; error?: string }>
   douyinPublish?: (payload: {
-    action: 'phones' | 'status' | 'stage' | 'fill' | 'push'
+    action: 'phones' | 'status' | 'stage' | 'fill' | 'push' | 'restart-adb'
     serial?: string
     root?: string
+    restartAdb?: boolean
   }) => Promise<{ ok: boolean; error?: string; phones?: Array<{ serial?: string; state?: string; model?: string; product?: string; douyin?: boolean }>; [k: string]: unknown }>
   /** B2 native program preview */
   previewInit?: (opts?: { fps?: number; budgetMB?: number; adapterLuid?: string | null }) => Promise<{ ok: boolean; error?: string; pid?: number }>

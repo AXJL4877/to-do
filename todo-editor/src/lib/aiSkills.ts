@@ -7,7 +7,7 @@ export type SkillParam =
   | (SkillParamBase & { type: 'select'; default: string; options: SkillOption[] })
   | (SkillParamBase & { type: 'number'; default: number; min: number; max: number; step: number; unit?: string })
   | (SkillParamBase & { type: 'text'; default: string; pattern: string; maxLength: number; placeholder?: string })
-export type SkillGroup = 'scene' | 'voice' | 'text' | 'timing' | 'stroke' | 'output'
+export type SkillGroup = 'story' | 'scene' | 'voice' | 'text' | 'timing' | 'stroke' | 'output'
 export type SkillParams = Record<string, string | number>
 
 export type SkillPack = {
@@ -23,8 +23,11 @@ export type SkillPack = {
   params: SkillParam[]
   /** 侧栏快捷露出的参数 id；null 时取前几个可见参数 */
   quick: string[] | null
-  /** elements = 规划 → 元素生图 → 渲染；tts = 文案配音；subtitle = 按一条配音的时间戳出字幕；narrated = 口播 → 配音 → 分板对时书写 */
-  pipeline: 'elements' | 'tts' | 'subtitle' | 'narrated'
+  /**
+   * elements = 规划 → 元素生图 → 渲染；tts = 文案配音；subtitle = 按一条配音的时间戳出字幕；
+   * narrated = 口播 → 配音 → 分板对时书写（2.x 老任务）；production = 长口播成片，分层生成、可局部重做
+   */
+  pipeline: 'elements' | 'tts' | 'subtitle' | 'narrated' | 'production'
   planner: { maxElements: number; countParam: string | null } | null
 }
 
@@ -89,7 +92,7 @@ export type SkillJob<O = SkillOutput> = {
   phase?: string | null
 }
 
-export const GROUP_LABELS: Record<SkillGroup, string> = { scene: '画面', voice: '音色', text: '字幕', timing: '节奏', stroke: '笔触', output: '输出' }
+export const GROUP_LABELS: Record<SkillGroup, string> = { story: '分段与分镜', scene: '画面', voice: '音色', text: '字幕', timing: '节奏', stroke: '笔触', output: '输出' }
 
 /** 中文口播约每秒 4.5 字，只用于预估 */
 export const speechSeconds = (text: string) => text.replace(/[\p{P}\s]/gu, '').length / 4.5

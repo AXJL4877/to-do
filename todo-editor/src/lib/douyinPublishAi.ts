@@ -1,8 +1,12 @@
 /**
  * 抖音发布：内置 AI 写文案 + 生竖封面（标题画进画面）。
+ * 文案/封面以「本工程口播备忘录 + 项目名」为主题来源；
+ * 不跟最新一次成片任务走（那次可能只是短修改）。
  */
 import { aiFetch, aiUrl } from './aiFetch'
 import { desktop } from './desktop'
+import { getProduction } from './production'
+import { useApp } from '../store'
 
 export type DouyinMeta = {
   title: string
@@ -10,10 +14,108 @@ export type DouyinMeta = {
   tags: string[]
 }
 
+export type PublishBrief = {
+  title: string
+  script: string
+  /** script=工程口播；production=工程无口播时才用成片长稿兜底；project=仅项目名 */
+  source: 'production' | 'script' | 'project'
+  productionId?: string
+  styleHint: string
+}
+
 async function readJson(res: Response) {
   const j = await res.json().catch(() => ({})) as { ok?: boolean; error?: string; [k: string]: unknown }
   if (!res.ok || j.ok === false) throw new Error(String(j.error || res.statusText || '请求失败'))
   return j
+}
+
+const STYLE_HINT = '财经黑板粉笔风，深色黑板，粉笔白字与橙色强调，竖版封面构图'
+
+function substantial(text: string) {
+  const t = text.replace(/\s+/g, '').length
+  return t >= 40
+}
+
+/** 工程无口播时：在本工程成片里挑「稿子最长」的一条做兜底（不是最近更新） */
+async function longestProjectProduction(ids: string[]) {
+  if (!ids.length) return null
+  const q = `?ids=${ids.map(encodeURIComponent).join(',')}`
+  const data = await aiFetch(`/api/ai-productions${q}`).then((r) => r.json()).catch(() => null) as
+    | { ok?: boolean; items?: { id: string; title: string; updatedAt: number }[] }
+    | null
+  const items = Array.isArray(data?.items) ? data!.items! : []
+  if (!items.length) return null
+  let best: { id: string; title: string; script: string; len: number } | null = null
+  // 最多看 8 条，避免一次拉太多
+  for (const it of items.slice(0, 8)) {
+    try {
+      const p = await getProduction(it.id)
+      const script = String(p.script || p.segments?.map((s) => s.text).join('\n\n') || '').trim()
+      const len = script.replace(/\s+/g, '').length
+      if (!best || len > best.len) {
+        best = { id: p.id, title: String(p.title || '').trim(), script, len }
+      }
+    } catch { /* skip */ }
+  }
+  return best && best.len > 0 ? best : null
+}
+
+/**
+ * 发布用标题与文稿：
+ * 1) 优先工程口播备忘录 + 项目名（主题）
+ * 2) 口播太短/为空时，才用本工程「稿子最长」的成片兜底
+ * 绝不默认用「最近一次」成片任务（可能只是短修改）
+ */
+export async function resolvePublishBrief(opts?: {
+  projectName?: string
+  script?: string
+}): Promise<PublishBrief> {
+  const st = useApp.getState()
+  const projectName = (opts?.projectName ?? st.projectName ?? '').trim()
+  const memo = (opts?.script ?? st.script ?? '').trim()
+
+  if (substantial(memo)) {
+    return {
+      title: (projectName || memo.split(/\n+/).map((l) => l.trim()).find(Boolean) || '成片').slice(0, 22),
+      script: memo,
+      source: 'script',
+      styleHint: STYLE_HINT,
+    }
+  }
+
+  try {
+    const ids = Object.keys(st.settings.aiProductions ?? {})
+    const best = await longestProjectProduction(ids)
+    if (best && substantial(best.script)) {
+      // 有工程口播碎片就拼在前面，主题仍用项目名
+      const script = memo && memo !== best.script ? `${memo}\n\n${best.script}` : best.script
+      return {
+        title: (projectName || best.title || '成片').slice(0, 22),
+        script,
+        source: memo ? 'script' : 'production',
+        productionId: best.id,
+        styleHint: STYLE_HINT,
+      }
+    }
+  } catch {
+    /* 成片服务不可用时退回备忘录 / 项目名 */
+  }
+
+  if (memo) {
+    return {
+      title: (projectName || memo.split(/\n+/).map((l) => l.trim()).find(Boolean) || '成片').slice(0, 22),
+      script: memo,
+      source: 'script',
+      styleHint: STYLE_HINT,
+    }
+  }
+
+  return {
+    title: projectName || '成片',
+    script: '',
+    source: 'project',
+    styleHint: STYLE_HINT,
+  }
 }
 
 /** AI 写标题 / 简介 / 标签 */
@@ -53,7 +155,7 @@ async function pollJob(id: string, onProgress?: (job: AiJob) => void, timeoutMs 
     onProgress?.(job)
     if (job.status === 'done') return job
     if (job.status === 'error') throw new Error(job.error || '封面生成失败')
-    await new Promise((r) => setTimeout(r, 1200))
+    await new Promise((r) => setTimeout(r, 800))
   }
   throw new Error('封面生成超时')
 }
@@ -76,11 +178,12 @@ export async function downloadAiImageToDisk(resultUrl: string, fileName: string)
   return saved.path
 }
 
-/** AI 生成 cover-3x4（标题画进画面），返回本机 path */
+/** AI 生成 cover-3x4（标题画进画面），默认 1K 更快；需要更清可传 quality:'2K' */
 export async function generateDouyinCover(input: {
   title: string
   styleHint?: string
   imageDataUrl?: string
+  quality?: '1K' | '2K'
   onProgress?: (msg: string) => void
 }): Promise<{ path: string; jobId: string; previewUrl: string }> {
   input.onProgress?.('正在提交封面生图…')
@@ -91,7 +194,7 @@ export async function generateDouyinCover(input: {
       title: input.title,
       styleHint: input.styleHint,
       imageDataUrl: input.imageDataUrl,
-      quality: '2K',
+      quality: input.quality === '2K' ? '2K' : '1K',
     }),
   })
   const j = await readJson(res)
@@ -105,4 +208,30 @@ export async function generateDouyinCover(input: {
   input.onProgress?.('正在保存封面…')
   const path = await downloadAiImageToDisk(resultUrl, `cover-3x4_${done.id}.png`)
   return { path, jobId: done.id, previewUrl: aiUrl(resultUrl) }
+}
+
+/** 一键：文案与封面并行；封面标题优先用项目主题，文稿用工程口播 */
+export async function generateMetaAndCover(input: {
+  projectName?: string
+  script?: string
+  coverTitle?: string
+  styleHint?: string
+  onProgress?: (msg: string) => void
+}): Promise<{ meta: DouyinMeta; cover: { path: string; jobId: string; previewUrl: string } }> {
+  const coverTitle = (input.coverTitle || input.projectName || '成片').trim().slice(0, 22)
+  input.onProgress?.('文案与封面并行生成中…')
+  const [meta, cover] = await Promise.all([
+    fetchDouyinMeta({
+      projectName: input.projectName || coverTitle,
+      script: input.script,
+      hint: coverTitle !== input.projectName ? coverTitle : undefined,
+    }),
+    generateDouyinCover({
+      title: coverTitle,
+      styleHint: input.styleHint,
+      quality: '1K',
+      onProgress: (m) => input.onProgress?.(m),
+    }),
+  ])
+  return { meta, cover }
 }
