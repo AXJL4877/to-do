@@ -11,6 +11,8 @@ import {
 import { isNarratedJob, narratedStage, type NarratedJob } from '../lib/narratedTimeline'
 import { createProduction, listProductions, type ProductionSummary } from '../lib/production'
 import { forgetProduction, registerProduction } from '../lib/productionTimeline'
+import { DynamicTextPanel } from './DynamicTextPanel'
+import { DYNAMIC_TEXT_PACK } from '../lib/dynamicTextPack'
 import { ProductionStudio } from './ProductionStudio'
 import { PlacementControl, SkillParamControl, SkillStudio } from './SkillStudio'
 import { CreativeProgress, progressThemeForJob } from './CreativeProgress'
@@ -157,7 +159,9 @@ const ProductionCard = memo(function ProductionCard({ p, onOpen, onRemove }: { p
 export function SkillsPanel() {
   const [packs, setPacks] = useState<SkillPack[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const selectedDynamicClip = useApp(s => s.sequences.find(q => q.id === s.activeSeqId)?.clips.find(c => c.id === s.selectedClipIds[0] && c.text?.fancy?.dynamic)?.id)
+  const [selectedId, setSelectedId] = useState<string | null>(() => selectedDynamicClip ? DYNAMIC_TEXT_PACK.id : null)
+  useEffect(() => { if (selectedDynamicClip) setSelectedId(DYNAMIC_TEXT_PACK.id) }, [selectedDynamicClip])
   const [drafts, setDrafts] = useState<Record<string, Draft>>({})
   const [autoTimeline, setAutoTimeline] = useState(true)
   const [placement, setPlacementState] = useState<TimelinePlacement>(loadPlacement)
@@ -305,18 +309,19 @@ export function SkillsPanel() {
     void refreshJobs()
   }, [refreshJobs])
 
-  if (!packs || !packs.length) {
-    return (
-      <div className="py-8 text-center text-[12px]" style={{ color: loadError ? 'var(--error)' : 'var(--text-muted)' }} data-testid="skill-panel-loading">
-        {loadError || <Loader2 size={16} className="animate-spin inline" />}
-      </div>
-    )
-  }
+  if (selectedId === DYNAMIC_TEXT_PACK.id) return <DynamicTextPanel onBack={() => select(null)} />
 
   if (!pack) {
     return (
       <div className="flex flex-col gap-1.5 p-1" data-testid="skill-picker">
-        {packs.map((p) => {
+        <button type="button" className="skill-card" data-testid="skill-pick-jizura-dynamic-text" onClick={() => select(DYNAMIC_TEXT_PACK.id)}>
+          <span className="skill-card-thumb"><span style={{ fontSize: 22, fontWeight: 800, color: 'var(--accent)' }}>字</span></span>
+          <span className="min-w-0 flex-1 flex flex-col gap-0.5"><span className="skill-card-name">{DYNAMIC_TEXT_PACK.name}</span><p className="skill-card-desc">{DYNAMIC_TEXT_PACK.description}</p></span>
+          <ChevronRight size={14} />
+        </button>
+        {!packs && !loadError && <p className="editor-hint">正在加载其他拓展…</p>}
+        {loadError && <p className="editor-hint">其他拓展暂不可用：{loadError}</p>}
+        {(packs ?? []).map((p) => {
           const running = jobs.filter((j) => jobSkillId(j) === p.id && (j.status === 'queued' || j.status === 'running')).length
           return (
             <button key={p.id} type="button" className="skill-card" title={p.description} data-testid={`skill-pick-${p.id}`} onClick={() => select(p.id)}>
@@ -417,7 +422,7 @@ export function SkillsPanel() {
         </div>
       )}
       {openProduction && (
-        <ProductionStudio key={openProduction} id={openProduction} pack={packs.find((x) => x.id === productions.find((p) => p.id === openProduction)?.skillId) ?? pack} onClose={() => setOpenProduction(null)} />
+        <ProductionStudio key={openProduction} id={openProduction} pack={(packs ?? []).find((x) => x.id === productions.find((p) => p.id === openProduction)?.skillId) ?? pack} onClose={() => setOpenProduction(null)} />
       )}
 
       {packJobs.length > 0 && (

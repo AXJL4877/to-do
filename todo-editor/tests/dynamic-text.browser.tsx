@@ -4,6 +4,8 @@ import { flushSync } from 'react-dom'
 import { FANCY_PRESETS, FANCY_CATEGORIES, clonePresetFancy } from '../src/lib/fancyText'
 import { drawTextClip } from '../src/lib/monitorDraw'
 import { FancyTextPanel } from '../src/components/FancyTextPanel'
+import { SkillsPanel } from '../src/components/SkillsPanel'
+import { DYNAMIC_TEXT_PRESETS } from '../src/lib/dynamicTextPack'
 import { useApp } from '../src/store'
 import { defaultText, type Clip, type TextStyle } from '../src/types'
 import { progressThemeForJob } from '../src/components/CreativeProgress'
@@ -15,7 +17,7 @@ const test = (name: string, fn: () => void | Promise<void>) => {
   chain = chain.then(async () => { try { await fn(); results.push({ name, ok: true }) }
     catch (e) { results.push({ name, ok: false, error: String(e) }) } })
 }
-const presets = () => FANCY_PRESETS.filter(p => p.category === 'dynamic')
+const presets = () => DYNAMIC_TEXT_PRESETS
 const textFor = (i = 0, content = '把灵感 写下来'): TextStyle => ({ ...defaultText(), content,
   fontFamily: 'Microsoft YaHei', fontSize: 96, animIn: 'none', animOut: 'none', fancy: clonePresetFancy(presets()[i]) })
 function render(text: TextStyle, time = 1.2, w = 640, h = 360, duration = 3, target?: HTMLCanvasElement) {
@@ -32,8 +34,9 @@ const same = (a: Uint8ClampedArray, b: Uint8ClampedArray) => a.length === b.leng
 const visible = (d: Uint8ClampedArray) => d.filter((_, i) => i % 4 === 3 && d[i] > 0).length
 const frames = () => new Promise<void>(r => requestAnimationFrame(() => requestAnimationFrame(() => r())))
 
-test('six editable dynamic presets are registered alongside chalk', () => {
-  check(FANCY_CATEGORIES.some(c => c.id === 'dynamic'), 'dynamic category is missing')
+test('dynamic templates belong to a separate extension, outside the font library', () => {
+  check(!FANCY_CATEGORIES.some(c => c.id === 'dynamic'), 'dynamic category remains in font library')
+  check(!FANCY_PRESETS.some(p => p.fancy.dynamic), 'dynamic templates remain in font library')
   check(presets().length === 6, 'expected six dynamic presets')
   check(FANCY_PRESETS.some(p => p.category === 'chalk'), 'chalk must remain available')
 })
@@ -116,7 +119,10 @@ test('library creates editable dynamic clip; edits, undo and JSON roundtrip reta
   const root = createRoot(host)
   try {
     flushSync(() => root.render(<FancyTextPanel />))
-    flushSync(() => host.querySelector<HTMLButtonElement>('[data-testid="fancy-cat-dynamic"]')!.click())
+    check(!host.querySelector('[data-testid="fancy-cat-dynamic"]'), 'font library still exposes dynamic entry')
+    flushSync(() => root.render(<SkillsPanel />))
+    flushSync(() => host.querySelector<HTMLButtonElement>('[data-testid="skill-pick-jizura-dynamic-text"]')!.click())
+    check(host.querySelectorAll('[data-testid^="fancy-preset-dynamic-"]').length === 6, 'extension must show all six templates')
     await frames()
     check(host.querySelector('[data-testid="dynamic-motion"]'), 'dynamic parameters missing')
     flushSync(() => host.querySelector<HTMLButtonElement>('[data-testid="fancy-play"]')!.click())
@@ -145,6 +151,14 @@ test('library creates editable dynamic clip; edits, undo and JSON roundtrip reta
     check(reopened.text.content === '修改之后' && reopened.text.fancy.dynamic.seed === (shuffled.text!.fancy as any).dynamic.seed, 'save data changed')
     flushSync(() => useApp.getState().undo())
     check(useApp.getState().sequences.find(s => s.id === seq.id)!.clips.find(c => c.id === clip.id)!.text!.content === original, 'undo fails')
+    flushSync(() => host.querySelector<HTMLButtonElement>('[data-testid="dynamic-pack-back"]')!.click())
+    check(host.querySelector('[data-testid="skill-picker"]'), 'extension cannot return to pack list')
+    flushSync(() => host.querySelector<HTMLButtonElement>('[data-testid="skill-pick-jizura-dynamic-text"]')!.click())
+    check(host.querySelector<HTMLTextAreaElement>('[data-testid="fancy-content"]')!.value === original, 'reopened extension loses selected clip')
+    flushSync(() => root.render(<FancyTextPanel />))
+    check(!host.querySelector('[data-testid="dynamic-controls"]'), 'font editor must not edit dynamic clips')
+    flushSync(() => root.render(<SkillsPanel />))
+    check(host.querySelector('[data-testid="dynamic-text-extension"]'), 'saved dynamic selection must reopen the extension')
   } finally { root.unmount(); host.remove() }
 })
 

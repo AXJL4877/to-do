@@ -1,6 +1,5 @@
 import { drawChalkText } from './chalkText'
 import type { FancyText } from '../types'
-import { DYNAMIC_PRESETS } from './dynamicText'
 
 /* ---------------- 字体 ---------------- */
 
@@ -258,7 +257,6 @@ export type FancyPreset = { id: string; name: string; category?: FancyCategory; 
 
 export const FANCY_CATEGORIES: { id: FancyCategory; name: string; desc?: string }[] = [
   { id: 'chalk', name: '粉笔字', desc: '逐字书写动画' },
-  { id: 'dynamic', name: '动态花字', desc: '排版、弹入与逐词运动' },
 ]
 
 export const FANCY_PRESETS: FancyPreset[] = [...[
@@ -269,9 +267,6 @@ export const FANCY_PRESETS: FancyPreset[] = [...[
 ].map(([id, name, color]) => ({ id, name, category: 'chalk', fonts: ['KaiTi', 'STKaiti', 'STXingkai'],
   fancy: { fontWeight: 400, fill: [color], fillAngle: 90, strokes: [],
     chalk: { duration: 2, grain: 0.55, hand: false } },
-})), ...DYNAMIC_PRESETS.map(p => ({ id: p.id, name: p.name, category: 'dynamic', fonts: ['Microsoft YaHei', 'SimHei'],
-  fancy: { fontWeight: 700, fill: ['#f8f5e9'], fillAngle: 90, strokes: [],
-    dynamic: { version: 1 as const, engine: 'jizura' as const, presetId: p.id, seed: 20261002, duration: 3, motion: 0.7, accent: '#ffb454' } },
 }))]
 
 export function presetCategory(id: string | undefined): FancyCategory {

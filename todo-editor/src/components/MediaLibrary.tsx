@@ -29,7 +29,7 @@ type LibTab = (typeof PRIMARY)[number] | (typeof SECONDARY)[number]
 
 const LABELS: Record<LibTab, string> = {
   media: '媒体', audio: '音频', text: '文字', transition: '转场', effect: '特效',
-  filter: '滤镜', preset: '动效预设', font: '字体', recent: '最近', ai: 'AI+', skill: 'Skill', voice: '配音',
+  filter: '滤镜', preset: '动效预设', font: '字体', recent: '最近', ai: 'AI+', skill: '拓展', voice: '配音',
 }
 
 const ICONS: Record<LibTab, LucideIcon> = {

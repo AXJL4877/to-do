@@ -37,7 +37,7 @@ export function Inspector({ onClose }: { onClose: () => void }) {
         <textarea aria-label="属性栏文字内容" className="input" rows={3} value={clip.text.content} onChange={e => updateText({ content: e.target.value })} />
         <NumInput label="字号" value={keyed ? sampleKeyframes(clip.keyframes.fontSize, Math.max(0, playhead - clip.start), clip.text.fontSize) : clip.text.fontSize} min={12} max={300} defaultValue={48} onChange={fontSize => keyed ? useApp.getState().setDynamicAtPlayhead('fontSize', fontSize) : updateText({ fontSize })} />
         <div className="editor-actions">{(['left', 'center', 'right'] as const).map((align, i) => <button key={align} type="button" className={`btn ${clip.text!.align === align ? 'btn-primary' : 'btn-ghost'}`} onClick={() => updateText({ align })}>{['左对齐', '居中', '右对齐'][i]}</button>)}</div>
-        <button type="button" className="btn btn-ghost" onClick={() => useApp.getState().setLibraryTab('text')}>编辑粉笔花字 →</button>
+        <button type="button" className="btn btn-ghost" onClick={() => useApp.getState().setLibraryTab(clip.text?.fancy?.dynamic ? 'skill' : 'text')}>{clip.text.fancy?.dynamic ? '编辑动态文字拓展 →' : '编辑粉笔花字 →'}</button>
       </PropSection>}
       <button type="button" className="inspector-more" onClick={() => setAdvanced(v => !v)}>{advanced ? <ChevronDown size={14} /> : <ChevronRight size={14} />}调色与音频</button>
       {advanced && <><PropSection title="调色">
