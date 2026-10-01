@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { useApp } from '../store'
-import { wheelZoom } from '../lib/timelineZoom'
+import { wheelZoom, TIMELINE_SPAN_SEC } from '../lib/timelineZoom'
 import { setLivePlayhead } from '../lib/livePlayhead'
 import { broadcastPlayheadSeek } from '../lib/storeSync'
 import { PrKeyframeRow, livePropValue } from './PrKeyframeRow'
@@ -74,7 +74,7 @@ export function KeyframeEditor({ scrollRef }: Props) {
   const clip = seq.clips.find((c) => selectedClipIds.includes(c.id))
 
   const duration = useMemo(
-    () => Math.max(seq.workOut, ...seq.clips.map((c) => c.start + c.duration), 12),
+    () => Math.max(TIMELINE_SPAN_SEC, seq.workOut, ...seq.clips.map((c) => c.start + c.duration), 12),
     [seq],
   )
   const [bodyW, setBodyW] = useState(0)

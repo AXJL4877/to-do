@@ -1,9 +1,15 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron')
 
+// sandbox:true 下 preload 不能 require('fs')；得意黑路径由主进程解析
+const smileyFontUrl = (() => {
+  try { return ipcRenderer.sendSync('desktop:smiley-font-url') || '' } catch { return '' }
+})()
+
 /** 最小桌面 API：文件读写与路径，不暴露 Node */
 contextBridge.exposeInMainWorld('todoDesktop', {
   isDesktop: true,
   platform: process.platform,
+  smileyFontUrl: () => smileyFontUrl,
   systemMemoryMb: () => {
     try { return Math.round(process.getSystemMemoryInfo().total / 1024) }
     catch { return 0 }
@@ -15,6 +21,7 @@ contextBridge.exposeInMainWorld('todoDesktop', {
   openProjectFile: (filePath) => ipcRenderer.invoke('desktop:open-project', { filePath }),
   recentProjects: () => ipcRenderer.invoke('desktop:recent-projects'),
   removeRecentProject: (filePath) => ipcRenderer.invoke('desktop:remove-recent-project', filePath),
+  discoverProjects: () => ipcRenderer.invoke('desktop:discover-projects'),
   createProjectFolder: (parentDir, name) => ipcRenderer.invoke('desktop:create-project', { parentDir, name }),
   pickDirectory: (opts) => ipcRenderer.invoke('desktop:pick-directory', opts || {}),
   setProject: (filePath) => ipcRenderer.invoke('desktop:set-project', filePath ?? null),
@@ -130,3 +137,7 @@ contextBridge.exposeInMainWorld('todoDesktop', {
     return () => ipcRenderer.removeListener('preview:crashed', handler)
   },
 })
+
+if (smileyFontUrl) {
+  contextBridge.exposeInMainWorld('__TODO_SMILEY_FONT_URL__', smileyFontUrl)
+}

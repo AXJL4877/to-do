@@ -9,6 +9,7 @@ import {
   type WatermarkDesign,
   type WatermarkPlacement,
 } from '../lib/watermarkDesign'
+import { ensureSmileyFont, watermarkFontChoices } from '../lib/textFonts'
 
 const PLACEMENTS: { id: WatermarkPlacement; label: string }[] = [
   { id: 'bottom', label: '底部通栏' },
@@ -34,7 +35,13 @@ export function WatermarkDesigner() {
   const [design, setDesign] = useState<WatermarkDesign>(() => loadWatermarkDesign())
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [fontReady, setFontReady] = useState(0)
   const previewRef = useRef<HTMLCanvasElement>(null)
+  const fonts = useMemo(() => watermarkFontChoices(), [fontReady])
+
+  useEffect(() => {
+    void ensureSmileyFont().then(() => setFontReady((n) => n + 1))
+  }, [])
 
   const preview = useMemo(() => {
     try {
@@ -42,7 +49,7 @@ export function WatermarkDesigner() {
     } catch (e) {
       return { error: e instanceof Error ? e.message : String(e) }
     }
-  }, [design, settings.width, settings.height])
+  }, [design, settings.width, settings.height, fontReady])
 
   useEffect(() => {
     const canvas = previewRef.current
@@ -114,6 +121,24 @@ export function WatermarkDesigner() {
           value={linesText}
           onChange={(e) => patch({ lines: e.target.value.split(/\r?\n/) })}
         />
+      </div>
+
+      <div className="field">
+        <label>字体</label>
+        <select
+          className="input"
+          data-testid="wm-font"
+          value={design.fontFamily}
+          onChange={(e) => patch({ fontFamily: e.target.value })}
+          style={{ fontFamily: design.fontFamily }}
+        >
+          {!fonts.some((f) => f.family === design.fontFamily) && (
+            <option value={design.fontFamily}>{design.fontFamily}</option>
+          )}
+          {fonts.map((f) => (
+            <option key={f.family} value={f.family} style={{ fontFamily: f.family }}>{f.label}</option>
+          ))}
+        </select>
       </div>
 
       <div className="grid grid-cols-2 gap-2">

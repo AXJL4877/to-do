@@ -207,9 +207,19 @@ export function StartScreen() {
   const refreshRecentProjects = useApp((s) => s.refreshRecentProjects)
   const isDesktop = isDesktopApp()
   const [opening, setOpening] = useState<string | null>(null)
+  const [roots, setRoots] = useState<string[]>([])
   const legacy = useMemo(() => legacyDrafts(drafts), [drafts])
 
-  useEffect(() => { void refreshRecentProjects() }, [refreshRecentProjects])
+  useEffect(() => {
+    void refreshRecentProjects()
+    void desktop()?.discoverProjects?.().then((r) => {
+      if (r?.roots?.length) setRoots(r.roots)
+      if (r?.ok && r.projects) useApp.setState({ recentProjects: r.projects })
+    })
+    void desktop()?.getPaths?.().then((p) => {
+      if (p?.projectsRoot) setRoots((cur) => cur.includes(p.projectsRoot!) ? cur : [...cur, p.projectsRoot!])
+    })
+  }, [refreshRecentProjects])
 
   async function open(filePath?: string) {
     setOpening(filePath ?? '')
@@ -220,6 +230,9 @@ export function StartScreen() {
     useApp.getState().openDraft(id, { localOnly: true })
     useApp.setState({ started: true })
   }
+
+  const visible = recent.filter((r) => r.exists)
+  const missing = recent.filter((r) => !r.exists)
 
   return (
     <div className="start-screen" data-testid="start-screen">
@@ -238,7 +251,9 @@ export function StartScreen() {
           </div>
           <div className="mt-auto text-[11px] leading-relaxed" style={{ color: 'var(--text-muted)' }}>
             {isDesktop
-              ? '每个项目是一个文件夹：工程文件、AI 生成物、导出和缓存都放在里面，整个文件夹拷走就能在别的电脑打开。'
+              ? (roots[0]
+                ? `项目默认保存在：${roots[0]}。每个项目一个文件夹，可整个拷走。`
+                : '每个项目是一个文件夹：工程文件、AI 生成物、导出和缓存都放在里面。')
               : '浏览器版：项目保存在本机浏览器里。'}
           </div>
         </aside>
@@ -246,13 +261,13 @@ export function StartScreen() {
         <section className="start-main">
           <div className="eyebrow flex items-center gap-1.5"><Clock size={11} />最近项目</div>
           {isDesktop ? (
-            recent.length ? (
+            visible.length ? (
               <div className="grid gap-1 mt-2" data-testid="start-recent">
-                {recent.map((r) => (
-                  <div key={r.path} className={clsx('start-item', !r.exists && 'missing')}>
-                    <button className="start-item-main" disabled={!r.exists || opening != null} title={r.path} onClick={() => void open(r.path)}>
+                {visible.map((r) => (
+                  <div key={r.path} className="start-item">
+                    <button className="start-item-main" disabled={opening != null} title={r.path} onClick={() => void open(r.path)}>
                       <b>{projectNameFromPath(r.path)}</b>
-                      <small>{r.exists ? r.path.replace(/[\\/][^\\/]+$/, '') : `已丢失 · ${r.path}`}</small>
+                      <small>{r.path.replace(/[\\/][^\\/]+$/, '')}</small>
                     </button>
                     {opening === r.path && <Loader2 size={13} className="animate-spin shrink-0" />}
                     <button className="icon-btn shrink-0" title="从列表移除（不删文件）" onClick={() => void removeRecentProject(r.path)}><X size={12} /></button>
@@ -260,7 +275,10 @@ export function StartScreen() {
                 ))}
               </div>
             ) : (
-              <div className="start-empty">还没有项目，点「新建项目」开始</div>
+              <div className="start-empty">
+                还没有项目，点「新建项目」开始
+                {roots[0] ? <div className="mt-2 text-[11px]">也可把已有工程放到：{roots[0]}</div> : null}
+              </div>
             )
           ) : (
             drafts.length ? (
@@ -275,6 +293,23 @@ export function StartScreen() {
                 ))}
               </div>
             ) : <div className="start-empty">还没有项目</div>
+          )}
+
+          {isDesktop && missing.length > 0 && (
+            <>
+              <div className="eyebrow mt-6">找不到的工程</div>
+              <div className="grid gap-1 mt-2" data-testid="start-missing">
+                {missing.map((r) => (
+                  <div key={r.path} className="start-item missing">
+                    <div className="start-item-main">
+                      <b>{projectNameFromPath(r.path)}</b>
+                      <small>已丢失 · {r.path}</small>
+                    </div>
+                    <button className="icon-btn shrink-0" title="从列表移除" onClick={() => void removeRecentProject(r.path)}><X size={12} /></button>
+                  </div>
+                ))}
+              </div>
+            </>
           )}
 
           {isDesktop && legacy.length > 0 && (

@@ -7,6 +7,7 @@ export type FontChoice = { family: string; label: string }
 
 /** Windows 常见中文字体 + 项目自带字体；实际可用的由 availableFonts() 过滤 */
 const FONT_CANDIDATES: FontChoice[] = [
+  { family: 'Smiley Sans Oblique', label: '得意黑' },
   { family: 'Microsoft YaHei', label: '微软雅黑' },
   { family: 'SimHei', label: '黑体' },
   { family: 'DengXian', label: '等线' },

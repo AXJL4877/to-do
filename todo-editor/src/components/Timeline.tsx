@@ -2,10 +2,10 @@ import { useMemo, useRef, useEffect, useLayoutEffect, useCallback, useState, use
 import { flushSync } from 'react-dom'
 import {
   Lock, VolumeX, EyeOff, Magnet, Scissors, Trash2, ZoomIn, ZoomOut,
-  MousePointer2, Hand, Gauge, Undo2, Redo2, Save, FolderOpen, Download, MoreHorizontal, ListCollapse, AudioLines, Stamp,
+  MousePointer2, Hand, Gauge, Undo2, Redo2, Save, FolderOpen, Download, MoreHorizontal, ListCollapse, AudioLines, Stamp, ArrowLeft,
 } from 'lucide-react'
 import { useApp, formatTime } from '../store'
-import { clampZoom, fmtRulerTime, fmtZoom, rulerStep, stepZoom, wheelZoom } from '../lib/timelineZoom'
+import { clampZoom, fmtRulerTime, fmtZoom, rulerStep, stepZoom, wheelZoom, TIMELINE_SPAN_SEC } from '../lib/timelineZoom'
 import { parseMediaFiles, filesFromDataTransfer } from '../lib/importFiles'
 import { acceptMediaDrop, readMediaDrag } from '../lib/mediaDrag'
 import { desktop } from '../lib/desktop'
@@ -77,6 +77,8 @@ export function Timeline({
   const canUndo = useApp((s) => s.history.length > 0)
   const canRedo = useApp((s) => s.future.length > 0)
   const saveProjectToFile = useApp((s) => s.saveProjectToFile)
+  const closeProject = useApp((s) => s.closeProject)
+  const projectName = useApp((s) => s.projectName)
   const setMonitorCompose = useApp((s) => s.setMonitorCompose)
   const monitorCompose = useApp((s) => s.monitorCompose)
   const setPropTab = useApp((s) => s.setPropTab)
@@ -155,7 +157,7 @@ export function Timeline({
   }, [geometryZoom])
 
   const duration = useMemo(
-    () => Math.max(seq.workOut, ...seq.clips.map((c) => c.start + c.duration), 12),
+    () => Math.max(TIMELINE_SPAN_SEC, seq.workOut, ...seq.clips.map((c) => c.start + c.duration), 12),
     [seq],
   )
 
@@ -959,7 +961,16 @@ export function Timeline({
       onDrop={onDrop}
     >
       <div className="flex items-center gap-1 px-2 py-1 border-b shrink-0 relative overflow-x-auto" style={{ borderColor: 'var(--border)' }}>
-        <button className="icon-btn" data-testid="btn-drafts" onClick={() => setModal('drafts')} title="项目"><FolderOpen size={12} /></button>
+        <button
+          className="btn shrink-0 text-[10px] flex items-center gap-1"
+          data-testid="btn-back-projects"
+          onClick={() => { void closeProject() }}
+          title="返回项目目录"
+        >
+          <ArrowLeft size={12} />项目目录
+        </button>
+        <button className="icon-btn" data-testid="btn-drafts" onClick={() => setModal('drafts')} title="当前工程 / 草稿"><FolderOpen size={12} /></button>
+        <span className="text-[10px] truncate max-w-[12ch] shrink-0" style={{ color: 'var(--text-muted)' }} title={projectName}>{projectName}</span>
         <button className="icon-btn" data-testid="btn-save" onClick={() => { void saveProjectToFile() }} title="保存 Ctrl+S"><Save size={12} /></button>
         <button className="icon-btn" data-testid="btn-undo" onClick={undo} disabled={!canUndo} title="撤销 Ctrl+Z" style={{ opacity: canUndo ? 1 : 0.35 }}><Undo2 size={12} /></button>
         <button className="icon-btn" data-testid="btn-redo" onClick={redo} disabled={!canRedo} title="重做 Ctrl+Shift+Z" style={{ opacity: canRedo ? 1 : 0.35 }}><Redo2 size={12} /></button>
@@ -1196,7 +1207,7 @@ export function Timeline({
             ))}
             </div>
 
-            <TimelineLabels seq={seq} pxPerSec={pxPerSec} scrollRef={scrollRef} viewportWidth={bodyW} />
+            <TimelineLabels seq={seq} pxPerSec={pxPerSec} scrollRef={scrollRef} viewportWidth={bodyW} geometryScale={geometryScale} geometryZoom={geometryZoom} />
             {marquee && (
               <div
                 data-testid="marquee-rect"

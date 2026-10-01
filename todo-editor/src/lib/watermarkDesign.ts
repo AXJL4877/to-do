@@ -2,6 +2,7 @@
  * 可自定义的文字水印：文案 / 字号 / 排版 → 透明底 PNG。
  * 默认预设「小薇说交易」免责文案，可随时改。
  */
+import { watermarkFontStack } from './textFonts'
 
 export type WatermarkAlign = 'left' | 'center' | 'right'
 export type WatermarkPlacement = 'bottom' | 'top' | 'bottom-left' | 'bottom-right' | 'top-left' | 'top-right'
@@ -21,6 +22,8 @@ export type WatermarkDesign = {
   /** 整层不透明度 0~1 */
   opacity: number
   color: string
+  /** CSS / Canvas 字体族，默认得意黑 */
+  fontFamily: string
 }
 
 export const DEFAULT_WATERMARK_DESIGN: WatermarkDesign = {
@@ -37,6 +40,7 @@ export const DEFAULT_WATERMARK_DESIGN: WatermarkDesign = {
   band: true,
   opacity: 0.92,
   color: '#FFFFFF',
+  fontFamily: 'Smiley Sans Oblique',
 }
 
 const STORAGE_KEY = 'todo.watermarkDesign'
@@ -60,6 +64,9 @@ export function loadWatermarkDesign(): WatermarkDesign {
       band: parsed.band !== false,
       color: typeof parsed.color === 'string' && parsed.color ? parsed.color : '#FFFFFF',
       name: typeof parsed.name === 'string' && parsed.name.trim() ? parsed.name.trim() : DEFAULT_WATERMARK_DESIGN.name,
+      fontFamily: typeof parsed.fontFamily === 'string' && parsed.fontFamily.trim()
+        ? parsed.fontFamily.trim()
+        : DEFAULT_WATERMARK_DESIGN.fontFamily,
     }
   } catch {
     return { ...DEFAULT_WATERMARK_DESIGN, lines: [...DEFAULT_WATERMARK_DESIGN.lines] }
@@ -105,6 +112,9 @@ export function renderWatermarkPng(
   const lines = design.lines.map((l) => l.trim()).filter(Boolean)
   if (!lines.length) throw new Error('请至少写一行水印文字')
 
+  // 渲染前调用方应 ensureSmileyFont（设计器 mount / 应用时）
+  const family = watermarkFontStack(design.fontFamily)
+
   const sy = h / 1080
   const titlePx = Math.max(12, Math.round(design.titleSize * sy))
   const bodyPx = Math.max(10, Math.round(design.bodySize * sy))
@@ -121,11 +131,10 @@ export function renderWatermarkPng(
   let bandTop = atTop ? 0 : h - blockH
   let bandH = blockH
   if (corner) {
-    // 角标：按内容宽估算一块更紧的区域
-    ctx.font = `600 ${titlePx}px "Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif`
+    ctx.font = `600 ${titlePx}px ${family}`
     let maxW = 0
     lines.forEach((line, i) => {
-      ctx.font = `${i === 0 ? 600 : 400} ${sizes[i]}px "Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif`
+      ctx.font = `${i === 0 ? 600 : 400} ${sizes[i]}px ${family}`
       maxW = Math.max(maxW, ctx.measureText(line).width)
     })
     const boxW = Math.min(w, Math.ceil(maxW + pad * 2))
@@ -143,6 +152,7 @@ export function renderWatermarkPng(
       gap: lineGap,
       color: design.color,
       sy,
+      family,
     })
   } else {
     if (design.band) {
@@ -167,6 +177,7 @@ export function renderWatermarkPng(
       gap: lineGap,
       color: design.color,
       sy,
+      family,
     })
   }
 
@@ -177,7 +188,7 @@ function drawLines(
   ctx: CanvasRenderingContext2D,
   lines: string[],
   sizes: number[],
-  opts: { align: WatermarkAlign; x: number; y0: number; gap: number; color: string; sy: number },
+  opts: { align: WatermarkAlign; x: number; y0: number; gap: number; color: string; sy: number; family: string },
 ) {
   ctx.textAlign = opts.align
   ctx.textBaseline = 'top'
@@ -188,7 +199,7 @@ function drawLines(
   lines.forEach((line, i) => {
     const px = sizes[i]
     ctx.fillStyle = i === 0 ? opts.color : withAlpha(opts.color, 0.86)
-    ctx.font = `${i === 0 ? 600 : 400} ${px}px "Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif`
+    ctx.font = `${i === 0 ? 600 : 400} ${px}px ${opts.family}`
     ctx.fillText(line, opts.x, y)
     y += px + opts.gap
   })

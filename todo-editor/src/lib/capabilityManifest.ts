@@ -10,6 +10,7 @@ export type CapabilityItem = {
 export const CAPABILITY_MANIFEST: CapabilityItem[] = [
   // 1 工程与界面 (26)
   { module: 1, moduleName: '工程与界面', feature: '草稿管理', selector: '[data-testid="btn-drafts"]' },
+  { module: 1, moduleName: '工程与界面', feature: '返回项目目录', selector: '[data-testid="btn-back-projects"]' },
   { module: 1, moduleName: '工程与界面', feature: '新建项目', selector: '[data-testid="btn-new-project"]' },
   { module: 1, moduleName: '工程与界面', feature: '保存', selector: '[data-testid="btn-save"]' },
   { module: 1, moduleName: '工程与界面', feature: '另存为', selector: '[data-testid="btn-save-as"]' },

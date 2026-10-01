@@ -4,14 +4,20 @@ import { indexClips } from '../lib/sequenceIndex'
 
 /** Viewport-sized text layer: geometry can scale without scaling glyphs or
  * restyling hundreds of label elements. DOM clip boxes retain all hit targets. */
-export function TimelineLabels({ seq, pxPerSec, scrollRef, viewportWidth }: {
+export function TimelineLabels({ seq, pxPerSec, scrollRef, viewportWidth, geometryScale = 1, geometryZoom }: {
   seq: Sequence
   pxPerSec: number
   scrollRef: RefObject<HTMLDivElement | null>
   viewportWidth: number
+  /** 缩放过渡期 timeline-geometry 的 scaleX；settled 时为 1 */
+  geometryScale?: number
+  /** 片段定位用的冻结 zoom；缺省等于 pxPerSec */
+  geometryZoom?: number
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const widths = useRef(new Map<string, number>())
+  const zoom = geometryZoom ?? pxPerSec
+  const scale = geometryScale || 1
   useLayoutEffect(() => {
     const scroll = scrollRef.current, canvas = canvasRef.current
     if (!scroll || !canvas) return
@@ -54,8 +60,11 @@ export function TimelineLabels({ seq, pxPerSec, scrollRef, viewportWidth }: {
         for (const clip of byTrack.get(track.id) ?? []) {
           const offset = offsets.get(clip.id)
           const cy = y + (offset?.m42 ?? 0)
-          const x = clip.start * pxPerSec - left + (offset?.m41 ?? 0)
-          const clipW = clip.duration * pxPerSec
+          // 与 TimelineClip 像素取整 + geometry scaleX 对齐
+          const x0 = Math.round(clip.start * zoom) * scale
+          const x1 = Math.round((clip.start + clip.duration) * zoom) * scale
+          const x = x0 - left + (offset?.m41 ?? 0)
+          const clipW = Math.max(1, x1 - x0)
           if (cy + track.height < 0 || cy >= h || x + clipW <= 0 || x >= w || clipW < 12) continue
           const labelX = x + 6, labelY = cy + 6
           const available = clipW - 12
@@ -102,11 +111,11 @@ export function TimelineLabels({ seq, pxPerSec, scrollRef, viewportWidth }: {
     const ro = new ResizeObserver(draw)
     ro.observe(scroll)
     const mo = new MutationObserver(records => {
-      if (records.some(r => (r.target as HTMLElement).hasAttribute('data-clip-start'))) draw()
+      if (records.some(r => (r.target as HTMLElement).hasAttribute('data-clip-start') || (r.target as HTMLElement).getAttribute?.('data-testid') === 'timeline-geometry')) draw()
     })
     if (geometry) mo.observe(geometry, { attributes: true, attributeFilter: ['style'], subtree: true })
     return () => { scroll.removeEventListener('scroll', draw); ro.disconnect(); mo.disconnect() }
-  }, [seq, pxPerSec, scrollRef, viewportWidth])
+  }, [seq, pxPerSec, scrollRef, viewportWidth, zoom, scale])
   return <canvas ref={canvasRef} data-testid="timeline-labels" aria-hidden="true"
     style={{ position: 'absolute', pointerEvents: 'none', zIndex: 2 }} />
 }

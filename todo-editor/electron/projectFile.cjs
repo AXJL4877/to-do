@@ -27,6 +27,13 @@ function createRecentProjects(getFile) {
     list: read,
     push: (filePath) => write([filePath, ...read().filter((p) => !samePath(p, filePath))].slice(0, RECENT_MAX)),
     remove: (filePath) => write(read().filter((p) => !samePath(p, filePath))),
+    /** 把发现的工程路径合并进最近列表（已有的保持原有顺序优先） */
+    merge: (paths) => {
+      const cur = read()
+      const extra = (paths || []).filter((p) => typeof p === 'string' && path.isAbsolute(p)
+        && !cur.some((c) => samePath(c, p)))
+      return write([...cur, ...extra].slice(0, RECENT_MAX))
+    },
   }
 }
 

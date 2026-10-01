@@ -2,6 +2,8 @@
 export type DesktopApi = {
   isDesktop: true
   platform: string
+  /** 得意黑本机字体 file:// URL（preload 注入） */
+  smileyFontUrl?: () => string
   /** 本机物理内存（MB），用于定预览 RAM 缓存预算 */
   systemMemoryMb?: () => number
   getPaths: () => Promise<{
@@ -31,6 +33,13 @@ export type DesktopApi = {
   }>
   recentProjects?: () => Promise<{ path: string; exists: boolean }[]>
   removeRecentProject?: (filePath: string) => Promise<string[]>
+  /** 扫描本机项目目录，合并进最近列表 */
+  discoverProjects?: () => Promise<{
+    ok: boolean
+    projects?: { path: string; exists: boolean }[]
+    roots?: string[]
+    error?: string
+  }>
   /** 在 parentDir 下建 <name>/ 项目文件夹（含 ai-generated / exports / cache），返回工程文件路径 */
   createProjectFolder?: (parentDir: string, name: string) => Promise<{ ok: boolean; dir?: string; path?: string; error?: string }>
   pickDirectory?: (opts?: { title?: string; defaultPath?: string }) => Promise<{ ok: boolean; canceled?: boolean; path?: string }>

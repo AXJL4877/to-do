@@ -1,5 +1,13 @@
 @import "tailwindcss";
 
+@font-face {
+  font-family: "Smiley Sans Oblique";
+  src: url("/fonts/SmileySans-Oblique.otf") format("opentype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   --spring-ui: cubic-bezier(0.34, 1.4, 0.5, 1);
   --spring-snap: cubic-bezier(0.3, 1.6, 0.4, 1);
@@ -430,6 +438,37 @@ img, video, svg { -webkit-user-drag: none; }
   font-size: 18px; line-height: 1.9; letter-spacing: 0.02em;
 }
 .script-memo-text::placeholder { color: var(--text-muted); }
+
+/* 选区/光标旁 AI 快捷栏 */
+.script-ai-bar {
+  position: fixed; z-index: 70; display: flex; align-items: center; gap: 2px;
+  padding: 3px; border-radius: 10px; border: 1px solid var(--border);
+  background: var(--surface-1); box-shadow: 0 8px 24px hsl(220 20% 8% / 0.12);
+  animation: fade-in 120ms var(--ease-out-expo);
+}
+.script-ai-ico {
+  display: grid; place-items: center; width: 30px; height: 28px; border: 0; border-radius: 7px;
+  background: transparent; color: var(--text-secondary); cursor: pointer;
+}
+.script-ai-ico:hover:not(:disabled) { background: var(--accent-dim); color: var(--accent); }
+.script-ai-ico:disabled { opacity: 0.35; cursor: default; }
+.script-ai-spin { margin: 0 6px; color: var(--text-muted); }
+.script-ai-panel {
+  position: fixed; z-index: 71; width: min(320px, calc(100vw - 24px));
+  padding: 8px; border-radius: 10px; border: 1px solid var(--border);
+  background: var(--surface-1); box-shadow: 0 12px 32px hsl(220 20% 8% / 0.14);
+  display: grid; gap: 6px;
+}
+.script-ai-panel-head {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 11px; color: var(--text-muted); padding: 0 2px;
+}
+.script-ai-msg {
+  font-size: 12px; line-height: 1.55; white-space: pre-wrap; padding: 8px 9px;
+  border-radius: 8px; border: 1px solid var(--border); background: var(--surface-0);
+  color: var(--text-secondary); max-height: 180px; overflow-y: auto;
+}
+.script-ai-msg.err { color: var(--accent); }
 
 /* 起始页 / 新建项目 */
 .start-screen {

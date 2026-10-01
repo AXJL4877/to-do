@@ -1388,7 +1388,7 @@ export const useApp = create<AppStore>((set, get) => {
 
   return {
     drafts: drafts0,
-    started: !desktop(),
+    started: false,
     newProjectDialog: null,
     projectId: draftStart?.id ?? 'draft_demo',
     projectName: draftStart?.name ?? '演示草稿',
@@ -1790,7 +1790,14 @@ export const useApp = create<AppStore>((set, get) => {
     async refreshRecentProjects() {
       const api = desktop()
       if (!api?.recentProjects) return
-      try { set({ recentProjects: await api.recentProjects() }) } catch { /* */ }
+      try {
+        // discover 会扫 Documents/桌面等目录，把丢出「最近」但仍在磁盘上的工程补回来
+        if (api.discoverProjects) {
+          const d = await api.discoverProjects()
+          if (d?.ok && d.projects) { set({ recentProjects: d.projects }); return }
+        }
+        set({ recentProjects: await api.recentProjects() })
+      } catch { /* */ }
     },
 
     async removeRecentProject(filePath) {
@@ -2477,6 +2484,19 @@ export const useApp = create<AppStore>((set, get) => {
     },
     toggleScript(open) {
       const next = open ?? !get().scriptOpen
+      // 关闭前由 ScriptMemo 已写入 sessionStorage；这里再兜底一次当前焦点
+      if (!next && typeof document !== 'undefined') {
+        const el = document.querySelector<HTMLTextAreaElement>('[data-script-memo]')
+        if (el) {
+          try {
+            sessionStorage.setItem(`todo-script-view:${get().projectId}`, JSON.stringify({
+              start: el.selectionStart ?? 0,
+              end: el.selectionEnd ?? 0,
+              scrollTop: el.scrollTop,
+            }))
+          } catch { /* */ }
+        }
+      }
       set(next ? { scriptOpen: true, playing: false } : { scriptOpen: false })
     },
     setMonitorCompose(m) {
@@ -3204,6 +3224,8 @@ export const useApp = create<AppStore>((set, get) => {
 
     async applyWatermarkDesign(design, opts) {
       const settings = get().settings
+      const { ensureSmileyFont } = await import('./lib/textFonts')
+      await ensureSmileyFont()
       const { renderWatermarkPng, saveWatermarkDesign } = await import('./lib/watermarkDesign')
       saveWatermarkDesign(design)
       const png = renderWatermarkPng(design, settings.width, settings.height)

@@ -222,11 +222,11 @@ export const TimelineClip = memo(function TimelineClip({
 
   return (
     <div
-      className={clsx('absolute top-1 bottom-1 rounded-md overflow-hidden border group', selected && 'ring-2')}
+      className={clsx('absolute top-1 bottom-1 rounded-none overflow-hidden border group', selected && 'ring-2')}
       style={{
-        // 按真实时长画，不设最小宽度：缩小时间轴时撑宽的短片段会盖住后面紧接的片段
-        left: clip.start * geometryZoom,
-        width: Math.max(1, clip.duration * geometryZoom),
+        // 像素对齐：起止分别取整，避免中间缝/重叠与缩放后「中间对不齐」
+        left: Math.round(clip.start * geometryZoom),
+        width: Math.max(1, Math.round((clip.start + clip.duration) * geometryZoom) - Math.round(clip.start * geometryZoom)),
         background: bg,
         borderColor: selected ? 'var(--accent)' : 'var(--border)',
         opacity: clip.enabled ? 1 : 0.4,

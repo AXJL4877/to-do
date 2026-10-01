@@ -316,11 +316,51 @@ function userDataPaths() {
     fs.mkdirSync(d, { recursive: true })
   }
   let projectsRoot = path.join(root, 'projects')
-  try { projectsRoot = path.join(app.getPath('documents'), 'TO DO 项目') } catch { /* */ }
+  try {
+    projectsRoot = path.join(app.getPath('documents'), 'TO DO 项目')
+    fs.mkdirSync(projectsRoot, { recursive: true })
+  } catch { /* */ }
   return { root, projects, cache, exports: exportsDir, projectsRoot, projectDir: currentProjectDir }
 }
 
 const recentProjects = createRecentProjects(() => path.join(app.getPath('userData'), 'recent-projects.json'))
+
+/** 扫描常用目录下的 *.todo.json，补回「最近项目」 */
+function discoverProjectFiles() {
+  const { projectsRoot, projects } = userDataPaths()
+  const roots = [projectsRoot, projects]
+  try { roots.push(app.getPath('desktop')) } catch { /* */ }
+  try { roots.push(path.join(app.getPath('documents'), 'TO DO 项目')) } catch { /* */ }
+  const found = []
+  const seen = new Set()
+  const add = (filePath) => {
+    const key = path.resolve(filePath).toLowerCase()
+    if (seen.has(key) || !fs.existsSync(filePath)) return
+    seen.add(key)
+    found.push(filePath)
+  }
+  for (const root of roots) {
+    if (!root || !fs.existsSync(root)) continue
+    let ents = []
+    try { ents = fs.readdirSync(root, { withFileTypes: true }) } catch { continue }
+    for (const e of ents) {
+      if (e.name.startsWith('.')) continue
+      const full = path.join(root, e.name)
+      if (e.isFile() && /\.todo\.json$/i.test(e.name)) {
+        add(full)
+        continue
+      }
+      if (!e.isDirectory()) continue
+      // 项目文件夹：<name>/<name>.todo.json 或任意 *.todo.json
+      let kids = []
+      try { kids = fs.readdirSync(full) } catch { continue }
+      for (const k of kids) {
+        if (/\.todo\.json$/i.test(k)) add(path.join(full, k))
+      }
+    }
+  }
+  return found
+}
 
 function aiServerScript() {
   if (app.isPackaged) {
@@ -400,6 +440,23 @@ app.whenReady().then(async () => {
   ipcMain.handle('desktop:get-paths', () => userDataPaths())
   ipcMain.on('desktop:ai-base-url', (e) => { e.returnValue = aiBaseUrl })
   ipcMain.handle('desktop:get-ai-base-url', () => aiBaseUrl)
+  ipcMain.on('desktop:smiley-font-url', (e) => {
+    const { pathToFileURL } = require('node:url')
+    const home = process.env.USERPROFILE || process.env.HOME || ''
+    const cands = [
+      process.env.SUB_FONT_FILE,
+      home && path.join(home, 'AppData/Local/Microsoft/Windows/Fonts/SmileySans-Oblique.otf'),
+      path.join(__dirname, '../public/fonts/SmileySans-Oblique.otf'),
+      process.env.WINDIR && path.join(process.env.WINDIR, 'Fonts/SmileySans-Oblique.otf'),
+    ].filter(Boolean)
+    let url = ''
+    for (const p of cands) {
+      try {
+        if (fs.existsSync(p)) { url = pathToFileURL(p).href; break }
+      } catch { /* */ }
+    }
+    e.returnValue = url
+  })
 
   try {
     await startAiServer()
@@ -639,9 +696,23 @@ app.whenReady().then(async () => {
     }
   })
 
-  ipcMain.handle('desktop:recent-projects', () => recentProjects.list()
-    .map((p) => ({ path: p, exists: fs.existsSync(p) })))
+  ipcMain.handle('desktop:recent-projects', () => {
+    // 每次打开列表时扫一遍本机项目目录，避免「最近」丢了但工程还在
+    try { recentProjects.merge(discoverProjectFiles()) } catch { /* */ }
+    return recentProjects.list().map((p) => ({ path: p, exists: fs.existsSync(p) }))
+  })
   ipcMain.handle('desktop:remove-recent-project', (_e, filePath) => recentProjects.remove(String(filePath || '')))
+  ipcMain.handle('desktop:discover-projects', () => {
+    try { recentProjects.merge(discoverProjectFiles()) } catch { /* */ }
+    return {
+      ok: true,
+      projects: recentProjects.list().map((p) => ({ path: p, exists: fs.existsSync(p) })),
+      roots: (() => {
+        const { projectsRoot, projects } = userDataPaths()
+        return [projectsRoot, projects].filter(Boolean)
+      })(),
+    }
+  })
 
   ipcMain.handle('desktop:create-project', (_e, { parentDir, name } = {}) => {
     try {

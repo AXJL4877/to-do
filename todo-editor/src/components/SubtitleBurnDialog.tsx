@@ -3,20 +3,12 @@ import { createPortal } from 'react-dom'
 import { Captions, Loader2, X } from 'lucide-react'
 import clsx from 'clsx'
 import { usePreviewSuspend } from '../hooks/usePreviewSuspend'
-import { SUBTITLE_FONT, subtitleFontPx, subtitleMarginPx, type SkillPack, type SkillParams, type SubtitleSourceMedia } from '../lib/aiSkills'
+import { subtitleFontPx, subtitleMarginPx, type SkillPack, type SkillParams, type SubtitleSourceMedia } from '../lib/aiSkills'
+import { ensureSmileyFont, subtitleCssFont } from '../lib/textFonts'
 import { burnSubtitles, initialSubtitleParams, narrationText, subtitlePack, subtitleTargets } from '../lib/subtitleBurn'
 import { SkillParamControl } from './SkillStudio'
 
-const CSS_FONT: Record<string, string> = {
-  smiley: '"Smiley Sans Oblique", "Smiley Sans"',
-  yahei: '"Microsoft YaHei"',
-  heiti: 'SimHei, "黑体"',
-  kaiti: 'KaiTi, "楷体"',
-  xingkai: 'STXingkai, "华文行楷"',
-  lishu: 'LiSu, "隶书"',
-  hupo: 'STHupo, "华文琥珀"',
-}
-const cssFont = (v: unknown) => `${CSS_FONT[String(v)] ?? `"${SUBTITLE_FONT[String(v)] ?? 'Microsoft YaHei'}"`}, sans-serif`
+const cssFont = subtitleCssFont
 
 const POSITION_PRESETS = [
   { label: '底部', pct: 6 },
@@ -81,6 +73,10 @@ export function SubtitleBurnDialog({ clipIds, onClose }: { clipIds: string[]; on
   const count = ready?.length ?? 0
   const asrCount = ready?.filter((r) => !r.jobId).length ?? 0
   const skipped = targets.audio.length - count
+
+  useEffect(() => {
+    void ensureSmileyFont()
+  }, [])
 
   useEffect(() => {
     subtitlePack()

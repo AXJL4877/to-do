@@ -28,6 +28,7 @@ import { animPreviewPath, listAnimPacks } from './animPacks.mjs'
 import { H3_QUALITIES, ensureH3, h3Health } from './h3Client.mjs'
 import { designFancyText, texturePrompt } from './fancyTextAi.mjs'
 import { designDouyinMeta, buildDouyinCoverPrompt } from './douyinMetaAi.mjs'
+import { assistScript } from './scriptRewriteAi.mjs'
 import { directAnim } from './animDirector.mjs'
 import { getSkillEntry, listSkillPacks, planSkill, resolveSkillParams, skillPreviewPath } from './skillPacks.mjs'
 import { cleanText } from './stylePacks.mjs'
@@ -320,6 +321,17 @@ export async function handleAiHttp(req, res) {
         const body = JSON.parse((await readBody(req)) || '{}')
         const meta = await designDouyinMeta(readAiConfig({ revealKey: true }), body)
         sendJson(res, 200, { ok: true, meta })
+      } catch (e) {
+        sendJson(res, 400, { ok: false, error: String(e instanceof Error ? e.message : e) })
+      }
+      return true
+    }
+
+    if (url === '/api/ai-script' && req.method === 'POST') {
+      try {
+        const body = JSON.parse((await readBody(req)) || '{}')
+        const result = await assistScript(readAiConfig({ revealKey: true }), body)
+        sendJson(res, 200, { ok: true, ...result })
       } catch (e) {
         sendJson(res, 400, { ok: false, error: String(e instanceof Error ? e.message : e) })
       }

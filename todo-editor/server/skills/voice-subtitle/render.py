@@ -28,8 +28,29 @@ BURN_SUBTITLES_DIR = Path(os.environ.get(
 LEGACY_FONT_SCALE = {"s": 0.04, "m": 0.05, "l": 0.062}
 LEGACY_MARGIN_SCALE = {"bottom": 0.06, "raised": 0.16}
 _WIN_FONTS = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"
-# 得意黑由 burn-subtitles 自带；其余用系统字体（文件, ASS 字体名）
+_USER_FONTS = Path.home() / "AppData" / "Local" / "Microsoft" / "Windows" / "Fonts"
+
+
+def _smiley_font() -> tuple[Path, str]:
+    """得意黑：用户字体 / 环境变量 / 应用 public/fonts。"""
+    cands: list[Path | None] = [
+        Path(os.environ["SUB_FONT_FILE"]) if os.environ.get("SUB_FONT_FILE") else None,
+        _USER_FONTS / "SmileySans-Oblique.otf",
+        _WIN_FONTS / "SmileySans-Oblique.otf",
+    ]
+    try:
+        cands.insert(2, Path(__file__).resolve().parents[3] / "public" / "fonts" / "SmileySans-Oblique.otf")
+    except Exception:
+        pass
+    for p in cands:
+        if p and p.exists():
+            return p, "Smiley Sans Oblique"
+    return _USER_FONTS / "SmileySans-Oblique.otf", "Smiley Sans Oblique"
+
+
+# 字体 key → (文件, ASS Fontname)；smiley 必须显式 set_font，避免进程内残留上一任务的字体
 FONTS = {
+    "smiley": _smiley_font(),
     "yahei": (_WIN_FONTS / "msyhbd.ttc", "Microsoft YaHei"),
     "heiti": (_WIN_FONTS / "simhei.ttf", "SimHei"),
     "kaiti": (_WIN_FONTS / "simkai.ttf", "KaiTi"),
@@ -172,11 +193,15 @@ def render(req: dict) -> dict:
     work.mkdir(parents=True, exist_ok=True)
 
     bs = load_burner()
-    font = FONTS.get(str(p.get("font")))
-    if font:
-        if not font[0].exists():
-            raise FileNotFoundError(f"系统里没有字体文件 {font[0].name}，换一种字体")
-        bs.set_font(font[0], font[1])
+    font_key = str(p.get("font") or "smiley")
+    font = FONTS.get(font_key) or FONTS["smiley"]
+    if not font[0].exists():
+        raise FileNotFoundError(
+            f"找不到字体文件 {font[0]}（选「{font_key}」）。"
+            f"得意黑请安装 SmileySans-Oblique.otf 到用户字体目录，或设 SUB_FONT_FILE。"
+        )
+    bs.set_font(font[0], font[1])
+    log(f"字幕字体：{font[1]} ← {font[0]}")
     fs = font_px(p, W, H)
     bs.apply_options(bs.BurnOptions(
         band_h=0,

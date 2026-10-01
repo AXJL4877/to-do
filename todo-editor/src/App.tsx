@@ -45,6 +45,10 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    void import('./lib/textFonts').then((m) => m.ensureSmileyFont())
+  }, [])
+
+  useEffect(() => {
     if (POPOUT) return
     return bindNativePreviewLifecycle()
   }, [])
@@ -84,11 +88,14 @@ export default function App() {
     setLayout(layout)
     const s = useApp.getState()
     const raw = localStorage.getItem(`todo-draft-${s.projectId}`)
-    // 桌面版像 PR 一样先出起始页（started=false），由用户新建或打开项目
-    let restored = !!desktop()
     void s.refreshRecentProjects()
-    if (restored) {
+    if (desktop()) {
+      // 桌面版每次冷启动回到项目起始页（不自动进上一次剪辑）
+      useApp.setState({ started: false })
       void desktop()?.setProject?.(null)
+      void desktop()?.discoverProjects?.().then((r) => {
+        if (r?.ok && r.projects) useApp.setState({ recentProjects: r.projects })
+      })
     } else if (raw) {
       try {
         const data = JSON.parse(raw)
@@ -97,14 +104,13 @@ export default function App() {
           || (Array.isArray(data.media) && data.media.length > 0)
         ) {
           s.openDraft(s.projectId)
-          useApp.setState({ toast: null })
-          restored = true
+          useApp.setState({ toast: null, started: true })
         }
       } catch { /* */ }
     }
-    if (!restored) {
+    if (!desktop() && !useApp.getState().started) {
       seedDemo()
-      useApp.setState({ dirty: false })
+      useApp.setState({ dirty: false, started: true })
     }
     requestAnimationFrame(() => {
       document.querySelector<HTMLElement>('[data-testid="app-shell"]')?.focus({ preventScroll: true })

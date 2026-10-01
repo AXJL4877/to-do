@@ -21,7 +21,7 @@ function MoreActions() {
         { id: 'newproject', label: '新建项目…', run: () => { setModal(null); useApp.getState().setNewProjectDialog({}) } },
         { id: 'openfile', label: '打开项目…', run: () => { void useApp.getState().openProjectFromFile(); setModal(null) } },
         { id: 'saveas', label: '工程另存为…', run: () => { void useApp.getState().saveProjectToFile({ saveAs: true }); setModal(null) } },
-        { id: 'closeproject', label: '关闭项目', run: () => { void useApp.getState().closeProject() } },
+        { id: 'closeproject', label: '返回项目列表', run: () => { void useApp.getState().closeProject() } },
         { id: 'pickmedia', label: '导入媒体…', run: () => { void useApp.getState().pickDesktopMedia(); setModal(null) } },
         { id: 'frame', label: '导出当前帧', run: () => { void useApp.getState().exportProgramFrame(); setModal(null) } },
       ],
@@ -188,7 +188,9 @@ export function Modals() {
                 {isDesktop && projectPath && (
                   <button className="btn btn-ghost" data-testid="btn-reveal-project" onClick={() => { void desktop()?.revealProject?.() }}>打开项目文件夹</button>
                 )}
-                <button className="btn btn-ghost" data-testid="btn-close-project" onClick={() => { void closeProject() }}>关闭项目</button>
+                <button className="btn btn-ghost" data-testid="btn-close-project" onClick={() => { void closeProject() }}>
+                  返回项目列表
+                </button>
               </div>
               {isDesktop && recentProjects.length > 0 && (
                 <div className="field" data-testid="recent-projects">

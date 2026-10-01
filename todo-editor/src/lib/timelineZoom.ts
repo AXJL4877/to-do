@@ -1,6 +1,8 @@
 /** 时间线缩放（px/秒）：1 px/s 时十分钟约 600px，一屏能看全 */
 export const ZOOM_MIN = 1
 export const ZOOM_MAX = 200
+/** 可滚动时间轴最短跨度（秒）：空工程也能滚到 10 分钟 */
+export const TIMELINE_SPAN_SEC = 600
 
 export function clampZoom(z: number) {
   // 取整太粗时触控板的细小滚动会被舍掉，缩放卡住不动
