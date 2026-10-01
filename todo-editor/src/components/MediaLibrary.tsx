@@ -13,6 +13,7 @@ import { parseMediaFiles, filesFromDataTransfer } from '../lib/importFiles'
 import { AiPanel } from './AiPanel'
 import { MotionPresetLibrary } from './MotionPresetLibrary'
 import { FancyTextPanel } from './FancyTextPanel'
+import { DynamicTextPanel } from './DynamicTextPanel'
 import { SkillsPanel } from './SkillsPanel'
 import { VoicePanel } from './VoicePanel'
 import { beginDockDrag, defaultPanelDock, shouldIgnoreDockClick } from '../lib/panelDock'
@@ -25,15 +26,15 @@ import type { MediaFolder, MediaItem } from '../types'
 /** 主页只露出高频；其余进「更多」 */
 const PRIMARY = ['media', 'text', 'preset', 'skill', 'voice', 'ai'] as const
 const SECONDARY = ['audio', 'transition', 'effect', 'filter', 'font', 'recent'] as const
-type LibTab = (typeof PRIMARY)[number] | (typeof SECONDARY)[number]
+type LibTab = (typeof PRIMARY)[number] | (typeof SECONDARY)[number] | 'dynamic-text'
 
 const LABELS: Record<LibTab, string> = {
   media: '媒体', audio: '音频', text: '文字', transition: '转场', effect: '特效',
-  filter: '滤镜', preset: '动效预设', font: '字体', recent: '最近', ai: 'AI+', skill: '拓展', voice: '配音',
+  filter: '滤镜', preset: '动效预设', font: '字体', recent: '最近', ai: 'AI+', skill: '拓展', voice: '配音', 'dynamic-text': '动态文字片段',
 }
 
 const ICONS: Record<LibTab, LucideIcon> = {
-  media: Film, text: Type, ai: Sparkles, skill: Blocks, voice: Mic,
+  media: Film, text: Type, ai: Sparkles, skill: Blocks, voice: Mic, 'dynamic-text': Type,
   audio: Music, transition: Blend, effect: Wand2, filter: Aperture,
   preset: Zap, font: CaseSensitive, recent: History,
 }
@@ -636,6 +637,7 @@ export function MediaLibrary() {
           <FancyTextPanel />
         )}
         {libraryTab === 'skill' && <SkillsPanel />}
+        {libraryTab === 'dynamic-text' && <DynamicTextPanel onBack={() => useApp.getState().setLibraryTab('skill')} />}
         {libraryTab === 'voice' && <VoicePanel />}
         {libraryTab === 'transition' && (
           <div className="grid grid-cols-2 gap-1">

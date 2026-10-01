@@ -53,6 +53,22 @@ app.whenReady().then(async () => {
       assert.ok(light > 100, `final composition lost preset ${i}`)
     }
     console.log('PASS final 9-second MP4: all six dynamic titles visible')
+    const productionSequence = path.join(root, 'native/test-output/dynamic-production/sequence.json')
+    if (fs.existsSync(productionSequence)) {
+      const narrated = JSON.parse(fs.readFileSync(productionSequence, 'utf8'))
+      const movie = await exportSequence(narrated, path.join(root, 'native/test-output/dynamic-production/narrated-acceptance.mp4'), { nativeBin: path.join(root, 'native/bin') })
+      assert.ok(movie.ok, movie.error)
+      const probe = spawnSync(path.join(root, 'native/bin/ffprobe.exe'), ['-v', 'error', '-show_streams', '-of', 'json', movie.path])
+      const streams = JSON.parse(probe.stdout.toString()).streams
+      assert.ok(streams.some(s => s.codec_type === 'audio'), 'narrated video lost voice')
+      assert.ok(streams.some(s => s.codec_type === 'video'), 'narrated video lost picture')
+      for (const c of narrated.clips.filter(c => c.text?.fancy?.dynamic)) {
+        const d = pixels(movie.path, c.start + c.duration * 0.6)
+        let light = 0; for (let k = 0; k < d.length; k += 4) if (d[k] > 100 || d[k + 1] > 100 || d[k + 2] > 100) light++
+        assert.ok(light > 20, `narrated scene blank: ${c.text.content}`)
+      }
+      console.log('PASS narrated production MP4: audio stream and every timed text scene present')
+    }
     fs.writeFileSync(path.join(out, 'export-results.json'), JSON.stringify({ ok: true, presets: 6, exactPixels: true, result }, null, 2))
     prepared.cleanup(); prepared = null; win.destroy(); win = null; app.exit(0)
   } catch (e) { console.error(e); prepared?.cleanup(); win?.destroy(); app.exit(1) }

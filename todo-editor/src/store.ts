@@ -868,7 +868,7 @@ export type AppStore = {
    */
   addAiLayerClips: (
     items: {
-      mediaId: string; start: number; duration: number; lane: number; name?: string
+      mediaId?: string; text?: NonNullable<Clip['text']>; start: number; duration: number; lane: number; name?: string
       transform?: Partial<Transform2D>; keyframes?: Clip['keyframes']; source?: Partial<NonNullable<ClipMeta['source']>>
     }[],
     opts: { jobId: string; kind: string; linkTo?: string; history?: boolean },
@@ -3010,7 +3010,7 @@ export const useApp = create<AppStore>((set, get) => {
 
     addAiLayerClips(items, { jobId, kind, linkTo, history = true }) {
       const media = get().media
-      const valid = items.filter((it) => media.some((m) => m.id === it.mediaId) && it.duration > 0.02)
+      const valid = items.filter((it) => (it.text || media.some((m) => m.id === it.mediaId)) && it.duration > 0.02)
       if (!valid.length) return items.map(() => null)
       if (history) get().pushHistory()
       let sequence = get().seq()
@@ -3022,8 +3022,8 @@ export const useApp = create<AppStore>((set, get) => {
         .map((t, i) => ({ t, i }))
         .filter(({ t }) => t.kind === kind && all().some((c) => c.trackId === t.id && laneOf(c) != null && pick(laneOf(c)!)))
       for (const it of valid) {
-        const m = media.find((x) => x.id === it.mediaId)!
-        const tk: TrackKind = m.kind === 'audio' ? 'audio' : 'video'
+        const m = media.find((x) => x.id === it.mediaId)
+        const tk: TrackKind = m?.kind === 'audio' ? 'audio' : 'video'
         const free = (t: Track) => !t.locked && !all().some((c) => c.trackId === t.id && rangeOverlap(it.start, it.duration, c.start, c.duration))
         let track = laneTracks(tk, (l) => l === it.lane).map(({ t }) => t).find(free)
         // 本层还没有轨：夹在本任务的上层（lane 更小）和下层（lane 更大）之间
@@ -3045,7 +3045,7 @@ export const useApp = create<AppStore>((set, get) => {
           track = sequence.tracks.find((t) => t.id === fresh.id)!
         }
         const clip: Clip = {
-          id: uid('clip'), trackId: track.id, mediaId: m.id, name: it.name ?? m.name, linkedId: linkTo,
+          id: uid('clip'), trackId: track.id, mediaId: m?.id, text: it.text, name: it.name ?? m?.name ?? '动态文字', linkedId: linkTo,
           start: it.start, duration: it.duration, inPoint: 0, outPoint: it.duration,
           enabled: true, speed: 1, reverse: false, speedKeyframes: [],
           transform: { ...defaultTransform(), ...it.transform }, color: defaultColor(), audio: defaultAudio(),

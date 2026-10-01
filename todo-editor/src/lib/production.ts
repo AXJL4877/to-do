@@ -4,6 +4,7 @@
  */
 import { aiFetch } from './aiFetch'
 import type { SkillParams, SubtitleCue, TimelinePlacement } from './aiSkills'
+import type { TextStyle } from '../types'
 
 export type ProductionRole = 'hero' | 'support' | 'accent'
 
@@ -46,10 +47,11 @@ export type RenderedElement = {
 
 export type ProductionBoard = {
   id: string
+  textTiming?: { startMs: number; endMs: number }
   /** 换板短语编号 */
   start: number
   elements: ProductionElement[]
-  render: { hash: string; result: { fps: number; width: number; height: number; startMs: number; endMs: number; layout: string; elements: RenderedElement[] } | null } | null
+  render: { hash: string; result: { fps: number; width: number; height: number; startMs: number; endMs: number; layout: string; elements: RenderedElement[]; dynamicText?: Partial<TextStyle> } | null } | null
   dirty: boolean
 }
 
@@ -203,6 +205,7 @@ export function pendingCount(p: Production) {
 export function boardSpan(seg: ProductionSegment, k: number) {
   const ph = seg.voice?.phrases ?? []
   const b = seg.boards[k]
+  if (b.textTiming) return { start: b.textTiming.startMs / 1000, end: b.textTiming.endMs / 1000 }
   const next = seg.boards[k + 1]
   const start = k === 0 ? 0 : ph[b.start]?.start ?? 0
   const end = next ? ph[next.start]?.start ?? seg.voice?.duration ?? 0 : seg.voice?.duration ?? 0

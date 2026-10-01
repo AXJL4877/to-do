@@ -1,3 +1,4 @@
+import { isDynamicText, planDynamicText, dynamicRenderHash, renderDynamicText } from './dynamicText.mjs'
 /**
  * 成片的生成层。每层只管一种产物，接口一致：
  *   hash(...)   这一层的输入指纹（输入不变 → 产物可复用）
@@ -118,6 +119,7 @@ export const storyboard = {
   },
   async run(ctx, seg, gi) {
     const { doc, pack } = ctx
+    if (isDynamicText(ctx)) { planDynamicText(ctx, seg, this.hash(ctx, seg)); return }
     const phrases = phrasesOf(seg)
     const boardSec = Number(doc.params.boardSec) || 10
     const maxBoards = Math.min(NARRATED_MAX_SCENES, Math.max(1, Math.ceil((phrases.at(-1)?.end ?? 0) / (boardSec * 0.6))))
@@ -166,6 +168,7 @@ export const asset = {
   },
   /** 选中的那张能不能直接用：有文件，且（锁定 / 上传 / 指纹相符） */
   usable(ctx, el) {
+    if (isDynamicText(ctx)) return true
     const v = pickedVariant(el)
     if (!v?.file || !has(ctx, v.file)) return false
     return v.locked || v.source === 'upload' || v.hash === this.hash(ctx, el)
@@ -175,6 +178,7 @@ export const asset = {
     return el.variants.filter((v) => v.source === 'ai' && !(v.file && has(ctx, v.file)))
   },
   dirty(ctx, el) {
+    if (isDynamicText(ctx)) return false
     return !this.usable(ctx, el) || this.pending(ctx, el).length > 0
   },
   async run(ctx, el) {
@@ -218,6 +222,7 @@ export function segmentSchedule(ctx, seg, isLast) {
 
 export const render = {
   hash(ctx, seg, board, sched) {
+    if (isDynamicText(ctx)) return dynamicRenderHash(ctx, seg, board)
     const p = Object.fromEntries(RENDER_PARAM_KEYS.map((k) => [k, ctx.doc.params[k]]))
     return stableHash({
       sched, p, v: ctx.pack.version,
@@ -228,9 +233,11 @@ export const render = {
     if (!board.elements.length) return false
     const r = board.render
     if (!r?.result || r.hash !== this.hash(ctx, seg, board, sched)) return true
+    if (isDynamicText(ctx)) return !r.result.dynamicText
     return !r.result.elements.every((e) => has(ctx, e.video) && has(ctx, e.hold))
   },
   async run(ctx, seg, board, sched) {
+    if (isDynamicText(ctx)) { renderDynamicText(ctx, seg, board); return }
     const { doc, entry } = ctx
     const hash = this.hash(ctx, seg, board, sched)
     const prefix = `${doc.id}_${hash.slice(0, 8)}`

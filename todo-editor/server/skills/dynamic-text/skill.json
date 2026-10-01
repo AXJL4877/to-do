@@ -1,0 +1,287 @@
+{
+  "spec": "todo-skill-pack/1",
+  "id": "builtin.dynamic-text",
+  "name": "动态文字",
+  "version": "2.0.0",
+  "author": "TO DO",
+  "description": "口播一键成片：全文自动分段配音，按配音时间戳拆成短句，搭配六种动态排版，文字、配音和字幕自动铺入时间线。支持修改文案与参数，只重做发生变化的部分。",
+  "tags": [
+    "口播",
+    "成片",
+    "动态文字",
+    "配音",
+    "字幕"
+  ],
+  "pipeline": "production",
+  "input": {
+    "label": "口播文案",
+    "maxLength": 12000,
+    "placeholder": "粘贴整篇口播。自动分段配音、按时间戳生成动态文字画面并加入时间线；空行或 --- 表示换段。"
+  },
+  "output": {
+    "mime": "video/webm",
+    "codec": "vp9",
+    "alphaWhen": {}
+  },
+  "params": [
+    {
+      "id": "voice",
+      "type": "select",
+      "group": "voice",
+      "label": "音色",
+      "default": "mizai",
+      "options": [
+        {
+          "value": "mizai",
+          "label": "咪仔"
+        },
+        {
+          "value": "clone",
+          "label": "克隆音",
+          "hint": "火山声音复刻 2.0 的音色 ID"
+        }
+      ]
+    },
+    {
+      "id": "cloneId",
+      "type": "text",
+      "group": "voice",
+      "label": "克隆音 ID",
+      "when": {
+        "voice": [
+          "clone"
+        ]
+      },
+      "default": "",
+      "maxLength": 64,
+      "pattern": "^S_[A-Za-z0-9_-]{2,60}$",
+      "placeholder": "S_xxxxxxxx"
+    },
+    {
+      "id": "split",
+      "type": "select",
+      "group": "story",
+      "label": "分段方式",
+      "default": "semantic",
+      "options": [
+        {
+          "value": "semantic",
+          "label": "AI 按意思",
+          "hint": "AI 找话题转折处切段，顺带定片名和人物外观；空行和 --- 一定换段"
+        },
+        {
+          "value": "paragraph",
+          "label": "按段落",
+          "hint": "尽量一个自然段一段，过长的再切"
+        },
+        {
+          "value": "length",
+          "label": "按字数",
+          "hint": "按目标字数在句号处切，不调用 AI"
+        }
+      ]
+    },
+    {
+      "id": "segmentChars",
+      "type": "number",
+      "group": "story",
+      "label": "每段字数",
+      "min": 60,
+      "max": 200,
+      "step": 10,
+      "default": 120,
+      "unit": "字",
+      "hint": "口播段的目标长度；一段 = 一条配音，硬上限 200 字"
+    },
+    {
+      "id": "size",
+      "type": "select",
+      "group": "scene",
+      "label": "画幅",
+      "default": "1920x1080",
+      "options": [
+        {
+          "value": "1280x720",
+          "label": "16:9 · 720p"
+        },
+        {
+          "value": "1920x1080",
+          "label": "16:9 · 1080p"
+        },
+        {
+          "value": "1080x1920",
+          "label": "9:16 竖屏"
+        },
+        {
+          "value": "1080x1080",
+          "label": "1:1 方形"
+        }
+      ]
+    },
+    {
+      "id": "tail",
+      "type": "number",
+      "group": "timing",
+      "label": "结尾停留",
+      "min": 0,
+      "max": 3,
+      "step": 0.5,
+      "default": 0,
+      "unit": "秒",
+      "hint": "配音结束后停在最后一块黑板；0 = 画面和配音同时结束"
+    },
+    {
+      "id": "fps",
+      "type": "select",
+      "group": "timing",
+      "label": "帧率",
+      "default": "30",
+      "options": [
+        {
+          "value": "24",
+          "label": "24 fps"
+        },
+        {
+          "value": "30",
+          "label": "30 fps"
+        }
+      ]
+    },
+    {
+      "id": "subtitles",
+      "type": "select",
+      "group": "output",
+      "label": "字幕",
+      "default": "on",
+      "options": [
+        {
+          "value": "on",
+          "label": "生成",
+          "hint": "按配音逐字时间戳切好字幕条，进时间轴后可直接改字"
+        },
+        {
+          "value": "off",
+          "label": "不要"
+        }
+      ]
+    },
+    {
+      "id": "subtitleChars",
+      "type": "number",
+      "group": "output",
+      "label": "每条字数",
+      "min": 8,
+      "max": 30,
+      "step": 1,
+      "default": 18,
+      "when": {
+        "subtitles": [
+          "on"
+        ]
+      }
+    },
+    {
+      "id": "effect",
+      "type": "select",
+      "group": "scene",
+      "label": "文字效果",
+      "default": "auto",
+      "options": [
+        {
+          "value": "auto",
+          "label": "自动搭配"
+        },
+        {
+          "value": "dynamic-pop",
+          "label": "弹入标题"
+        },
+        {
+          "value": "dynamic-type",
+          "label": "打字显现"
+        },
+        {
+          "value": "dynamic-wave",
+          "label": "波浪文字"
+        },
+        {
+          "value": "dynamic-stack",
+          "label": "逐词叠入"
+        },
+        {
+          "value": "dynamic-flow",
+          "label": "流动归位"
+        },
+        {
+          "value": "dynamic-cross",
+          "label": "十字排版"
+        }
+      ]
+    },
+    {
+      "id": "motion",
+      "type": "number",
+      "group": "timing",
+      "label": "运动强度",
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "default": 0.7
+    },
+    {
+      "id": "textColor",
+      "type": "text",
+      "group": "scene",
+      "label": "文字颜色",
+      "default": "#f8f5e9",
+      "pattern": "^#[0-9a-fA-F]{6}$",
+      "maxLength": 7,
+      "placeholder": "#f8f5e9"
+    },
+    {
+      "id": "accent",
+      "type": "text",
+      "group": "scene",
+      "label": "强调色",
+      "default": "#ffb454",
+      "pattern": "^#[0-9a-fA-F]{6}$",
+      "maxLength": 7,
+      "placeholder": "#ffb454"
+    },
+    {
+      "id": "font",
+      "type": "select",
+      "group": "text",
+      "label": "字体",
+      "default": "MicrosoftYaHei",
+      "options": [
+        {
+          "value": "MicrosoftYaHei",
+          "label": "微软雅黑"
+        },
+        {
+          "value": "SimHei",
+          "label": "黑体"
+        },
+        {
+          "value": "KaiTi",
+          "label": "楷体"
+        }
+      ]
+    }
+  ],
+  "quick": [
+    "voice",
+    "split",
+    "size",
+    "effect",
+    "subtitles"
+  ],
+  "planner": {
+    "maxElements": 1,
+    "system": "按口播时间戳拆分短句，每个镜头显示一条原文，不改写、不省略文字。按顺序安排文字镜头，在配音讲到对应内容时显示。"
+  },
+  "runtime": {
+    "type": "text",
+    "engine": "jizura"
+  }
+}

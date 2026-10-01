@@ -4,6 +4,7 @@ import { flushSync } from 'react-dom'
 import { FANCY_PRESETS, FANCY_CATEGORIES, clonePresetFancy } from '../src/lib/fancyText'
 import { drawTextClip } from '../src/lib/monitorDraw'
 import { FancyTextPanel } from '../src/components/FancyTextPanel'
+import { DynamicTextPanel } from '../src/components/DynamicTextPanel'
 import { SkillsPanel } from '../src/components/SkillsPanel'
 import { DYNAMIC_TEXT_PRESETS } from '../src/lib/dynamicTextPack'
 import { useApp } from '../src/store'
@@ -120,8 +121,7 @@ test('library creates editable dynamic clip; edits, undo and JSON roundtrip reta
   try {
     flushSync(() => root.render(<FancyTextPanel />))
     check(!host.querySelector('[data-testid="fancy-cat-dynamic"]'), 'font library still exposes dynamic entry')
-    flushSync(() => root.render(<SkillsPanel />))
-    flushSync(() => host.querySelector<HTMLButtonElement>('[data-testid="skill-pick-jizura-dynamic-text"]')!.click())
+    flushSync(() => root.render(<DynamicTextPanel onBack={() => {}} />))
     check(host.querySelectorAll('[data-testid^="fancy-preset-dynamic-"]').length === 6, 'extension must show all six templates')
     await frames()
     check(host.querySelector('[data-testid="dynamic-motion"]'), 'dynamic parameters missing')
@@ -151,14 +151,12 @@ test('library creates editable dynamic clip; edits, undo and JSON roundtrip reta
     check(reopened.text.content === '修改之后' && reopened.text.fancy.dynamic.seed === (shuffled.text!.fancy as any).dynamic.seed, 'save data changed')
     flushSync(() => useApp.getState().undo())
     check(useApp.getState().sequences.find(s => s.id === seq.id)!.clips.find(c => c.id === clip.id)!.text!.content === original, 'undo fails')
-    flushSync(() => host.querySelector<HTMLButtonElement>('[data-testid="dynamic-pack-back"]')!.click())
-    check(host.querySelector('[data-testid="skill-picker"]'), 'extension cannot return to pack list')
-    flushSync(() => host.querySelector<HTMLButtonElement>('[data-testid="skill-pick-jizura-dynamic-text"]')!.click())
-    check(host.querySelector<HTMLTextAreaElement>('[data-testid="fancy-content"]')!.value === original, 'reopened extension loses selected clip')
     flushSync(() => root.render(<FancyTextPanel />))
     check(!host.querySelector('[data-testid="dynamic-controls"]'), 'font editor must not edit dynamic clips')
     flushSync(() => root.render(<SkillsPanel />))
-    check(host.querySelector('[data-testid="dynamic-text-extension"]'), 'saved dynamic selection must reopen the extension')
+    check(host.querySelector('[data-testid="skill-prompt"]'), 'extension must open narration input')
+    check(host.querySelector('[data-testid="skill-generate"]')?.textContent?.includes('一键成片'), 'extension must use production action')
+    check(host.querySelector('[data-testid="skill-auto-timeline"]'), 'extension must offer automatic timeline placement')
   } finally { root.unmount(); host.remove() }
 })
 

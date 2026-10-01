@@ -14,7 +14,7 @@
  *   - 段与段首尾相接：按各段配音片段现在的位置排，配音变长 / 变短、中间插了新段时，后面的段整体顺移（保留用户留的空隙）
  */
 import { appendGroupSlot, useApp } from '../store'
-import type { ChalkStroke, Clip, MediaItem, ProductionPlacement, Transform2D } from '../types'
+import { defaultText, type ChalkStroke, type Clip, type MediaItem, type ProductionPlacement, type Transform2D } from '../types'
 import { aiUrl } from './aiFetch'
 import { isSameAiMedia } from './aiJobImport'
 import { subtitleClipStyle, type TimelinePlacement } from './aiSkills'
@@ -191,6 +191,21 @@ export function syncProduction(p: Production): boolean {
       if (!r || !b.render) continue
       const fps = r.fps || 30
       const boardEnd = r.endMs / 1000
+      if (r.dynamicText) {
+        const key = `${seg.id}/${b.id}/text`
+        const rev = b.render.hash
+        wanted.add(key)
+        const old = byKey.get(key)?.[0]
+        if (old?.meta?.source?.rev === rev || (!old && placed[key] === rev)) continue
+        const start = snap(toTimeline(m, r.startMs / 1000))
+        const end = snap(toTimeline(m, boardEnd))
+        if (old) patches[old.id] = null
+        items.push({ text: { ...defaultText(), ...r.dynamicText, animIn: 'none', animOut: 'none' }, start,
+          duration: Math.max(1 / projFps, end - start), lane: 1, name: r.dynamicText.content,
+          transform: old?.transform, keyframes: old?.keyframes, source: { key, rev } })
+        placed[key] = rev
+        continue
+      }
       for (const [j, e] of r.elements.entries()) {
         const el = b.elements.find((x) => x.id === e.id)
         const name = el?.label || e.label || e.id

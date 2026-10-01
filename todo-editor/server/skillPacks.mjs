@@ -168,6 +168,11 @@ export function validateSkillPack(raw, packDir) {
     if (raw.runtime != null) fail('runtime', 'tts 管线由宿主调 TTS_timeline，不带渲染端')
     return { ...raw, pipeline }
   }
+  if (raw.runtime?.type === 'text') {
+    onlyKeys(raw.runtime, ['type', 'engine'], 'runtime')
+    if (pipeline !== 'production' || raw.runtime.engine !== 'jizura') fail('runtime', 'text 运行时只支持 production 管线的 jizura 引擎')
+    return { ...raw, pipeline }
+  }
   onlyKeys(raw.runtime, ['type', 'entry', 'timeoutSec'], 'runtime')
   if (raw.runtime.type !== 'python') fail('runtime.type', 'v1 只支持 "python"')
   const entry = String(raw.runtime.entry || '')
@@ -191,6 +196,11 @@ function validateElementsPipeline(raw) {
     }
   }
   str(raw.planner.system, 'planner.system', { min: 20, max: 2000 })
+
+  if (raw.runtime?.type === 'text') {
+    if (raw.assets != null) fail('assets', '动态文字由宿主渲染，不使用生图素材')
+    return
+  }
 
   const a = raw.assets
   onlyKeys(a, ['models', 'resolution', 'template', 'roles', 'avoid'], 'assets')

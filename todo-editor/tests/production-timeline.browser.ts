@@ -6,6 +6,7 @@ import { useApp } from '../src/store'
 import { syncProduction } from '../src/lib/productionTimeline'
 import type { Production, ProductionBoard, ProductionSegment } from '../src/lib/production'
 import { defaultScene3d, type Clip, type Track } from '../src/types'
+import { buildEditGraph } from '../src/lib/editGraph'
 
 const results: { name: string; ok: boolean; error?: string }[] = []
 function check(ok: unknown, message: string) { if (!ok) throw new Error(message) }
@@ -176,4 +177,25 @@ test('关掉自动入轨后不再改时间轴', () => {
   check(!syncProduction(production([g1, g2])), '不应改动')
 })
 
-;(window as unknown as { productionTests: unknown }).productionTests = { failed: results.filter((r) => !r.ok).length, results }
+let exportSequence: unknown
+test('真实动态文字成片文档自动入轨，包含配音和可编辑文字且重复同步不会重复添加', () => {
+  const p = (window as any).dynamicProductionFixture as Production
+  const st = useApp.getState()
+  useApp.setState({ selectedClipIds: [], media: [], folders: [],
+    sequences: [{ ...st.seq(), clips: [], workIn: 0, workOut: 8 }],
+    settings: { ...st.settings, width: 640, height: 360, fps: 30,
+      aiProductions: { [p.id]: { t0: 0, auto: true, placed: {}, createdAt: 0 } } } })
+  check(syncProduction(p), '动态成片没有入轨')
+  const clips = useApp.getState().seq().clips
+  const text = clips.filter(c => c.text?.fancy?.dynamic)
+  check(text.length === p.segments.flatMap(s => s.boards).length, '文字镜头缺失')
+  check(clips.some(c => c.meta?.source?.key?.endsWith('/voice')), '配音缺失')
+  check(text.every(c => !!c.linkedId && c.duration > 0 && !c.mediaId), '镜头须为链接配音的可编辑文字')
+  check(text.map(c => c.text!.content).join('') === p.script, '口播文字被丢弃或改写')
+  check(!syncProduction(p), '重复同步不应重复添加')
+  const state = useApp.getState(); const sq = state.seq()
+  const media = state.media.map(m => ({ ...m, path: m.kind === 'audio' ? m.url : m.path }))
+  exportSequence = buildEditGraph({ clips: sq.clips, tracks: sq.tracks, media,
+    settings: state.settings, workIn: 0, workOut: p.segments.reduce((n, s) => n + (s.voice?.duration || 0), 0) })
+})
+;(window as unknown as { productionTests: unknown }).productionTests = { failed: results.filter((r) => !r.ok).length, results, exportSequence }

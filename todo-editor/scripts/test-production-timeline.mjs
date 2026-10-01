@@ -5,9 +5,11 @@ import { spawn } from 'node:child_process'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
+import './test-dynamic-production.mjs'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const out = resolve(root, 'native/test-output/production-timeline')
+const productionFixture = resolve(root, 'native/test-output/dynamic-production', process.argv.includes('--live') ? 'live-production.json' : 'production.json')
 mkdirSync(out, { recursive: true })
 const bundle = await build({ entryPoints: [resolve(root, 'tests/production-timeline.browser.ts')], bundle: true,
   write: false, format: 'iife', jsx: 'automatic', define: { 'process.env.NODE_ENV': '"production"' } })
@@ -15,13 +17,16 @@ writeFileSync(resolve(out, 'index.html'), '<!doctype html><meta charset="utf-8">
 writeFileSync(resolve(out, 'bundle.js'), bundle.outputFiles[0].text)
 writeFileSync(resolve(out, 'run.cjs'), `
 const {app, BrowserWindow} = require('electron');
-const {readFileSync} = require('node:fs');
+const {readFileSync, writeFileSync} = require('node:fs');
 app.setPath('userData', ${JSON.stringify(resolve(out, 'profile'))});
 app.whenReady().then(async () => {
   try {
     const win = new BrowserWindow({show:false, webPreferences:{backgroundThrottling:false}});
     await win.loadFile(${JSON.stringify(resolve(out, 'index.html'))});
+    await win.webContents.executeJavaScript('window.dynamicProductionFixture = ' + readFileSync(${JSON.stringify(productionFixture)}, 'utf8'));
     const result = await win.webContents.executeJavaScript(readFileSync(${JSON.stringify(resolve(out, 'bundle.js'))}, 'utf8') + '\\nwindow.productionTests');
+    if (result.exportSequence) writeFileSync(${JSON.stringify(resolve(root, 'native/test-output/dynamic-production/sequence.json'))}, JSON.stringify(result.exportSequence));
+    delete result.exportSequence;
     console.log(JSON.stringify(result, null, 2));
     app.exit(result.failed ? 1 : 0);
   } catch (e) { console.error(e); app.exit(1); }

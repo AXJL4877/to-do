@@ -145,7 +145,7 @@ export function ProductionStudio({ id, pack, onClose }: { id: string; pack: Skil
             onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== doc.title) void edit([{ op: 'setTitle', title: v }]) }}
           />
           <span className="text-[11px] truncate" style={{ color: 'var(--text-muted)' }}>
-            {doc.segments.length ? `${doc.segments.length} 段 · ${boards} 块黑板 · ${fmt(total)}` : '还没分段'}
+            {doc.segments.length ? `${doc.segments.length} 段 · ${boards} ${doc.skillId === 'builtin.dynamic-text' ? '个文字镜头' : '块黑板'} · ${fmt(total)}` : '还没分段'}
           </span>
           <span className="min-w-0 flex-1 flex items-center gap-2">
             {running && (
@@ -337,7 +337,7 @@ const SegmentEditor = memo(function SegmentEditor({ ctx, seg, index }: { ctx: Ct
 
       {seg.boards.map((b, k) => <BoardCard key={b.id} ctx={ctx} seg={seg} board={b} k={k} />)}
 
-      {seg.voice && seg.plan && <AddBoard ctx={ctx} seg={seg} starts={sentenceStarts} />}
+      {seg.voice && seg.plan && ctx.doc.skillId !== 'builtin.dynamic-text' && <AddBoard ctx={ctx} seg={seg} starts={sentenceStarts} />}
       {!seg.plan && !locked && (
         <p className="m-0 text-[11px]" style={{ color: 'var(--text-muted)' }}>这段还没有分镜：点「只生成这段」或底部的「先出分镜」。</p>
       )}
@@ -374,6 +374,15 @@ const BoardCard = memo(function BoardCard({ ctx, seg, board, k }: { ctx: Ctx; se
   const end = seg.boards[k + 1]?.start ?? phrases.length
   const range = phrases.slice(board.start, end).map((p, j) => ({ ...p, i: board.start + j }))
   const dirty = board.dirty || board.elements.some((e) => e.dirty)
+  if (ctx.doc.skillId === 'builtin.dynamic-text') return <section className={clsx('prod-board', dirty && 'is-dirty')} data-testid={`production-board-${board.id}`}>
+    <div className="flex items-center gap-2"><strong>文字镜头 {k + 1}</strong><span className="prod-badge">{fmt(span.start)} – {fmt(span.end)}</span>
+      {dirty && <span className="prod-badge is-dirty">待生成</span>}
+      <button type="button" className="btn btn-ghost ml-auto" disabled={locked} onClick={() => void run({ boards: [board.id] })}>更新此镜头</button>
+    </div>
+    {board.elements.map(el => <textarea key={`${el.id}/${el.label}`} className="skill-textarea" aria-label="镜头文字" rows={2} defaultValue={el.label} maxLength={12} disabled={locked}
+      onBlur={e => { const label = e.target.value.trim(); if (label && label !== el.label) void edit([{ op: 'setElement', element: el.id, patch: { label } }]) }} />)}
+    <p className="editor-hint">自动按配音对时 · {board.render?.result?.layout || '待安排效果'} · 入轨后可在片段属性中编辑效果</p>
+  </section>
   return (
     <section className={clsx('prod-board', dirty && 'is-dirty')} data-testid={`production-board-${board.id}`}>
       <div className="flex items-center gap-2">

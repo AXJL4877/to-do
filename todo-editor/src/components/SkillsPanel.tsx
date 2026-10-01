@@ -11,7 +11,6 @@ import {
 import { isNarratedJob, narratedStage, type NarratedJob } from '../lib/narratedTimeline'
 import { createProduction, listProductions, type ProductionSummary } from '../lib/production'
 import { forgetProduction, registerProduction } from '../lib/productionTimeline'
-import { DynamicTextPanel } from './DynamicTextPanel'
 import { DYNAMIC_TEXT_PACK } from '../lib/dynamicTextPack'
 import { ProductionStudio } from './ProductionStudio'
 import { PlacementControl, SkillParamControl, SkillStudio } from './SkillStudio'
@@ -139,7 +138,7 @@ const ProductionCard = memo(function ProductionCard({ p, onOpen, onRemove }: { p
           />
         ) : (
           <span className="text-[10px] truncate" style={{ color: failed ? 'var(--error)' : 'var(--text-muted)' }} title={p.status?.error || p.status?.phase}>
-            {[p.segments ? `${p.segments} 段 · ${p.boards} 块黑板 · ${p.duration.toFixed(1)}s` : '', phaseText(p.status?.phase)].filter(Boolean).join(' · ')}
+            {[p.segments ? `${p.segments} 段 · ${p.boards} ${p.skillId === DYNAMIC_TEXT_PACK.id ? '个文字镜头' : '块黑板'} · ${p.duration.toFixed(1)}s` : '', phaseText(p.status?.phase)].filter(Boolean).join(' · ')}
           </span>
         )}
       </button>
@@ -179,7 +178,8 @@ export function SkillsPanel() {
   // 拼成字符串再比：每次返回新数组会让订阅一直判定为变化
   const productionIds = useApp((s) => Object.keys(s.settings.aiProductions ?? {}).join(','))
 
-  const pack = packs?.find((p) => p.id === selectedId) ?? null
+  const availablePacks = [DYNAMIC_TEXT_PACK, ...(packs ?? []).filter(p => p.id !== DYNAMIC_TEXT_PACK.id)]
+  const pack = availablePacks.find((p) => p.id === selectedId) ?? null
   const emptyDraft = useMemo<Draft>(() => ({ prompt: '', params: pack ? defaultSkillParams(pack) : {}, plan: null }), [pack])
   const draft = (pack && drafts[pack.id]) || emptyDraft
   const { prompt, params, plan } = draft
@@ -252,7 +252,7 @@ export function SkillsPanel() {
         ...(autoTimeline ? { placement, ...(placement === 'playhead' ? { placeAt } : {}) } : {}),
       })
       registerProduction(production.id, { auto: autoTimeline, placement, placeAt, estimate: speechSeconds(prompt) })
-      useApp.getState().setToast(stopAfter ? `${pack.name}：先配音、分段、拆分镜，好了在成片工作台里挑` : `${pack.name}已开始${autoTimeline ? '，配音和画面边生成边入轨' : ''}`)
+      useApp.getState().setToast(stopAfter ? `${pack.name}：先分段、配音、安排镜头，好了在成片工作台里编辑` : `${pack.name}已开始${autoTimeline ? '，配音和画面边生成边入轨' : ''}`)
       patchDraft({ prompt: '' })
       setOpenProduction(stopAfter ? production.id : null)
       void refreshJobs()
@@ -309,19 +309,12 @@ export function SkillsPanel() {
     void refreshJobs()
   }, [refreshJobs])
 
-  if (selectedId === DYNAMIC_TEXT_PACK.id) return <DynamicTextPanel onBack={() => select(null)} />
-
   if (!pack) {
     return (
       <div className="flex flex-col gap-1.5 p-1" data-testid="skill-picker">
-        <button type="button" className="skill-card" data-testid="skill-pick-jizura-dynamic-text" onClick={() => select(DYNAMIC_TEXT_PACK.id)}>
-          <span className="skill-card-thumb"><span style={{ fontSize: 22, fontWeight: 800, color: 'var(--accent)' }}>字</span></span>
-          <span className="min-w-0 flex-1 flex flex-col gap-0.5"><span className="skill-card-name">{DYNAMIC_TEXT_PACK.name}</span><p className="skill-card-desc">{DYNAMIC_TEXT_PACK.description}</p></span>
-          <ChevronRight size={14} />
-        </button>
         {!packs && !loadError && <p className="editor-hint">正在加载其他拓展…</p>}
         {loadError && <p className="editor-hint">其他拓展暂不可用：{loadError}</p>}
-        {(packs ?? []).map((p) => {
+        {availablePacks.map((p) => {
           const running = jobs.filter((j) => jobSkillId(j) === p.id && (j.status === 'queued' || j.status === 'running')).length
           return (
             <button key={p.id} type="button" className="skill-card" title={p.description} data-testid={`skill-pick-${p.id}`} onClick={() => select(p.id)}>
@@ -400,7 +393,7 @@ export function SkillsPanel() {
           {isProduction ? '一键成片' : '生成'}
         </button>
         {isProduction && (
-          <button type="button" className="btn btn-ghost" title="先配音、分段、拆分镜，不生图不渲染：在工作台里挑好描述再出画面" data-testid="skill-plan-first"
+          <button type="button" className="btn btn-ghost" title={pack.id === DYNAMIC_TEXT_PACK.id ? '先分段配音、安排文字镜头，在工作台里检查后再生成画面' : '先配音、分段、拆分镜，不生图不渲染：在工作台里挑好描述再出画面'} data-testid="skill-plan-first"
             disabled={!prompt.trim() || submitting} onClick={() => void submitProduction('plan').catch(() => {})}>
             <Wand2 size={13} />先出分镜
           </button>

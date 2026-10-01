@@ -1,3 +1,4 @@
+import { isDynamicText } from './dynamicText.mjs'
 /**
  * 成片运行器：把文档里「需要重做」的节点按层跑完。
  *
@@ -254,7 +255,7 @@ function countMissing(ctx, planOnly) {
     if (voice.dirty(ctx, seg) || storyboard.dirty(ctx, seg)) { n++; continue }
     if (planOnly) continue
     const sched = segmentSchedule(ctx, seg, gi === ctx.doc.segments.length - 1)
-    seg.boards.forEach((b, k) => { if (render.dirty(ctx, seg, b, sched[k]) || b.elements.some((e) => !asset.usable(ctx, e) || !pickedVariant(e))) n++ })
+    seg.boards.forEach((b, k) => { if (render.dirty(ctx, seg, b, sched[k]) || b.elements.some((e) => !asset.usable(ctx, e) || (!isDynamicText(ctx) && !pickedVariant(e)))) n++ })
   }
   return n
 }
