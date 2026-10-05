@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useApp } from '../store'
 import { desktop, isDesktopApp } from '../lib/desktop'
-import { fetchDouyinMeta, generateDouyinCover, generateMetaAndCover, resolvePublishBrief } from '../lib/douyinPublishAi'
+import { fetchDouyinMeta, generateDouyinCover, generateMetaAndCover, pickCoverHeadline, pickCoverStyleHint, resolvePublishBrief } from '../lib/douyinPublishAi'
 import { takeDouyinPendingVideo } from '../lib/douyinPending'
 import { pathToFileUrl } from '../lib/importFiles'
 import { CreativeProgress } from './CreativeProgress'
+import { runIndependentTasks } from '../lib/independentTasks'
 
 type Asset = {
   id: string
@@ -62,11 +63,21 @@ function saveUi(next: { selectedSlug?: string | null; tab?: Tab }) {
   }))
 }
 
-function coverSrc(a: Asset | null | undefined) {
+function withBust(url: string, bust?: number | string) {
+  if (!url || bust == null || bust === '') return url
+  return `${url}${url.includes('?') ? '&' : '?'}t=${bust}`
+}
+
+function coverSrc(a: Asset | null | undefined, bust?: number | string) {
   if (!a) return ''
-  if (a.cover_url) return a.cover_url
-  if (a.cover_path) return pathToFileUrl(a.cover_path)
+  if (a.cover_url) return withBust(a.cover_url, bust ?? a.updated_at)
+  if (a.cover_path) return withBust(pathToFileUrl(a.cover_path), bust ?? a.updated_at)
   return ''
+}
+
+function seedStyleHint(seed: { coverText?: string; theme?: string; visual?: string } | null | undefined) {
+  if (!seed) return ''
+  return [seed.coverText, seed.theme, seed.visual].filter(Boolean).join('。')
 }
 
 function fileBase(p?: string | null) {
@@ -111,15 +122,17 @@ export function DouyinPublishPanel() {
   )
   const lastDone = recentExports[0]
 
+  const publishSeed = useApp((s) => s.publishSeed)
+  const coverSeed = useApp((s) => s.coverSeed)
   const [tab, setTab] = useState<Tab>(() => loadUi().tab || 'publish')
   const [videoPath, setVideoPath] = useState(lastDone?.path ?? '')
   const [coverPath, setCoverPath] = useState('')
   const [coverPreview, setCoverPreview] = useState('')
-  const [title, setTitle] = useState(projectName || '成片')
-  const [caption, setCaption] = useState('仅供参考，不构成投资建议。')
-  const [tags, setTags] = useState('财经,A股')
-  const [styleHint, setStyleHint] = useState('财经黑板粉笔风，深色黑板，粉笔白字与橙色强调')
-  const [slug, setSlug] = useState(() => defaultSlug(projectName || '成片'))
+  const [title, setTitle] = useState(() => coverSeed?.title || publishSeed?.title || projectName || '成片')
+  const [caption, setCaption] = useState(() => publishSeed?.description || '仅供参考，不构成投资建议。')
+  const [tags, setTags] = useState(() => publishSeed?.tags?.length ? publishSeed.tags.join(',') : '财经,A股')
+  const [styleHint, setStyleHint] = useState(() => seedStyleHint(coverSeed) || '财经黑板粉笔风，深色黑板，粉笔白字与橙色强调')
+  const [slug, setSlug] = useState(() => defaultSlug(coverSeed?.title || publishSeed?.title || projectName || '成片'))
   /** 拆开忙态：文案 / 封面可并行；投放与 ADB 共用 actionBusy */
   const [metaBusy, setMetaBusy] = useState(false)
   const [coverBusy, setCoverBusy] = useState(false)
@@ -141,6 +154,34 @@ export function DouyinPublishPanel() {
   const [sourceNote, setSourceNote] = useState<string | null>(null)
   /** 发布台专用文稿（优先工程口播），不覆盖工程口播备忘录 */
   const [publishScript, setPublishScript] = useState(script)
+  const titleRef = useRef(title)
+  const styleHintRef = useRef(styleHint)
+  const coverBusyRef = useRef(coverBusy)
+  const coverPreviewRef = useRef(coverPreview)
+  titleRef.current = title
+  styleHintRef.current = styleHint
+  coverBusyRef.current = coverBusy
+  coverPreviewRef.current = coverPreview
+
+  useLayoutEffect(() => {
+    if (!publishSeed) return
+    setTitle(publishSeed.title || projectName || '成片')
+    setCaption(publishSeed.description || '')
+    setTags(publishSeed.tags.join(','))
+    setPublishScript(publishSeed.body)
+    setSlug(defaultSlug(publishSeed.title || projectName || '成片'))
+    setSourceNote(`发布信息来自稿件版本 ${publishSeed.revision}，不含创作简报`)
+    setTab('stage')
+  }, [publishSeed, projectName])
+
+  useLayoutEffect(() => {
+    if (!coverSeed) return
+    if (coverSeed.title) setTitle(coverSeed.title)
+    const hint = seedStyleHint(coverSeed)
+    if (hint) setStyleHint(hint)
+    setCoverMsg('已带入标题、封面短句和主题。确认后再生成，不会自动开始。')
+    setTab('stage')
+  }, [coverSeed])
 
   const selectedAsset = useMemo(
     () => assets.find((a) => a.slug === selected) || null,
@@ -233,6 +274,17 @@ export function DouyinPublishPanel() {
       if (!alive || !pack) return
       if (!restored) {
         const exportPath = pending || lastDone?.path || ''
+        const seeded = !!(useApp.getState().coverSeed || useApp.getState().publishSeed)
+        const keepCover = coverBusyRef.current || !!coverPreviewRef.current
+
+        if (seeded) {
+          if (exportPath) {
+            setVideoPath(exportPath)
+            setVideoLocked(true)
+          }
+          setRestored(true)
+          return
+        }
 
         // 1) 从导出队列点进来，或最近导出尚未进资产库 → 新投放该成片
         if (exportPath && (pending || !pack.assets.some((a) => normPath(a.video_path) === normPath(exportPath)))) {
@@ -240,15 +292,19 @@ export function DouyinPublishPanel() {
           setSelected(null)
           setVideoPath(exportPath)
           setVideoLocked(true)
-          setCoverPath('')
-          setCoverPreview('')
+          if (!keepCover) {
+            setCoverPath('')
+            setCoverPreview('')
+          }
           saveUi({ selectedSlug: null, tab: 'stage' })
           setMsg(`已选中成片：${fileBase(exportPath)}（来自最近导出）`)
           try {
             const brief = await resolvePublishBrief({ projectName, script })
-            setTitle(brief.title)
-            setSlug(defaultSlug(brief.title))
-            setStyleHint(brief.styleHint)
+            if (!coverBusyRef.current && !coverPreviewRef.current) {
+              setTitle(brief.title)
+              setSlug(defaultSlug(brief.title))
+              setStyleHint(brief.styleHint)
+            }
             setPublishScript(brief.script || script)
             setSourceNote(applyBriefNote(brief.source, brief.title))
           } catch { /* */ }
@@ -257,7 +313,7 @@ export function DouyinPublishPanel() {
         }
 
         // 2) 资产库已有同路径视频 → 进该条发布页
-        if (exportPath) {
+        if (exportPath && !coverBusyRef.current && !coverPreviewRef.current) {
           const hitByVideo = pack.assets.find((a) => normPath(a.video_path) === normPath(exportPath))
           if (hitByVideo) {
             applyAssetToForm(hitByVideo)
@@ -375,17 +431,26 @@ export function DouyinPublishPanel() {
 
   const makeCover = async () => {
     if (coverBusy) return
-    if (!title.trim()) { setCoverMsg('请先填写或生成标题'); return }
+    const headline = pickCoverHeadline({
+      formTitle: titleRef.current,
+      seedTitle: useApp.getState().coverSeed?.title,
+      projectName,
+    })
+    if (!headline.trim()) { setCoverMsg('请先填写或生成标题'); return }
+    if (headline !== title) setTitle(headline)
     setCoverBusy(true)
     try {
       const r = await generateDouyinCover({
-        title: title.trim(),
-        styleHint,
+        title: headline,
+        styleHint: pickCoverStyleHint({
+          formHint: styleHintRef.current,
+          seedHint: seedStyleHint(useApp.getState().coverSeed),
+        }),
         quality: '1K',
         onProgress: (m) => setCoverMsg(m),
       })
       setCoverPath(r.path)
-      setCoverPreview(r.previewUrl)
+      setCoverPreview(withBust(r.previewUrl, r.jobId))
       if (tab === 'publish' && selected) {
         const attached = await desktop()?.douyinAttachCover?.({ slug: selected, coverPath: r.path })
         if (attached?.ok) {
@@ -413,51 +478,61 @@ export function DouyinPublishPanel() {
       const brief = await resolvePublishBrief({ projectName, script: script || publishScript })
       setPublishScript(brief.script || script || publishScript)
       setSourceNote(applyBriefNote(brief.source, brief.title))
-      const coverTitle = (projectName || brief.title || title || '成片').trim().slice(0, 22)
+      const coverTitle = pickCoverHeadline({
+        formTitle: titleRef.current,
+        seedTitle: useApp.getState().coverSeed?.title,
+        briefTitle: brief.title,
+        projectName,
+      })
+      const coverHint = pickCoverStyleHint({
+        formHint: styleHintRef.current,
+        seedHint: seedStyleHint(useApp.getState().coverSeed),
+        briefHint: brief.styleHint,
+      })
       setMetaMsg('文案生成中…')
       setCoverMsg('封面生成中…')
-      const [metaSettled, coverSettled] = await Promise.allSettled([
-        fetchDouyinMeta({
-          projectName: projectName || coverTitle,
-          script: brief.script || script || publishScript,
-          hint: coverTitle !== projectName ? coverTitle : undefined,
-        }),
-        generateDouyinCover({
-          title: coverTitle,
-          styleHint: brief.styleHint || styleHint,
-          quality: '1K',
-          onProgress: (m) => setCoverMsg(m),
-        }),
+      await runIndependentTasks([
+        {
+          run: () => fetchDouyinMeta({
+            projectName: projectName || coverTitle,
+            script: brief.script || script || publishScript,
+            hint: coverTitle !== projectName ? coverTitle : undefined,
+          }),
+          onSuccess: (meta) => {
+            setTitle(meta.title)
+            setCaption(meta.caption)
+            setTags(meta.tags.join(','))
+            if (tab === 'stage') setSlug(defaultSlug(meta.title))
+            setMetaMsg('文案已生成')
+          },
+          onError: e => setMetaMsg(e instanceof Error ? e.message : String(e)),
+          onFinally: () => setMetaBusy(false),
+        },
+        {
+          run: () => generateDouyinCover({
+            title: coverTitle,
+            styleHint: coverHint,
+            quality: '1K',
+            onProgress: setCoverMsg,
+          }),
+          onSuccess: async (cover) => {
+            setCoverPath(cover.path)
+            setCoverPreview(withBust(cover.previewUrl, cover.jobId))
+            setCoverMsg('封面已生成')
+            if (tab === 'publish' && selected) {
+              const attached = await desktop()?.douyinAttachCover?.({ slug: selected, coverPath: cover.path })
+              setCoverMsg(attached?.ok ? '封面已写入资产' : '封面已生成')
+              if (attached?.ok) await refreshAssets()
+            }
+          },
+          onError: e => setCoverMsg(e instanceof Error ? e.message : String(e)),
+          onFinally: () => setCoverBusy(false),
+        },
       ])
-      if (metaSettled.status === 'fulfilled') {
-        const meta = metaSettled.value
-        setTitle(meta.title)
-        setCaption(meta.caption)
-        setTags(meta.tags.join(','))
-        if (tab === 'stage') setSlug(defaultSlug(meta.title))
-        setMetaMsg('文案已生成')
-      } else {
-        setMetaMsg(metaSettled.reason instanceof Error ? metaSettled.reason.message : String(metaSettled.reason))
-      }
-      if (coverSettled.status === 'fulfilled') {
-        const cover = coverSettled.value
-        setCoverPath(cover.path)
-        setCoverPreview(cover.previewUrl)
-        if (tab === 'publish' && selected) {
-          const attached = await desktop()?.douyinAttachCover?.({ slug: selected, coverPath: cover.path })
-          setCoverMsg(attached?.ok ? '封面已写入资产' : '封面已生成')
-          if (attached?.ok) await refreshAssets()
-        } else {
-          setCoverMsg('封面已生成')
-        }
-      } else {
-        setCoverMsg(coverSettled.reason instanceof Error ? coverSettled.reason.message : String(coverSettled.reason))
-      }
     } catch (e) {
       const err = e instanceof Error ? e.message : String(e)
       setMetaMsg(err)
       setCoverMsg(err)
-    } finally {
       setMetaBusy(false)
       setCoverBusy(false)
     }
@@ -500,7 +575,17 @@ export function DouyinPublishPanel() {
         const brief = await resolvePublishBrief({ projectName, script: script || publishScript })
         setPublishScript(brief.script || script || publishScript)
         setSourceNote(applyBriefNote(brief.source, brief.title))
-        const coverTitle = (projectName || brief.title || title || '成片').trim().slice(0, 22)
+        const coverTitle = pickCoverHeadline({
+          formTitle: titleRef.current,
+          seedTitle: useApp.getState().coverSeed?.title,
+          briefTitle: brief.title,
+          projectName,
+        })
+        const coverHint = pickCoverStyleHint({
+          formHint: styleHintRef.current,
+          seedHint: seedStyleHint(useApp.getState().coverSeed),
+          briefHint: brief.styleHint,
+        })
         setMsg('文案与封面并行生成…')
         setMetaMsg('文案生成中…')
         setCoverMsg('封面生成中…')
@@ -509,7 +594,7 @@ export function DouyinPublishPanel() {
             projectName: projectName || coverTitle,
             script: brief.script || script || publishScript,
             coverTitle,
-            styleHint: brief.styleHint || styleHint,
+            styleHint: coverHint,
             onProgress: (m) => setMsg(m),
           })
           nextTitle = meta.title
@@ -522,7 +607,7 @@ export function DouyinPublishPanel() {
           setTags(nextTags)
           setSlug(nextSlug)
           setCoverPath(cover.path)
-          setCoverPreview(cover.previewUrl)
+          setCoverPreview(withBust(cover.previewUrl, cover.jobId))
           setMetaMsg('文案已生成')
           setCoverMsg('封面已生成')
         } finally {

@@ -6,6 +6,7 @@
 import { aiFetch, aiUrl } from './aiFetch'
 import { desktop } from './desktop'
 import { getProduction } from './production'
+import { readSpokenBody } from './scriptMemoDocument'
 import { useApp } from '../store'
 
 export type DouyinMeta = {
@@ -29,7 +30,33 @@ async function readJson(res: Response) {
   return j
 }
 
-const STYLE_HINT = '财经黑板粉笔风，深色黑板，粉笔白字与橙色强调，竖版封面构图'
+export const STYLE_HINT = '财经黑板粉笔风，深色黑板，粉笔白字与橙色强调，竖版封面构图'
+
+function firstText(...vals: Array<string | null | undefined>) {
+  for (const v of vals) {
+    const t = String(v || '').trim()
+    if (t) return t
+  }
+  return ''
+}
+
+/** 封面大标题：用用户正在看的表单/种子，不要被工程名盖掉 */
+export function pickCoverHeadline(parts: {
+  formTitle?: string
+  seedTitle?: string
+  briefTitle?: string
+  projectName?: string
+}) {
+  return firstText(parts.formTitle, parts.seedTitle, parts.briefTitle, parts.projectName).slice(0, 22) || '成片'
+}
+
+export function pickCoverStyleHint(parts: {
+  formHint?: string
+  seedHint?: string
+  briefHint?: string
+}) {
+  return firstText(parts.formHint, parts.seedHint, parts.briefHint) || STYLE_HINT
+}
 
 function substantial(text: string) {
   const t = text.replace(/\s+/g, '').length
@@ -72,14 +99,16 @@ export async function resolvePublishBrief(opts?: {
 }): Promise<PublishBrief> {
   const st = useApp.getState()
   const projectName = (opts?.projectName ?? st.projectName ?? '').trim()
-  const memo = (opts?.script ?? st.script ?? '').trim()
+  const body = readSpokenBody(opts?.script ?? st.script ?? '', st.scriptMemo).trim()
+  const pkg = st.publishSeed || null
+  const titled = st.scriptWorkspace?.package?.titles?.[0] || st.scriptMemo?.publish?.titles?.[0] || ''
 
-  if (substantial(memo)) {
+  if (substantial(body) || titled) {
     return {
-      title: (projectName || memo.split(/\n+/).map((l) => l.trim()).find(Boolean) || '成片').slice(0, 22),
-      script: memo,
+      title: (titled || projectName || body.split(/\n+/).map((l) => l.trim()).find(Boolean) || '成片').slice(0, 22),
+      script: body,
       source: 'script',
-      styleHint: STYLE_HINT,
+      styleHint: pkg ? [pkg.title, pkg.description].filter(Boolean).join('。') || STYLE_HINT : STYLE_HINT,
     }
   }
 
@@ -88,11 +117,11 @@ export async function resolvePublishBrief(opts?: {
     const best = await longestProjectProduction(ids)
     if (best && substantial(best.script)) {
       // 有工程口播碎片就拼在前面，主题仍用项目名
-      const script = memo && memo !== best.script ? `${memo}\n\n${best.script}` : best.script
+      const script = body && body !== best.script ? `${body}\n\n${best.script}` : best.script
       return {
         title: (projectName || best.title || '成片').slice(0, 22),
         script,
-        source: memo ? 'script' : 'production',
+        source: body ? 'script' : 'production',
         productionId: best.id,
         styleHint: STYLE_HINT,
       }
@@ -101,10 +130,10 @@ export async function resolvePublishBrief(opts?: {
     /* 成片服务不可用时退回备忘录 / 项目名 */
   }
 
-  if (memo) {
+  if (body) {
     return {
-      title: (projectName || memo.split(/\n+/).map((l) => l.trim()).find(Boolean) || '成片').slice(0, 22),
-      script: memo,
+      title: (titled || projectName || body.split(/\n+/).map((l) => l.trim()).find(Boolean) || '成片').slice(0, 22),
+      script: body,
       source: 'script',
       styleHint: STYLE_HINT,
     }
@@ -218,7 +247,10 @@ export async function generateMetaAndCover(input: {
   styleHint?: string
   onProgress?: (msg: string) => void
 }): Promise<{ meta: DouyinMeta; cover: { path: string; jobId: string; previewUrl: string } }> {
-  const coverTitle = (input.coverTitle || input.projectName || '成片').trim().slice(0, 22)
+  const coverTitle = pickCoverHeadline({
+    formTitle: input.coverTitle,
+    projectName: input.projectName,
+  })
   input.onProgress?.('文案与封面并行生成中…')
   const [meta, cover] = await Promise.all([
     fetchDouyinMeta({
