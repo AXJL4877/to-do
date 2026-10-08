@@ -14,7 +14,9 @@ node_modules
 dist
 dist-ssr
 *.local
-.data
+.data/**
+!.data/
+!.data/ai-config.json
 
 # B1 golden / test media（大文件本地生成，只提交 hashes + fixtures）
 tests/media/*.mp4

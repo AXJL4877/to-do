@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 
 process.env.TODO_DATA_DIR = mkdtempSync(path.join(tmpdir(), 'todo-ai-http-'))
+// 隔离密匙，避免本机 .env 被 bootstrap 进测试目录
+process.env.MISHI_ROOT = mkdtempSync(path.join(tmpdir(), 'todo-ai-http-mishi-'))
 
 const { handleAiHttp } = await import('../server/aiHttp.mjs')
 

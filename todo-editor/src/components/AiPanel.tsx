@@ -46,7 +46,15 @@ type AiModel = {
   qualityOptions?: readonly QualityOption[]
   defaultQuality?: string
 }
-type AiConfig = { baseUrl: string; hasApiKey: boolean; apiKeyMasked: string; chatModel?: string }
+type AiConfig = {
+  baseUrl: string
+  hasApiKey: boolean
+  apiKeyMasked: string
+  chatModel?: string
+  canImportMishi?: boolean
+  mishiRoot?: string
+  importedFrom?: string
+}
 type AiMode = 'image' | 'video' | 'audio' | 'anim'
 
 const MODE_TABS: { id: AiMode; label: string; Icon: typeof Sparkles }[] = [
@@ -186,6 +194,9 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
   const [configKey, setConfigKey] = useState('')
   const [configChatModel, setConfigChatModel] = useState('gemini-3.8-flash')
   const [configSaving, setConfigSaving] = useState(false)
+  const [configShowKey, setConfigShowKey] = useState(false)
+  const [configTesting, setConfigTesting] = useState(false)
+  const [configTestNote, setConfigTestNote] = useState<string | null>(null)
   const [models, setModels] = useState<AiModel[]>([...FALLBACK_MODELS])
   const [modelsLoading, setModelsLoading] = useState(false)
   const [modelsError, setModelsError] = useState<string | null>(null)
@@ -338,6 +349,7 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
       setConfig(next)
       setConfigBaseUrl(next.baseUrl || 'https://huniuai.com')
       setConfigChatModel(next.chatModel || 'gemini-3.8-flash')
+      setConfigTestNote(null)
     } catch { /* */ }
   }
 
@@ -366,15 +378,17 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
     }
   }
 
-  async function saveConfig() {
+  async function saveConfig(extra?: { clearApiKey?: boolean; keepOpen?: boolean; silent?: boolean }) {
     setConfigSaving(true)
     setError(null)
+    setConfigTestNote(null)
     try {
-      const body: { baseUrl: string; apiKey?: string; chatModel?: string } = {
+      const body: { baseUrl: string; apiKey?: string; chatModel?: string; clearApiKey?: boolean } = {
         baseUrl: configBaseUrl,
         chatModel: configChatModel.trim() || 'gemini-3.8-flash',
       }
-      if (configKey.trim()) body.apiKey = configKey.trim()
+      if (extra?.clearApiKey) body.clearApiKey = true
+      else if (configKey.trim()) body.apiKey = configKey.trim()
       const r = await aiFetch('/api/ai-config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -387,13 +401,64 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
       setConfigBaseUrl(next.baseUrl)
       setConfigChatModel(next.chatModel || 'gemini-3.8-flash')
       setConfigKey('')
-      setConfigOpen(false)
-      useApp.getState().setToast(`AI 配置已保存 · 聊天模型 ${next.chatModel || 'gemini-3.8-flash'}`)
+      if (!extra?.clearApiKey && !extra?.keepOpen) setConfigOpen(false)
+      if (!extra?.silent) {
+        useApp.getState().setToast(
+          extra?.clearApiKey
+            ? '已清除 API Key'
+            : `AI 设置已保存 · ${next.chatModel || 'gemini-3.8-flash'}`,
+        )
+      }
+      void refreshModels()
+      return next
+    } catch (e) {
+      setError(friendlyAiError(e instanceof Error ? e.message : String(e)))
+      return null
+    } finally {
+      setConfigSaving(false)
+    }
+  }
+
+  async function importMishiConfig() {
+    setConfigSaving(true)
+    setError(null)
+    setConfigTestNote(null)
+    try {
+      const r = await aiFetch('/api/ai-config/import-mishi', { method: 'POST' })
+      const data = await r.json()
+      if (!data.ok) throw new Error(data.error || '导入失败')
+      const next = data.config as AiConfig
+      setConfig(next)
+      setConfigBaseUrl(next.baseUrl)
+      setConfigChatModel(next.chatModel || 'gemini-3.8-flash')
+      setConfigKey('')
+      useApp.getState().setToast(`已从密匙导入 · ${next.apiKeyMasked}`)
       void refreshModels()
     } catch (e) {
       setError(friendlyAiError(e instanceof Error ? e.message : String(e)))
     } finally {
       setConfigSaving(false)
+    }
+  }
+
+  async function testAiConfig() {
+    setConfigTesting(true)
+    setConfigTestNote(null)
+    setError(null)
+    try {
+      if (configKey.trim() || configBaseUrl !== config?.baseUrl || configChatModel !== (config?.chatModel || '')) {
+        const saved = await saveConfig({ keepOpen: true, silent: true })
+        if (!saved) return
+      }
+      const r = await aiFetch('/api/ai-models?mode=image')
+      const data = await r.json()
+      if (!data.ok) throw new Error(data.error || '连接失败')
+      const n = Array.isArray(data.models) ? data.models.length : 0
+      setConfigTestNote(n ? `连接成功 · ${n} 个生图模型` : '连接成功 · 未返回模型列表')
+    } catch (e) {
+      setConfigTestNote(friendlyAiError(e instanceof Error ? e.message : String(e)))
+    } finally {
+      setConfigTesting(false)
     }
   }
 
@@ -558,8 +623,8 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
               className={clsx('icon-btn', config?.hasApiKey && 'active')}
               style={{ width: 26, height: 26 }}
               data-testid="ai-config-open"
-              title="配置 API Key 与 Base URL"
-              aria-label="配置"
+              title="AI 设置（API Key）"
+              aria-label="AI 设置"
               onClick={() => setConfigOpen(true)}
             >
               <Settings size={12} />
@@ -575,8 +640,8 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
             className={clsx('icon-btn', config?.hasApiKey && 'active')}
             style={{ width: 26, height: 26 }}
             data-testid="ai-config-open"
-            title="配置 API Key 与 Base URL"
-            aria-label="配置"
+            title="AI 设置（API Key）"
+            aria-label="AI 设置"
             onClick={() => setConfigOpen(true)}
           >
             <Settings size={12} />
@@ -1089,14 +1154,50 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
       )}
       {configOpen && (
         <div className="modal-backdrop" data-testid="ai-config-modal" onClick={() => setConfigOpen(false)}>
-          <div className="modal" style={{ width: 'min(420px, 100%)' }} onClick={(e) => e.stopPropagation()}>
+          <div className="modal" style={{ width: 'min(460px, 100%)' }} onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: 'var(--border)' }}>
-              <span className="eyebrow">AI 接口配置</span>
+              <div className="min-w-0">
+                <span className="eyebrow">AI 设置</span>
+                <p className="text-[11px] mt-0.5 truncate" style={{ color: 'var(--text-secondary)' }}>
+                  内嵌虎妞网关（密匙能力）· 自定义 API Key 即可生图 / 文案 / 视频
+                </p>
+              </div>
               <button className="icon-btn" data-testid="ai-config-close" onClick={() => setConfigOpen(false)} aria-label="关闭">
                 <X size={14} />
               </button>
             </div>
             <div className="p-4 grid gap-3">
+              <div
+                className="text-[11px] px-2.5 py-1.5 rounded"
+                style={{ background: 'var(--bg-elevated)', color: 'var(--text-secondary)' }}
+                data-testid="ai-config-status"
+              >
+                {config?.hasApiKey
+                  ? `已配置 ${config.apiKeyMasked}${config.importedFrom === 'mishi' ? ' · 来自密匙导入' : ''}`
+                  : '尚未配置 API Key — 粘贴虎妞 Key，或从本机密匙导入'}
+              </div>
+              <div className="field">
+                <label>API Key</label>
+                <div className="flex gap-1">
+                  <input
+                    className="flex-1 min-w-0"
+                    data-testid="ai-config-key"
+                    value={configKey}
+                    type={configShowKey ? 'text' : 'password'}
+                    autoComplete="off"
+                    placeholder={config?.hasApiKey ? `已保存 ${config.apiKeyMasked}（留空则保持）` : 'sk-... 自定义填写'}
+                    onChange={(e) => setConfigKey(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    data-testid="ai-config-toggle-key"
+                    onClick={() => setConfigShowKey((v) => !v)}
+                  >
+                    {configShowKey ? '隐藏' : '显示'}
+                  </button>
+                </div>
+              </div>
               <div className="field">
                 <label>Base URL</label>
                 <input
@@ -1107,17 +1208,7 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
                 />
               </div>
               <div className="field">
-                <label>API Key</label>
-                <input
-                  data-testid="ai-config-key"
-                  value={configKey}
-                  type="password"
-                  placeholder={config?.hasApiKey ? `已保存 ${config.apiKeyMasked}` : 'sk-...'}
-                  onChange={(e) => setConfigKey(e.target.value)}
-                />
-              </div>
-              <div className="field">
-                <label>聊天模型（口播 / 规划）</label>
+                <label>聊天模型（口播 / 规划 / 视觉）</label>
                 <input
                   data-testid="ai-config-chat-model"
                   value={configChatModel}
@@ -1127,24 +1218,68 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
                 />
                 <datalist id="todo-ai-chat-models">
                   <option value="gemini-3.8-flash" />
+                  <option value="gpt-6-astra" />
+                  <option value="claude-fable-5" />
                   <option value="gemini-3.7-flash" />
                   <option value="gemini-3.6-flash" />
                   <option value="gemini-3.5-flash" />
                   <option value="gemini-3-flash" />
                 </datalist>
               </div>
-              <div className="flex justify-end gap-2">
-                <button type="button" className="btn btn-ghost" onClick={() => setConfigOpen(false)}>取消</button>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  data-testid="ai-config-save"
-                  disabled={configSaving}
-                  onClick={() => void saveConfig()}
-                >
-                  {configSaving && <Loader2 size={13} className="animate-spin" />}
-                  保存
-                </button>
+              {configTestNote && (
+                <p className="text-[11px]" style={{ color: 'var(--text-secondary)' }} data-testid="ai-config-test-note">
+                  {configTestNote}
+                </p>
+              )}
+              <div className="flex flex-wrap gap-2 justify-between">
+                <div className="flex flex-wrap gap-2">
+                  {config?.canImportMishi && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      data-testid="ai-config-import-mishi"
+                      disabled={configSaving}
+                      title={config.mishiRoot || '密匙'}
+                      onClick={() => void importMishiConfig()}
+                    >
+                      从密匙导入
+                    </button>
+                  )}
+                  {config?.hasApiKey && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      data-testid="ai-config-clear"
+                      disabled={configSaving}
+                      onClick={() => void saveConfig({ clearApiKey: true })}
+                    >
+                      清除 Key
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    data-testid="ai-config-test"
+                    disabled={configSaving || configTesting || (!config?.hasApiKey && !configKey.trim())}
+                    onClick={() => void testAiConfig()}
+                  >
+                    {configTesting ? <Loader2 size={13} className="animate-spin" /> : null}
+                    测试连接
+                  </button>
+                </div>
+                <div className="flex gap-2 ml-auto">
+                  <button type="button" className="btn btn-ghost" onClick={() => setConfigOpen(false)}>取消</button>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    data-testid="ai-config-save"
+                    disabled={configSaving}
+                    onClick={() => void saveConfig()}
+                  >
+                    {configSaving && <Loader2 size={13} className="animate-spin" />}
+                    保存
+                  </button>
+                </div>
               </div>
             </div>
           </div>

@@ -29,7 +29,7 @@ import { deleteProduction, listProductions, loadProduction } from './production/
 import { createProduction, editProduction, productionEntry, uploadVariant } from './production/job.mjs'
 import { publicView } from './production/runner.mjs'
 import { listModels } from './huniuClient.mjs'
-import { readAiConfig, writeAiConfig } from './huniuConfig.mjs'
+import { importAiConfigFromMishi, readAiConfig, writeAiConfig } from './huniuConfig.mjs'
 import { listStylePacks, stylePreviewPath } from './stylePacks.mjs'
 import { animPreviewPath, listAnimPacks } from './animPacks.mjs'
 import { H3_QUALITIES, ensureH3, h3Health } from './h3Client.mjs'
@@ -493,6 +493,15 @@ export async function handleAiHttp(req, res) {
         return true
       }
       sendJson(res, 200, { ok: true, ...listAnimPacks() })
+      return true
+    }
+
+    if (url === '/api/ai-config/import-mishi' && req.method === 'POST') {
+      try {
+        sendJson(res, 200, { ok: true, config: importAiConfigFromMishi() })
+      } catch (e) {
+        sendJson(res, 400, { ok: false, error: String(e instanceof Error ? e.message : e) })
+      }
       return true
     }
 

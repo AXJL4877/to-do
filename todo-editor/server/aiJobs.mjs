@@ -12,7 +12,7 @@ import {
   saveImageResult,
   submitImageGeneration,
 } from './huniuClient.mjs'
-import { readAiConfig } from './huniuConfig.mjs'
+import { MISHI_ROOT, mishiEnvFromAiConfig, readAiConfig } from './huniuConfig.mjs'
 import { compileStyleById } from './stylePacks.mjs'
 import { cutoutFile, decodeImage, encodePng } from './imageCutout.mjs'
 import { characterPrompt, compileAnimById, spritePrompt } from './animPacks.mjs'
@@ -30,8 +30,7 @@ const DATA_DIR = process.env.TODO_DATA_DIR
   : path.join(ROOT, '.data')
 /** 成果目录：与 /ai-generated/* URL 对应，正式包由 AI 服务托管 */
 export const AI_OUT = path.join(DATA_DIR, 'ai-generated')
-// 协作者可设 MISHI_ROOT；默认本机桌面「密匙」
-const MISHI_ROOT = process.env.MISHI_ROOT || 'd:\\Desktop\\密匙'
+// 生视频/host 仍可调外挂密匙 CLI，但 Key 以 TODO AI 设置为准（注入 env）
 const MISHI = path.join(MISHI_ROOT, 'run.py')
 
 mkdirSync(DATA_DIR, { recursive: true })
@@ -96,8 +95,13 @@ const ackDone = db.prepare(`
 
 function runPy(args) {
   return new Promise((resolve) => {
+    if (!existsSync(MISHI)) {
+      resolve({ ok: false, error: `未找到密匙模块：${MISHI}（生图/文案只需在 AI 设置里填 Key；云端生视频仍需本机密匙）` })
+      return
+    }
     const env = {
       ...process.env,
+      ...mishiEnvFromAiConfig(),
       HTTP_PROXY: '', HTTPS_PROXY: '', http_proxy: '', https_proxy: '',
       ALL_PROXY: '', all_proxy: '', NO_PROXY: '*', no_proxy: '*', MISHI_DIRECT: '1',
     }
