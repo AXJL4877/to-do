@@ -9,6 +9,12 @@
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
+import {
+  resolveBlackboardRoot,
+  resolveBurnSubtitlesRoot,
+  resolveMishiRoot,
+  resolveTtsTimelineRoot,
+} from './toolRoots.mjs'
 import { saveImageResult, submitImageGeneration } from './huniuClient.mjs'
 import {
   assetAspect, assetPrompt, fallbackNarrationPlan, fallbackPlan, getSkillEntry, planNarration, planSkill, timingPhrases,
@@ -61,7 +67,16 @@ export function runRenderer(entry, requestFile, { timeoutSec, onProgress }) {
     const child = spawn(PYTHON, [script, '--request', requestFile], {
       cwd: entry.dir,
       windowsHide: true,
-      env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUNBUFFERED: '1' },
+      env: {
+        ...process.env,
+        PYTHONIOENCODING: 'utf-8',
+        PYTHONUNBUFFERED: '1',
+        // 技能渲染端统一走内嵌 vendor，避免依赖本机桌面/Cursor skills 路径
+        BLACKBOARD_ROOT: resolveBlackboardRoot(),
+        BURN_SUBTITLES_DIR: resolveBurnSubtitlesRoot(),
+        TTS_TIMELINE_ROOT: resolveTtsTimelineRoot(),
+        MISHI_ROOT: resolveMishiRoot(),
+      },
     })
     let buf = ''
     let tail = ''

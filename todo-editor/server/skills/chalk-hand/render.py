@@ -10,7 +10,7 @@ stdout 协议（每行一条，其余行均为日志）：
   @progress {"phase": "...", "pct": 0.42}
   @result   {...}               成功，退出码 0
   @error    {"message": "..."}  失败，退出码 1
-完整协议见同目录 PROTOCOL.md。渲染核心来自黑板报仓库（BLACKBOARD_ROOT，默认 D:\\desktop\\黑板报）。
+完整协议见同目录 PROTOCOL.md。渲染核心来自内嵌 vendor/blackboard（可用 BLACKBOARD_ROOT 覆盖）。
 """
 from __future__ import annotations
 
@@ -27,7 +27,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-BLACKBOARD_ROOT = Path(os.environ.get("BLACKBOARD_ROOT") or r"D:\desktop\黑板报")
+_VENDOR_BB = Path(__file__).resolve().parents[3] / "vendor" / "blackboard"
+BLACKBOARD_ROOT = Path(os.environ.get("BLACKBOARD_ROOT") or _VENDOR_BB)
 sys.path.insert(0, str(BLACKBOARD_ROOT / "scripts"))
 sys.path.insert(0, str(BLACKBOARD_ROOT))
 

@@ -56,6 +56,8 @@ type AiConfig = {
   mishiReady?: boolean
   ttsTimelineRoot?: string
   ttsTimelineReady?: boolean
+  blackboardReady?: boolean
+  burnSubtitlesReady?: boolean
   importedFrom?: string
 }
 type AiMode = 'image' | 'video' | 'audio' | 'anim'
@@ -1181,9 +1183,13 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
                     : '虎妞 Key：未配置 — 粘贴 Key 或从密匙导入'}
                 </div>
                 <div data-testid="ai-config-tts-status">
-                  配音模块：{config?.ttsTimelineReady ? '已内嵌' : '缺失 vendor/tts-timeline'}
+                  配音：{config?.ttsTimelineReady ? '已内嵌' : '缺'}
                   {' · '}
-                  密匙模块：{config?.mishiReady ? '已内嵌' : '缺失 vendor/mishi'}
+                  密匙：{config?.mishiReady ? '已内嵌' : '缺'}
+                  {' · '}
+                  黑板：{config?.blackboardReady ? '已内嵌' : '缺'}
+                  {' · '}
+                  烧字幕：{config?.burnSubtitlesReady ? '已内嵌' : '缺'}
                 </div>
               </div>
               <div className="field">

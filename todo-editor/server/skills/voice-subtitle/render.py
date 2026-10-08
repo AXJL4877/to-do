@@ -19,10 +19,8 @@ import sys
 import traceback
 from pathlib import Path
 
-BURN_SUBTITLES_DIR = Path(os.environ.get(
-    "BURN_SUBTITLES_DIR",
-    str(Path.home() / ".cursor" / "skills" / "burn-subtitles" / "scripts"),
-))
+_VENDOR_BURN = Path(__file__).resolve().parents[3] / "vendor" / "burn-subtitles"
+BURN_SUBTITLES_DIR = Path(os.environ.get("BURN_SUBTITLES_DIR") or _VENDOR_BURN)
 
 # 字号按画面短边 1080 换算、底边距按画面高度百分比，横竖屏观感一致
 # v2.0 的档位参数（fontSize / position）仍认，重试旧任务时用

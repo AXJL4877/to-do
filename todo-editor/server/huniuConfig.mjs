@@ -2,7 +2,16 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { normalizeBaseUrl } from './huniuClient.mjs'
-import { mishiReady, resolveMishiRoot, resolveTtsTimelineRoot, ttsTimelineReady } from './toolRoots.mjs'
+import {
+  blackboardReady,
+  burnSubtitlesReady,
+  mishiReady,
+  resolveBlackboardRoot,
+  resolveBurnSubtitlesRoot,
+  resolveMishiRoot,
+  resolveTtsTimelineRoot,
+  ttsTimelineReady,
+} from './toolRoots.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const DATA_DIR = process.env.TODO_DATA_DIR
@@ -130,6 +139,8 @@ export function readAiConfig({ revealKey = false } = {}) {
   )
   const mishi = peekMishiEnv()
   const ttsRoot = resolveTtsTimelineRoot()
+  const bbRoot = resolveBlackboardRoot()
+  const burnRoot = resolveBurnSubtitlesRoot()
   return {
     apiKey: revealKey ? apiKey : '',
     apiKeyMasked: maskKey(apiKey),
@@ -141,6 +152,10 @@ export function readAiConfig({ revealKey = false } = {}) {
     mishiReady: mishiReady(mishi.mishiRoot),
     ttsTimelineRoot: ttsRoot,
     ttsTimelineReady: ttsTimelineReady(ttsRoot),
+    blackboardRoot: bbRoot,
+    blackboardReady: blackboardReady(bbRoot),
+    burnSubtitlesRoot: burnRoot,
+    burnSubtitlesReady: burnSubtitlesReady(burnRoot),
     importedFrom: cfg.importedFrom === 'mishi' ? 'mishi' : (apiKey ? 'manual' : ''),
   }
 }

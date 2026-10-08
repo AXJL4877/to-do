@@ -144,7 +144,7 @@ elements 夹具没有配音 / `scenes` / `drawSpeed` / `tail`，换成 `elements
 ```
 
 - `image`：**纯黑底上的粉笔画**（亮度即墨迹）。渲染端用 soft_cutout 抠透明并裁到内容框，不要求透明 PNG。
-- 调用：`python render.py --request <file>`，工作目录为技能包目录。Python 可用 `TODO_PYTHON` 指定；黑板报核心路径用 `BLACKBOARD_ROOT`（默认 `D:\desktop\黑板报`）。
+- 调用：`python render.py --request <file>`，工作目录为技能包目录。Python 可用 `TODO_PYTHON` 指定；黑板报核心默认 `todo-editor/vendor/blackboard`（可用 `BLACKBOARD_ROOT` 覆盖）。
 - `keepWork=true` 保留 `_<prefix>_work/`（annotation.json、masks/ 等中间件）便于排查。
 
 ### 3.3 stdout 协议行（渲染端 → 宿主）

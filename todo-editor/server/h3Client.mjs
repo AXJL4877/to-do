@@ -7,8 +7,9 @@ import path from 'node:path'
 import { spawn } from 'node:child_process'
 
 export const H3_BASE = (process.env.H3_STUDIO_BASE || 'http://127.0.0.1:8787').replace(/\/+$/, '')
-const STUDIO_DIR = process.env.H3_STUDIO_DIR || 'D:\\desktop\\jiaohuanji1\\h3-studio'
-const COMFY_DIR = process.env.H3_COMFY_DIR || 'E:\\ComfyUI\\ComfyUI_windows_portable'
+/** 本地 H3/ComfyUI 体积过大，不内嵌；未设置环境变量时不自动找本机私有路径 */
+const STUDIO_DIR = String(process.env.H3_STUDIO_DIR || '').trim()
+const COMFY_DIR = String(process.env.H3_COMFY_DIR || '').trim()
 /** 8GB 显存实测：0.4MP 稳定，0.7MP 可能爆显存 */
 export const H3_QUALITIES = [0.4, 0.55, 0.7]
 export const H3_SEGMENT_SECONDS = 5
@@ -51,12 +52,18 @@ export function ensureH3(onPhase = () => {}) {
     let h = await h3Health()
     if (h.studio && h.comfy) return h
     if (!h.comfy) {
+      if (!COMFY_DIR) {
+        throw new Error('本地 H3 需要 ComfyUI：请设环境变量 H3_COMFY_DIR（本仓不内嵌 ComfyUI，体积过大）')
+      }
       const py = path.join(COMFY_DIR, 'python_embeded', 'python.exe')
       if (!existsSync(py)) throw new Error(`找不到本地 ComfyUI：${COMFY_DIR}（可设 H3_COMFY_DIR）`)
       onPhase('启动本地 ComfyUI…')
       launch(py, ['-s', 'ComfyUI\\main.py', '--windows-standalone-build', '--listen', '127.0.0.1', '--port', '8188'], COMFY_DIR)
     }
     if (!h.studio) {
+      if (!STUDIO_DIR) {
+        throw new Error('本地 H3 需要 h3-studio：请设环境变量 H3_STUDIO_DIR（本仓不内嵌）')
+      }
       if (!existsSync(path.join(STUDIO_DIR, 'server.py'))) throw new Error(`找不到 h3-studio：${STUDIO_DIR}（可设 H3_STUDIO_DIR）`)
       onPhase('启动 h3-studio…')
       launch('python', ['server.py'], STUDIO_DIR)
