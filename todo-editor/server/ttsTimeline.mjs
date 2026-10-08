@@ -1,14 +1,17 @@
 /**
- * TTS_timeline 调用封装：只走其唯一入口 `run.py synth`，宿主不自带任何 TTS 客户端，密钥由它经「密匙」读取。
- * 其硬锁要求 --out 落在它自己的 outputs/<作业>/，拿到产物后拷进业务目录并只删这一个作业目录。
+ * TTS_timeline 调用封装：只走内嵌 vendor/tts-timeline 的 run.py synth。
+ * 密钥由内嵌 vendor/mishi/.env（火山 Volc）读取；宿主不自带 TTS 客户端。
  */
-import { copyFileSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
+import { resolveMishiRoot, resolveTtsTimelineRoot, ttsTimelineReady } from './toolRoots.mjs'
 
-export const TTS_TIMELINE_ROOT = process.env.TTS_TIMELINE_ROOT || 'd:\\video_Tools\\TTS_timeline'
 const PYTHON = process.env.TODO_PYTHON || 'python'
 const TIMEOUT_MS = 600_000
+
+/** @deprecated 用 resolveTtsTimelineRoot()；保留导出兼容旧引用 */
+export const TTS_TIMELINE_ROOT = resolveTtsTimelineRoot()
 
 /** stdout 只有一行 JSON；Python 侧偶有告警混进来，取最后一行 */
 export function parseSynthStdout(stdout) {
@@ -23,19 +26,28 @@ export function parseSynthStdout(stdout) {
 /**
  * @param {string} text 旁白原文
  * @param {{ job: string, textFile: string, audioFile: string, timingFile: string, speaker?: string, resourceId?: string }} o
- *   作业名与业务目录里的落盘路径；speaker / resourceId 不给则用密匙默认
  * @returns {Promise<{ duration: number, speaker: string|null }>}
  */
 export async function synthTimeline(text, { job, textFile, audioFile, timingFile, speaker, resourceId }) {
+  const root = resolveTtsTimelineRoot()
+  const runPy = path.join(root, 'run.py')
+  if (!ttsTimelineReady(root)) {
+    throw new Error(`未找到内嵌配音模块：${runPy}（请确认仓库含 todo-editor/vendor/tts-timeline）`)
+  }
   writeFileSync(textFile, text, 'utf8')
-  const out = path.join(TTS_TIMELINE_ROOT, 'outputs', job)
-  const args = [path.join(TTS_TIMELINE_ROOT, 'run.py'), 'synth', '--text-file', textFile, '--out', out]
+  const out = path.join(root, 'outputs', job)
+  const args = [runPy, 'synth', '--text-file', textFile, '--out', out]
   if (speaker) args.push('--speaker', speaker)
   if (resourceId) args.push('--resource-id', resourceId)
   const stdout = await new Promise((resolve, reject) => {
     const child = spawn(PYTHON, args, {
       windowsHide: true,
-      env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+      env: {
+        ...process.env,
+        PYTHONIOENCODING: 'utf-8',
+        // 让内嵌 TTS_timeline 找到 vendor/mishi（含 Volc Key）
+        MISHI_ROOT: resolveMishiRoot(),
+      },
     })
     let buf = ''
     let err = ''
@@ -53,6 +65,8 @@ export async function synthTimeline(text, { job, textFile, audioFile, timingFile
   const res = parseSynthStdout(stdout)
   try {
     if (!res.ok) throw new Error(`配音失败：${res.error || '未知错误'}`)
+    if (!res.audio || !existsSync(res.audio)) throw new Error('配音失败：未产出 audio.wav')
+    if (!res.timing || !existsSync(res.timing)) throw new Error('配音失败：未产出 timing.json')
     copyFileSync(res.audio, audioFile)
     copyFileSync(res.timing, timingFile)
   } finally {

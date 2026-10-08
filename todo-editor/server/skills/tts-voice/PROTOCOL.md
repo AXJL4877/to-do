@@ -38,7 +38,7 @@ CLI：`npm run skill -- start --skill builtin.tts-voice --prompt "……" --set 
 
 ## 3. 执行
 
-只调用 `python <TTS_TIMELINE_ROOT>\run.py synth --text-file … --out <它的 outputs>\todo_<jobId> --speaker … --resource-id …`（`TTS_TIMELINE_ROOT` 默认 `d:\video_Tools\TTS_timeline`）。产物拷成 `<jobId>_voice.wav` / `<jobId>_timing.json` 后只删这一个作业目录。密钥由 TTS_timeline 经「密匙」读取，宿主不碰 Key，也不自带 TTS 客户端。
+只调用内嵌 `todo-editor/vendor/tts-timeline/run.py synth --text-file … --out <它的 outputs>\todo_<jobId> --speaker … --resource-id …`（可用环境变量 `TTS_TIMELINE_ROOT` 覆盖）。产物拷成 `<jobId>_voice.wav` / `<jobId>_timing.json` 后只删这一个作业目录。密钥由内嵌 `vendor/mishi/.env`（火山）读取，宿主不自带 TTS 客户端。
 
 重试时两个文件都在就不重新合成（不重复扣费）。
 

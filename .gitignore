@@ -4,15 +4,18 @@
 **/dist-ssr/
 *.local
 
-# AI local data & generated media
+# AI local data & generated media（仅提交开箱用的 ai-config）
 **/.data/
+!**/.data/
+!**/.data/ai-config.json
 **/public/ai-generated/
 !**/public/ai-generated/.gitkeep
 
-# Secrets
+# Secrets（内嵌密匙 .env 私密仓例外，供换机开箱）
 .env
 .env.*
 !.env.example
+!todo-editor/vendor/mishi/.env
 
 # Python
 __pycache__/

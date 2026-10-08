@@ -1,0 +1,14 @@
+# 私有库按用户要求纳入 .env（含密钥）。切勿把此仓改公开或加协作者后忘记轮换 Key。
+# .env
+
+outputs/*
+!outputs/.gitkeep
+jobs/*
+!jobs/.gitkeep
+out/
+refs/
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.part

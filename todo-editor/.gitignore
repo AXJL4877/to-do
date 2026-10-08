@@ -18,6 +18,12 @@ dist-ssr
 !.data/
 !.data/ai-config.json
 
+# 内嵌工具运行时产物（源码与 .env 要提交）
+vendor/**/outputs/
+vendor/**/jobs/
+vendor/**/__pycache__/
+vendor/**/*.pyc
+
 # B1 golden / test media（大文件本地生成，只提交 hashes + fixtures）
 tests/media/*.mp4
 tests/media/*.png

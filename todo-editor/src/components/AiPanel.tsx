@@ -53,6 +53,9 @@ type AiConfig = {
   chatModel?: string
   canImportMishi?: boolean
   mishiRoot?: string
+  mishiReady?: boolean
+  ttsTimelineRoot?: string
+  ttsTimelineReady?: boolean
   importedFrom?: string
 }
 type AiMode = 'image' | 'video' | 'audio' | 'anim'
@@ -1168,13 +1171,20 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
             </div>
             <div className="p-4 grid gap-3">
               <div
-                className="text-[11px] px-2.5 py-1.5 rounded"
+                className="text-[11px] px-2.5 py-1.5 rounded grid gap-0.5"
                 style={{ background: 'var(--bg-elevated)', color: 'var(--text-secondary)' }}
                 data-testid="ai-config-status"
               >
-                {config?.hasApiKey
-                  ? `已配置 ${config.apiKeyMasked}${config.importedFrom === 'mishi' ? ' · 来自密匙导入' : ''}`
-                  : '尚未配置 API Key — 粘贴虎妞 Key，或从本机密匙导入'}
+                <div>
+                  {config?.hasApiKey
+                    ? `虎妞 Key：已配置 ${config.apiKeyMasked}${config.importedFrom === 'mishi' ? ' · 来自密匙' : ''}`
+                    : '虎妞 Key：未配置 — 粘贴 Key 或从密匙导入'}
+                </div>
+                <div data-testid="ai-config-tts-status">
+                  配音模块：{config?.ttsTimelineReady ? '已内嵌' : '缺失 vendor/tts-timeline'}
+                  {' · '}
+                  密匙模块：{config?.mishiReady ? '已内嵌' : '缺失 vendor/mishi'}
+                </div>
               </div>
               <div className="field">
                 <label>API Key</label>

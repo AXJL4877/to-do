@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { normalizeBaseUrl } from './huniuClient.mjs'
+import { mishiReady, resolveMishiRoot, resolveTtsTimelineRoot, ttsTimelineReady } from './toolRoots.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const DATA_DIR = process.env.TODO_DATA_DIR
@@ -13,8 +14,8 @@ const CONFIG_PATH = path.join(DATA_DIR, 'ai-config.json')
 export const DEFAULT_CHAT_MODEL = 'gemini-3.8-flash'
 export const DEFAULT_BASE_URL = 'https://huniuai.com'
 
-/** 外挂密匙根目录：仅用于一次性导入 Key；运行时以 TODO AI 设置为准 */
-export const MISHI_ROOT = process.env.MISHI_ROOT || 'd:\\Desktop\\密匙'
+/** 内嵌密匙根目录（可用 MISHI_ROOT 覆盖） */
+export const MISHI_ROOT = resolveMishiRoot()
 
 mkdirSync(DATA_DIR, { recursive: true })
 
@@ -49,22 +50,23 @@ function parseDotEnv(text) {
   return out
 }
 
-/** 读取本机密匙 .env 中的虎妞字段（不落盘、不回显完整 Key） */
+/** 读取内嵌/外挂密匙 .env 中的虎妞字段（不落盘、不回显完整 Key） */
 export function peekMishiEnv() {
-  const envPath = path.join(MISHI_ROOT, '.env')
+  const mishiRoot = resolveMishiRoot()
+  const envPath = path.join(mishiRoot, '.env')
   if (!existsSync(envPath)) {
-    return { available: false, mishiRoot: MISHI_ROOT, hasApiKey: false, apiKeyMasked: '', baseUrl: '', chatModel: '' }
+    return { available: false, mishiRoot, hasApiKey: false, apiKeyMasked: '', baseUrl: '', chatModel: '' }
   }
   let env = {}
   try { env = parseDotEnv(readFileSync(envPath, 'utf8')) } catch {
-    return { available: false, mishiRoot: MISHI_ROOT, hasApiKey: false, apiKeyMasked: '', baseUrl: '', chatModel: '' }
+    return { available: false, mishiRoot, hasApiKey: false, apiKeyMasked: '', baseUrl: '', chatModel: '' }
   }
   const apiKey = String(env.huniu_api_key || env.HUNIU_API_KEY || '').trim()
   const baseUrl = normalizeBaseUrl(env.HUNIU_BASE_URL || DEFAULT_BASE_URL)
   const chatModel = normalizeChatModel(env.HUNIU_CHAT_MODEL || env.HUNIU_VISION_MODEL || DEFAULT_CHAT_MODEL)
   return {
     available: true,
-    mishiRoot: MISHI_ROOT,
+    mishiRoot,
     hasApiKey: !!apiKey,
     apiKeyMasked: maskKey(apiKey),
     baseUrl,
@@ -103,7 +105,7 @@ export function bootstrapAiConfigFromMishi() {
 /** 手动「从密匙导入」：覆盖写入 TODO AI 设置 */
 export function importAiConfigFromMishi() {
   const mishi = peekMishiEnv()
-  if (!mishi.available) throw new Error(`未找到密匙目录：${MISHI_ROOT}`)
+  if (!mishi.available) throw new Error(`未找到密匙目录：${mishi.mishiRoot}`)
   if (!mishi.hasApiKey || !mishi._apiKey) throw new Error('密匙 .env 中没有 huniu_api_key')
   const current = readAiConfig({ revealKey: true })
   persistConfig({
@@ -127,6 +129,7 @@ export function readAiConfig({ revealKey = false } = {}) {
       || cfg.chatModel,
   )
   const mishi = peekMishiEnv()
+  const ttsRoot = resolveTtsTimelineRoot()
   return {
     apiKey: revealKey ? apiKey : '',
     apiKeyMasked: maskKey(apiKey),
@@ -134,7 +137,10 @@ export function readAiConfig({ revealKey = false } = {}) {
     baseUrl: normalizeBaseUrl(baseUrl),
     chatModel,
     canImportMishi: mishi.available && mishi.hasApiKey,
-    mishiRoot: MISHI_ROOT,
+    mishiRoot: mishi.mishiRoot,
+    mishiReady: mishiReady(mishi.mishiRoot),
+    ttsTimelineRoot: ttsRoot,
+    ttsTimelineReady: ttsTimelineReady(ttsRoot),
     importedFrom: cfg.importedFrom === 'mishi' ? 'mishi' : (apiKey ? 'manual' : ''),
   }
 }

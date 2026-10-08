@@ -102,7 +102,8 @@ def load_burner():
 
 def retime_tts(timing: dict, audio: Path) -> None:
     """老配音的 timing 可能是修复前生成的（时长偏短、尾句压扁），用 TTS_timeline 自己的校正在内存里修一遍"""
-    root = Path(os.environ.get("TTS_TIMELINE_ROOT", r"d:\video_Tools\TTS_timeline"))
+    bundled = Path(__file__).resolve().parents[3] / "vendor" / "tts-timeline"
+    root = Path(os.environ.get("TTS_TIMELINE_ROOT") or bundled)
     if not (root / "tts_timeline" / "retime.py").exists():
         log(f"找不到 TTS_timeline 的尾句校正（{root}），按原时间戳对时")
         return

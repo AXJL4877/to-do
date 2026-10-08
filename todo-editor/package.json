@@ -24,6 +24,7 @@
     "timeline:test": "node scripts/test-timeline-tidy.mjs && node scripts/test-timeline-browser.mjs",
     "subtitle:test": "node scripts/test-tts-subtitle-source.mjs",
     "ai:config-check": "node scripts/huniu-config-selfcheck.mjs",
+    "vendor:check": "node scripts/vendor-tools-selfcheck.mjs",
     "styles:check": "node scripts/style-pack-selfcheck.mjs",
     "fancy:check": "node scripts/fancy-text-selfcheck.mjs",
     "chalk:test": "node scripts/test-chalk-text.mjs",
@@ -60,10 +61,13 @@
       "electron/**/*",
       "server/**/*",
       "shared/**/*",
+      "vendor/**/*",
+      ".data/ai-config.json",
       "package.json"
     ],
     "asarUnpack": [
       "server/**/*",
+      "vendor/**/*",
       "douyin-publish/**/*"
     ],
     "extraResources": [
