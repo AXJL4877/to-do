@@ -357,13 +357,16 @@ export function resolveClipTransform(clip: Clip, playhead: number): Transform2D 
   const localT = Math.max(0, playhead - clip.start)
   const kf = clip.keyframes
   const tr = clip.transform
-  const scale = sampleKeyframes(kf.scale, localT, tr.scaleX)
+  const scaleX = sampleKeyframes(kf.scale, localT, tr.scaleX)
+  const scaleY = kf.scaleY?.length
+    ? sampleKeyframes(kf.scaleY, localT, tr.scaleY)
+    : sampleKeyframes(kf.scale, localT, tr.scaleY)
   return {
     ...tr,
     x: sampleKeyframes(kf.x, localT, tr.x),
     y: sampleKeyframes(kf.y, localT, tr.y),
-    scaleX: scale,
-    scaleY: kf.scale?.length ? scale : sampleKeyframes(kf.scaleY, localT, tr.scaleY),
+    scaleX,
+    scaleY,
     rotation: sampleKeyframes(kf.rotation, localT, tr.rotation),
     opacity: sampleKeyframes(kf.opacity, localT, tr.opacity),
   }

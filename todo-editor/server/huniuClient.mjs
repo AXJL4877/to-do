@@ -165,9 +165,16 @@ export async function submitImageGeneration(config, params) {
   return parseImageResult(payload)
 }
 
+/** 只有真正的 data:image… 才走改图；空串/假值一律文生图，避免误进 edits 吃到示例图 */
+export function normalizeImageDataUrl(raw) {
+  const s = typeof raw === 'string' ? raw.trim() : ''
+  return /^data:image\/[a-z0-9+.-]+;base64,/i.test(s) ? s : ''
+}
+
 export function buildImageRequest(params) {
   const aspectRatio = ASPECT_RATIO_OPTIONS.some((x) => x.value === params.size) ? params.size : '1:1'
   const outputResolution = RESOLUTION_OPTIONS.some((x) => x.value === params.quality) ? params.quality : '1K'
+  const imageDataUrl = normalizeImageDataUrl(params.imageDataUrl)
   const body = {
     model: params.model,
     prompt: params.prompt,
@@ -176,11 +183,9 @@ export function buildImageRequest(params) {
     n: 1,
     response_format: 'url',
   }
-  if (params.imageDataUrl) {
-    body.image = params.imageDataUrl
-  }
+  if (imageDataUrl) body.image = imageDataUrl
   return {
-    path: params.imageDataUrl ? '/v1/images/edits' : '/v1/images/generations',
+    path: imageDataUrl ? '/v1/images/edits' : '/v1/images/generations',
     body,
   }
 }

@@ -2085,6 +2085,86 @@ static bool gpu_composite_cached(int w, int h, const std::vector<PreparedLayer> 
 
 static bool g_compose_used_gpu = false;
 
+static double dust_hash(const std::string &seed, int i) {
+  uint32_t h = 2166136261u ^ static_cast<uint32_t>(i);
+  for (unsigned char ch : seed) {
+    h ^= ch;
+    h *= 16777619u;
+  }
+  h ^= h >> 15;
+  h *= 2246822507u;
+  h ^= h >> 13;
+  h *= 3266489909u;
+  h ^= h >> 16;
+  return h / 4294967295.0;
+}
+
+static void blend_dust_disc(uint8_t *rgb, int w, int h, double cx, double cy, double radius, double alpha) {
+  if (alpha <= 0.004 || radius < 0.4) return;
+  const int r = static_cast<int>(std::ceil(radius));
+  const int x0 = (std::max)(0, static_cast<int>(std::floor(cx)) - r);
+  const int y0 = (std::max)(0, static_cast<int>(std::floor(cy)) - r);
+  const int x1 = (std::min)(w - 1, static_cast<int>(std::floor(cx)) + r);
+  const int y1 = (std::min)(h - 1, static_cast<int>(std::floor(cy)) + r);
+  for (int y = y0; y <= y1; ++y) {
+    for (int x = x0; x <= x1; ++x) {
+      const double d = std::hypot(x + 0.5 - cx, y + 0.5 - cy) / radius;
+      if (d >= 1.0) continue;
+      const double a = alpha * std::pow(1.0 - d, 1.5);
+      uint8_t *p = rgb + (static_cast<size_t>(y) * static_cast<size_t>(w) + x) * 3;
+      p[0] = static_cast<uint8_t>(236.0 * a + p[0] * (1.0 - a));
+      p[1] = static_cast<uint8_t>(228.0 * a + p[1] * (1.0 - a));
+      p[2] = static_cast<uint8_t>(210.0 * a + p[2] * (1.0 - a));
+    }
+  }
+}
+
+/** 盖章入场的粉笔灰，叠在已经合成好的画面上。时间对齐片段内的 effect.start/end。 */
+static void paint_stamp_dust(uint8_t *rgb, int w, int h, const EditGraph &g, double time_sec) {
+  for (const Clip &c : g.clips) {
+    if (c.fx_dust <= 0 || !c.enabled) continue;
+    const double local = time_sec - c.start;
+    if (local < 0 || local >= c.duration || local < c.fx_dust_start || local > c.fx_dust_end) continue;
+    const double span = c.fx_dust_end - c.fx_dust_start;
+    if (span < 1e-3) continue;
+    const double u = (local - c.fx_dust_start) / span;
+    if (u < 0.36 || u >= 0.995) continue;
+    const double q = (std::min)(1.0, (u - 0.36) / 0.64);
+    double x = 0, y = 0, sx = 1, sy = 1, rot = 0, op = 1;
+    clip_transform_at(c, c.start + c.fx_dust_end, &x, &y, &sx, &sy, &rot, &op);
+    const double cx = w * 0.5 + x * w * 0.5;
+    const double cy = h * 0.5 + y * h * 0.5;
+    const double mw = c.media_w > 1.0 ? c.media_w : w;
+    const double mh = c.media_h > 1.0 ? c.media_h : h;
+    const double fit = (std::min)(w / (std::max)(mw, 1.0), h / (std::max)(mh, 1.0));
+    const double crop_w = (std::min)(1.0, (std::max)(0.05, 1.0 - c.crop_l - c.crop_r));
+    const double crop_h = (std::min)(1.0, (std::max)(0.05, 1.0 - c.crop_t - c.crop_b));
+    const double dw = mw * fit * std::fabs(sx) * crop_w;
+    const double dh = mh * fit * std::fabs(sy) * crop_h;
+    const double spread = (std::max)(4.0, (std::min)(dw, dh)) * 0.42;
+    const int n = static_cast<int>(std::lround(16.0 + 30.0 * c.fx_dust));
+    const std::string seed = c.id.empty() ? c.media_path : c.id;
+    for (int i = 0; i < n; ++i) {
+      const double h1 = dust_hash(seed, i);
+      const double h2 = dust_hash(seed, i + 101);
+      const double h3 = dust_hash(seed, i + 202);
+      const double h4 = dust_hash(seed, i + 303);
+      const double life = 0.42 + h1 * 0.58;
+      if (q >= life) continue;
+      const double age = q / life;
+      const double ang = h2 * 6.283185307179586;
+      const double speed = spread * (0.35 + h3 * 1.15);
+      const double rise = spread * (0.85 + h4 * 1.35);
+      const bool puff = h4 > 0.84;
+      const double px = cx + std::cos(ang) * speed * age;
+      const double py = cy - rise * age + spread * 0.5 * age * age + std::sin(ang) * speed * 0.22 * age;
+      const double radius = (std::max)(0.7, spread * (puff ? 0.2 : 0.035 + h1 * 0.04) * (1.0 + age * 0.7));
+      const double alpha = c.fx_dust * std::pow(1.0 - age, 1.25) * (puff ? 0.28 : 0.4 + h3 * 0.55);
+      blend_dust_disc(rgb, w, h, px, py, radius, alpha);
+    }
+  }
+}
+
 static int compose_graph_rgb(const EditGraph &g, double time_sec, std::vector<uint8_t> *canvas, int *out_w, int *out_h, int *out_layers, ComposeCache *cache) {
   g_compose_used_gpu = false;
   const int w = (std::max)(16, static_cast<int>(std::lround(g.width)) & ~1);
@@ -2232,6 +2312,8 @@ static int compose_graph_rgb(const EditGraph &g, double time_sec, std::vector<ui
         pl.blend == 1 ? "multiply" : pl.blend == 2 ? "screen" : pl.blend == 3 ? "add" : "normal");
     }
   }
+
+  if (canvas && !canvas->empty()) paint_stamp_dust(canvas->data(), w, h, g, time_sec);
 
   if (out_w) *out_w = w;
   if (out_h) *out_h = h;

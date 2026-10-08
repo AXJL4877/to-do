@@ -5,7 +5,8 @@ import clsx from 'clsx'
 import { usePreviewSuspend } from '../hooks/usePreviewSuspend'
 import { subtitleFontPx, subtitleMarginPx, type SkillPack, type SkillParams, type SubtitleSourceMedia } from '../lib/aiSkills'
 import { ensureSmileyFont, subtitleCssFont } from '../lib/textFonts'
-import { burnSubtitles, initialSubtitleParams, narrationText, subtitlePack, subtitleTargets } from '../lib/subtitleBurn'
+import { burnSubtitles, initialSubtitleParams, loadChapterDraft, narrationText, saveSubtitleStyle, subtitlePack, subtitleTargets } from '../lib/subtitleBurn'
+import { chapterTitleError, chapterTitles, planChapterBar, type ChapterBarPlan } from '../lib/chapterBar'
 import { SkillParamControl } from './SkillStudio'
 import { CreativeProgress } from './CreativeProgress'
 
@@ -40,7 +41,7 @@ function grabProgramFrame(): string | null {
   }
 }
 
-function Preview({ params, script, frame }: { params: SkillParams; script: string; frame: string | null }) {
+function Preview({ params, script, frame, chapters }: { params: SkillParams; script: string; frame: string | null; chapters: ChapterBarPlan | null }) {
   const [W, H] = String(params.size).split('x').map(Number)
   const px = subtitleFontPx(params, W, H)
   const stroke = Math.max(2, Math.round(px / 18))
@@ -54,6 +55,13 @@ function Preview({ params, script, frame }: { params: SkillParams; script: strin
   return (
     <div className="subburn-preview" style={{ aspectRatio: `${W} / ${H}` }} data-testid="subburn-preview">
       {frame && <img src={frame} alt="" />}
+      {chapters && (
+        <div className="subburn-chapter" data-testid="subburn-chapter-preview">
+          {chapters.chapters.map((c, i) => (
+            <span key={`${c.title}-${i}`} style={{ width: `${((c.end - c.start) / chapters.duration) * 100}%` }}>{c.title}</span>
+          ))}
+        </div>
+      )}
       <span style={style}>{sampleLine(script, Number(params.maxChars) || 18)}</span>
     </div>
   )
@@ -68,12 +76,23 @@ export function SubtitleBurnDialog({ clipIds, onClose }: { clipIds: string[]; on
   const [frame] = useState(grabProgramFrame)
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [chapterOn, setChapterOn] = useState(() => loadChapterDraft().on)
+  const [chapterText, setChapterText] = useState(() => loadChapterDraft().titles)
   const targets = useMemo(() => subtitleTargets(clipIds), [clipIds])
   /** 能烧的片段：有配音文案的带 jobId，其余带 media 走语音识别；null = 还在查 */
   const [ready, setReady] = useState<ReadyTarget[] | null>(null)
   const count = ready?.length ?? 0
   const asrCount = ready?.filter((r) => !r.jobId).length ?? 0
   const skipped = targets.audio.length - count
+  const chapterPlan = useMemo(() => {
+    if (!chapterOn || chapterTitleError(chapterText)) return null
+    const byId = new Map(targets.burnable.map((b) => [b.clip.id, b.clip]))
+    const clips = (ready ?? []).flatMap((r) => {
+      const c = byId.get(r.clipId)
+      return c ? [{ start: c.start, duration: c.duration }] : []
+    })
+    return planChapterBar(clips, chapterTitles(chapterText))
+  }, [chapterOn, chapterText, ready, targets.burnable])
 
   useEffect(() => {
     void ensureSmileyFont()
@@ -111,7 +130,11 @@ export function SubtitleBurnDialog({ clipIds, onClose }: { clipIds: string[]; on
     setSubmitting(true)
     setError(null)
     try {
-      await burnSubtitles(ready ?? [], params)
+      const titleError = chapterOn ? chapterTitleError(chapterText) : null
+      if (titleError) throw new Error(titleError)
+      if (chapterOn && !chapterPlan) throw new Error('选中的音频太短，排不出进度条')
+      saveSubtitleStyle(params, { on: chapterOn, titles: chapterText })
+      await burnSubtitles(ready ?? [], params, chapterPlan)
       // 立刻关窗回时间轴：被烧的音频条会持续扫光直到字幕入轨
       onClose()
     } catch (e) {
@@ -146,7 +169,7 @@ export function SubtitleBurnDialog({ clipIds, onClose }: { clipIds: string[]; on
         ) : (
           <div className="flex flex-col md:flex-row min-h-0 overflow-y-auto">
             <div className="flex-1 min-w-0 p-4 flex flex-col items-center justify-center gap-3" style={{ background: 'var(--surface-0)' }}>
-              <Preview params={params} script={script} frame={frame} />
+              <Preview params={params} script={script} frame={frame} chapters={chapterOn ? chapterPlan : null} />
               {submitting ? (
                 <div className="w-full max-w-md">
                   <CreativeProgress
@@ -192,6 +215,29 @@ export function SubtitleBurnDialog({ clipIds, onClose }: { clipIds: string[]; on
               )}
               {param('maxChars') && <SkillParamControl p={param('maxChars')!} values={params} onChange={set} />}
               {param('keywords') && <SkillParamControl p={param('keywords')!} values={params} onChange={set} />}
+              <div className="subburn-chapter-field" data-testid="subburn-chapter">
+                <label>
+                  <input type="checkbox" checked={chapterOn} onChange={(e) => setChapterOn(e.target.checked)} />
+                  顶部进度条
+                </label>
+                {chapterOn && (
+                  <>
+                    <textarea
+                      data-testid="subburn-chapters"
+                      rows={6}
+                      value={chapterText}
+                      placeholder={'一行一个章名，建议 3–6 个、每个 4–6 字\n成本墙\n换维度'}
+                      onChange={(e) => setChapterText(e.target.value)}
+                    />
+                    <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                      {chapterPlan
+                        ? `整段 ${chapterPlan.duration.toFixed(1)} 秒，从 ${chapterPlan.placeAt.toFixed(1)} 秒起。章名和音频段数相同则一段一章，否则按时长均分。`
+                        : '章名和音频段数相同则一段一章，否则从最早一段到最晚一段均分。'}
+                      条贴在画面顶部，成片比例不变。
+                    </p>
+                  </>
+                )}
+              </div>
             </div>
           </div>
         )}

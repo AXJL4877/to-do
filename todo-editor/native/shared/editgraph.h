@@ -51,6 +51,13 @@ struct Clip {
   double fx_blur = 0;
   double fx_sharpen = 0;
   double fx_filter = 0;
+  /** 盖章入场的粉笔灰：强度，以及片段内起止秒 */
+  double fx_dust = 0;
+  double fx_dust_start = 0;
+  double fx_dust_end = 0;
+  /** 素材像素尺寸，粉尘范围按元素在画面上的大小算；0 表示按画幅 */
+  double media_w = 0;
+  double media_h = 0;
   std::string mask_type;
   double mask_feather = 0;
   double mask_expand = 0;

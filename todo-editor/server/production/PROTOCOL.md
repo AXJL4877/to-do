@@ -58,7 +58,7 @@ production { id, skillId, title, titleLocked?, script, params, cast[], rev, stat
 | `voice` | 段 | 文案 + 音色 | wav、timing.json、短语表 | 2 |
 | `storyboard` | 段 | 配音指纹、`boardSec`、角色、规划提示词 | 镜头 + 元素（LLM；失败按句兜底） | 2 |
 | `asset` | 元素 | 生图提示词（技能包模板 + 参数）、模型、清晰度 | 候选图 | `TODO_AI_CONCURRENCY`（默认 4） |
-| `render` | 镜头 | 时间表、`RENDER_PARAM_KEYS`、包版本、各元素选中图 | 每元素书写 WebM + 定格 PNG + 笔尖轨迹 | 1 |
+| `render` | 镜头 | 时间表、`RENDER_PARAM_KEYS`、包版本、各元素选中图 | 每元素进场 WebM（手写 / 盖章扬尘 / 渐显）+ 定格 PNG + 笔尖轨迹（手写才有） | 1 |
 | `subtitles` | 段 | 配音指纹、画幅、每条字数 | 字幕条（只对时不烧录） | 1 |
 | `plate` | 整片 | 画幅、包版本 | 底板图 | — |
 

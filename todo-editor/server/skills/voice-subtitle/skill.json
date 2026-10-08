@@ -2,7 +2,7 @@
   "spec": "todo-skill-pack/1",
   "id": "builtin.voice-subtitle",
   "name": "字幕",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "author": "TO DO",
   "description": "给时间轴上的音频烧字幕：有配音文案的直接用文案和 TTS 逐字时间戳，没有的先语音识别出文字和时间；按 burn-subtitles 规则切条（气口切窗、关键词强调），字幕进时间轴对齐并链接该音频，另烧一份透明底 WebM 备用。",
   "tags": ["字幕", "口播", "WebM"],

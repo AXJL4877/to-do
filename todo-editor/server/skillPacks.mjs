@@ -61,7 +61,7 @@ function validateParam(p, i, all) {
   str(p.hint, `${where}.hint`, { optional: true, max: 60 })
   if (p.type === 'select') {
     onlyKeys(p, ['id', 'type', 'group', 'label', 'hint', 'when', 'default', 'options'], where)
-    if (!Array.isArray(p.options) || p.options.length < 1 || p.options.length > 16) fail(`${where}.options`, '须为 1~16 个选项')
+    if (!Array.isArray(p.options) || p.options.length < 1 || p.options.length > 256) fail(`${where}.options`, '须为 1~256 个选项')
     const seen = new Set()
     for (const [j, o] of p.options.entries()) {
       const ow = `${where}.options[${j}]`
@@ -138,7 +138,7 @@ export function validateSkillPack(raw, packDir) {
   }
   str(raw.input.placeholder, 'input.placeholder', { optional: true, max: 120 })
 
-  if (!Array.isArray(raw.params) || raw.params.length > 24) fail('params', '须为 0~24 项的数组')
+  if (!Array.isArray(raw.params) || raw.params.length > 48) fail('params', '须为 0~48 项的数组')
   raw.params.forEach((p, i) => validateParam(p, i, raw.params))
   const ids = raw.params.map((p) => p.id)
   if (new Set(ids).size !== ids.length) fail('params', 'id 重复')

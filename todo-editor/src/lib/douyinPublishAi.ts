@@ -207,22 +207,23 @@ export async function downloadAiImageToDisk(resultUrl: string, fileName: string)
   return saved.path
 }
 
-/** AI 生成 cover-3x4（标题画进画面），默认 1K 更快；需要更清可传 quality:'2K' */
+/** AI 生成 cover-3x4：纯文生图（按标题+口播文案），禁止参考图/抽帧 */
 export async function generateDouyinCover(input: {
   title: string
   styleHint?: string
-  imageDataUrl?: string
+  script?: string
   quality?: '1K' | '2K'
   onProgress?: (msg: string) => void
 }): Promise<{ path: string; jobId: string; previewUrl: string }> {
-  input.onProgress?.('正在提交封面生图…')
+  const styleHint = pickCoverStyleHint({ formHint: input.styleHint })
+  input.onProgress?.('正在按文案提交封面…')
   const res = await aiFetch('/api/ai-douyin-cover', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       title: input.title,
-      styleHint: input.styleHint,
-      imageDataUrl: input.imageDataUrl,
+      styleHint,
+      script: input.script,
       quality: input.quality === '2K' ? '2K' : '1K',
     }),
   })
@@ -239,7 +240,7 @@ export async function generateDouyinCover(input: {
   return { path, jobId: done.id, previewUrl: aiUrl(resultUrl) }
 }
 
-/** 一键：文案与封面并行；封面标题优先用项目主题，文稿用工程口播 */
+/** 一键：文案与封面并行；均按工程口播文案，封面纯文生图 */
 export async function generateMetaAndCover(input: {
   projectName?: string
   script?: string
@@ -261,6 +262,7 @@ export async function generateMetaAndCover(input: {
     generateDouyinCover({
       title: coverTitle,
       styleHint: input.styleHint,
+      script: input.script,
       quality: '1K',
       onProgress: (m) => input.onProgress?.(m),
     }),

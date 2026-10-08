@@ -169,6 +169,51 @@ def encode(cmd: list[str], duration: float) -> None:
         raise RuntimeError(f"ffmpeg 编码失败: {err[-400:]}")
 
 
+def render_chapter_bar(bs, ffmpeg: str, out_dir: Path, prefix: str, W: int, H: int, fps: int, chapters: dict) -> dict:
+    """整段一条进度条。画布与成片同大，条在顶部，其余透明，避免每段各自从 0 走到 100%。"""
+    titles = [str(t).strip() for t in chapters.get("titles") or [] if str(t).strip()]
+    duration = float(chapters.get("duration") or 0)
+    ranges = chapters.get("ranges") or []
+    if not titles or len(titles) != len(ranges) or duration <= 0.05:
+        raise ValueError("章节进度条缺少章名或时间")
+    bar_h = max(36, round(52 * min(W, H) / 1080))
+    label = max(18, round(26 * min(W, H) / 1080))
+    bs.apply_options(bs.BurnOptions(chapter_bar_h=bar_h, chapter_font_size=label, band_h=0))
+    spec = {
+        "chapters": [
+            {"title": title, "start": float(span[0]), "end": float(span[1])}
+            for title, span in zip(titles, ranges)
+        ]
+    }
+    spec_path = out_dir / f"{prefix}_chapters.json"
+    spec_path.write_text(json.dumps(spec, ensure_ascii=False), encoding="utf-8")
+    plan = bs.parse_chapters(path=spec_path)
+    if not plan or not plan.titles:
+        raise ValueError("章节进度条解析失败")
+    ass = out_dir / f"{prefix}_chapters.ass"
+    bs.write_ass([], ass, W, H, band_h=0, chapters=plan, duration=duration, top_h=bar_h)
+    video_name = f"{prefix}_chapters.webm"
+    subs_vf = f"ass='{filter_path(ass)}:fontsdir={filter_path(bs.FONTS_DIR)}:alpha=1'"
+    canvas = f"color=c=black@0.0:s={W}x{H}:r={fps}:d={duration},format=rgba"
+    progress("进度条", 0.02)
+    encode([
+        ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-nostats", "-progress", "pipe:1",
+        "-f", "lavfi", "-i", canvas,
+        "-vf", f"{subs_vf},format=yuva420p", "-t", f"{duration}",
+        "-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p", "-b:v", "0", "-crf", str(CRF),
+        "-row-mt", "1", "-deadline", "good", "-cpu-used", "4", "-auto-alt-ref", "0",
+        "-an", str(out_dir / video_name),
+    ], duration)
+    return {
+        "video": video_name,
+        "width": W,
+        "height": H,
+        "barH": bar_h,
+        "duration": round(duration, 3),
+        "placeAt": round(float(chapters.get("placeAt") or 0), 3),
+    }
+
+
 def render(req: dict) -> dict:
     p = req["params"]
     W, H = (int(v) for v in str(p["size"]).split("x"))
@@ -289,6 +334,12 @@ def render(req: dict) -> dict:
         "-vf", subs_vf, "-ss", f"{at}", "-frames:v", "1", str(out_dir / still_name),
     ], check=True, capture_output=True)
 
+    chapter_bar = None
+    raw_chapters = req.get("chapters")
+    if raw_chapters:
+        progress("进度条", 0.0)
+        chapter_bar = render_chapter_bar(bs, ffmpeg, out_dir, prefix, W, H, fps, raw_chapters)
+
     if not req.get("keepWork"):
         shutil.rmtree(work, ignore_errors=True)
     return {
@@ -308,6 +359,7 @@ def render(req: dict) -> dict:
         "fontSize": fs,
         "audioDuration": round(audio_dur, 3),
         "text": script,
+        **({"chapterBar": chapter_bar} if chapter_bar else {}),
     }
 
 

@@ -46,7 +46,7 @@ type AiModel = {
   qualityOptions?: readonly QualityOption[]
   defaultQuality?: string
 }
-type AiConfig = { baseUrl: string; hasApiKey: boolean; apiKeyMasked: string }
+type AiConfig = { baseUrl: string; hasApiKey: boolean; apiKeyMasked: string; chatModel?: string }
 type AiMode = 'image' | 'video' | 'audio' | 'anim'
 
 const MODE_TABS: { id: AiMode; label: string; Icon: typeof Sparkles }[] = [
@@ -176,12 +176,15 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
   const [audioRefName, setAudioRefName] = useState('')
   const [audioLoop, setAudioLoop] = useState(false)
   const [autoTimeline, setAutoTimeline] = useState(true)
+  /** 有参考图时默认不改图，避免残留截帧第一次把文生图带成示例图；勾选后才走 edits */
+  const [useRefForEdit, setUseRefForEdit] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [configOpen, setConfigOpen] = useState(false)
   const [config, setConfig] = useState<AiConfig | null>(null)
   const [configBaseUrl, setConfigBaseUrl] = useState('https://huniuai.com')
   const [configKey, setConfigKey] = useState('')
+  const [configChatModel, setConfigChatModel] = useState('gemini-3.8-flash')
   const [configSaving, setConfigSaving] = useState(false)
   const [models, setModels] = useState<AiModel[]>([...FALLBACK_MODELS])
   const [modelsLoading, setModelsLoading] = useState(false)
@@ -334,6 +337,7 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
       const next = data.config as AiConfig
       setConfig(next)
       setConfigBaseUrl(next.baseUrl || 'https://huniuai.com')
+      setConfigChatModel(next.chatModel || 'gemini-3.8-flash')
     } catch { /* */ }
   }
 
@@ -366,7 +370,10 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
     setConfigSaving(true)
     setError(null)
     try {
-      const body: { baseUrl: string; apiKey?: string } = { baseUrl: configBaseUrl }
+      const body: { baseUrl: string; apiKey?: string; chatModel?: string } = {
+        baseUrl: configBaseUrl,
+        chatModel: configChatModel.trim() || 'gemini-3.8-flash',
+      }
       if (configKey.trim()) body.apiKey = configKey.trim()
       const r = await aiFetch('/api/ai-config', {
         method: 'POST',
@@ -378,9 +385,10 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
       const next = data.config as AiConfig
       setConfig(next)
       setConfigBaseUrl(next.baseUrl)
+      setConfigChatModel(next.chatModel || 'gemini-3.8-flash')
       setConfigKey('')
       setConfigOpen(false)
-      useApp.getState().setToast('AI 配置已保存')
+      useApp.getState().setToast(`AI 配置已保存 · 聊天模型 ${next.chatModel || 'gemini-3.8-flash'}`)
       void refreshModels()
     } catch (e) {
       setError(friendlyAiError(e instanceof Error ? e.message : String(e)))
@@ -404,6 +412,10 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
 
   useEffect(() => {
     void refreshCold()
+  }, [refDataUrl])
+
+  useEffect(() => {
+    if (!refDataUrl) setUseRefForEdit(false)
   }, [refDataUrl])
 
   useEffect(() => {
@@ -445,6 +457,7 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
     rd.onload = () => {
       const dataUrl = String(rd.result)
       setAiRef(dataUrl)
+      setUseRefForEdit(true)
       void persistColdRef(dataUrl, 'upload', f.name).then(refreshCold)
     }
     rd.readAsDataURL(f)
@@ -455,7 +468,10 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
     try {
       const r = await aiFetch(`/api/ai-assets/${id}`)
       const data = await r.json()
-      if (data.ok && data.dataUrl) setAiRef(data.dataUrl)
+      if (data.ok && data.dataUrl) {
+        setAiRef(data.dataUrl)
+        setUseRefForEdit(true)
+      }
     } catch {
       setError('读取参考图失败')
     }
@@ -484,12 +500,12 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
           quality: styleValues.resolution,
           model: styleValues.model,
           cutout: styleValues.cutout,
-          imageDataUrl: refDataUrl ?? undefined,
+          imageDataUrl: useRefForEdit && refDataUrl ? refDataUrl : undefined,
           autoTimeline,
         } : {
           kind: mode,
           prompt: p,
-          imageDataUrl: refDataUrl ?? undefined,
+          imageDataUrl: useRefForEdit && refDataUrl ? refDataUrl : undefined,
           size,
           model,
           quality,
@@ -651,14 +667,30 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
               className="absolute top-1 right-1 icon-btn bg-black/50 text-white"
               style={{ width: 22, height: 22 }}
               data-testid="ai-ref-clear"
-              onClick={() => setAiRef(null)}
+              onClick={() => { setAiRef(null); setUseRefForEdit(false) }}
             >
               <X size={12} />
             </button>
           </div>
         )}
-        <div className="flex gap-1">
-          <button type="button" className="btn btn-ghost flex-1" data-testid="ai-ref-capture" onClick={captureFrame}>
+        {refDataUrl ? (
+          <label className="flex items-center gap-2 text-[11px] mt-1.5 cursor-pointer" style={{ color: 'var(--text-secondary)' }}>
+            <input
+              type="checkbox"
+              checked={useRefForEdit}
+              data-testid="ai-ref-use"
+              onChange={(e) => setUseRefForEdit(e.target.checked)}
+            />
+            用参考图改图（不勾选则按文案纯文生图）
+          </label>
+        ) : null}
+        <div className="flex gap-1 mt-1">
+          <button
+            type="button"
+            className="btn btn-ghost flex-1"
+            data-testid="ai-ref-capture"
+            onClick={() => { captureFrame(); setUseRefForEdit(true) }}
+          >
             <Camera size={13} /> 截帧
           </button>
           <button type="button" className="btn btn-ghost flex-1" data-testid="ai-ref-pick" onClick={() => fileRef.current?.click()}>
@@ -935,7 +967,7 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
         onClick={() => void enqueue()}
       >
         {submitting ? <Loader2 size={13} className="animate-spin" /> : mode === 'video' ? <Video size={13} /> : mode === 'audio' ? <AudioLines size={13} /> : <Sparkles size={13} />}
-        {submitting ? '入队中…' : activeStyle ? `${activeStyle.name} · 入队` : useH3 ? `本地 H3 ${refDataUrl ? '图生视频' : '文生视频'} · 入队` : mode === 'audio' ? '生音频 · 待接入' : refDataUrl ? (mode === 'video' ? '图生视频 · 入队' : '图生图 · 入队') : (mode === 'video' ? '文生视频 · 入队' : '文生图 · 入队')}
+        {submitting ? '入队中…' : activeStyle ? `${activeStyle.name} · 入队` : useH3 ? `本地 H3 ${useRefForEdit && refDataUrl ? '图生视频' : '文生视频'} · 入队` : mode === 'audio' ? '生音频 · 待接入' : useRefForEdit && refDataUrl ? (mode === 'video' ? '图生视频 · 入队' : '图生图 · 入队') : (mode === 'video' ? '文生视频 · 入队' : '文生图 · 入队')}
       </button>
       )}
 
@@ -1083,6 +1115,23 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
                   placeholder={config?.hasApiKey ? `已保存 ${config.apiKeyMasked}` : 'sk-...'}
                   onChange={(e) => setConfigKey(e.target.value)}
                 />
+              </div>
+              <div className="field">
+                <label>聊天模型（口播 / 规划）</label>
+                <input
+                  data-testid="ai-config-chat-model"
+                  value={configChatModel}
+                  placeholder="gemini-3.8-flash"
+                  list="todo-ai-chat-models"
+                  onChange={(e) => setConfigChatModel(e.target.value)}
+                />
+                <datalist id="todo-ai-chat-models">
+                  <option value="gemini-3.8-flash" />
+                  <option value="gemini-3.7-flash" />
+                  <option value="gemini-3.6-flash" />
+                  <option value="gemini-3.5-flash" />
+                  <option value="gemini-3-flash" />
+                </datalist>
               </div>
               <div className="flex justify-end gap-2">
                 <button type="button" className="btn btn-ghost" onClick={() => setConfigOpen(false)}>取消</button>

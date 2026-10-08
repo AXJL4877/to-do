@@ -8,6 +8,7 @@ import { drawFancyText, fontStack } from './fancyText'
 import { drawDynamicText } from './dynamicText'
 import { mayHaveAlpha } from './mediaAlpha'
 import { HAND_TRACK_PREFIX, withChalkHands } from './chalkHandLayers'
+import { elementDustSpread, paintStampDust, stampDustSpecks } from './stampDust'
 import { indexClips, indexTracks, upcomingClips } from './sequenceIndex'
 
 export type ImageCache = Map<string, HTMLImageElement>
@@ -469,6 +470,8 @@ function drawClip(
   ctx.rotate((tr.rotation * Math.PI) / 180)
   ctx.scale(tr.flipH ? -tr.scaleX : tr.scaleX, tr.flipV ? -tr.scaleY : tr.scaleY)
 
+  let mediaW = w
+  let mediaH = h
   if (clip.text) {
     drawTextClip(ctx, clip, w, h, playhead)
   } else {
@@ -487,12 +490,15 @@ function drawClip(
       const img = cache.get(m.id)
       const iw = img?.naturalWidth || m.width || w
       const ih = img?.naturalHeight || m.height || h
+      mediaW = iw
+      mediaH = ih
       if (img?.complete && img.naturalWidth > 0) {
         drawContainCenter(ctx, img, w, h, iw, ih)
       } else if (!mayHaveAlpha(m)) {
         drawMediaPlaceholder(ctx, clip.name, w, h, sy)
       }
     } else if (m && m.kind === 'video') {
+      if (m.width && m.height) { mediaW = m.width; mediaH = m.height }
       const speed = Math.max(0.05, clip.speed || 1)
       const srcDur = m.duration > 0 ? m.duration : Infinity
       // 勿把源时间 clamp 到片尾：超出素材时长应空，否则像「过了还有画面」；
@@ -522,6 +528,8 @@ function drawClip(
           || (frame as HTMLCanvasElement).height
           || m.height
           || h
+        mediaW = iw
+        mediaH = ih
         drawContainCenter(ctx, frame, w, h, iw, ih)
       } else if (!mayHaveAlpha(m)) {
         // 透明叠层还没解出帧时留空：占位块会盖住下层，播放时就是一闪的坏帧
@@ -540,6 +548,30 @@ function drawClip(
     ctx.fillStyle = g
     ctx.fillRect(-w / 2, -h / 2, w, h)
   }
+  ctx.restore()
+  drawStampDust(ctx, clip, w, h, playhead, mediaW, mediaH)
+}
+
+function drawStampDust(
+  ctx: CanvasRenderingContext2D, clip: Clip, w: number, h: number, playhead: number,
+  mediaW: number, mediaH: number,
+) {
+  const fx = clip.effects.find((e) => e.enabled && e.type === 'chalkDust' && e.strength > 0)
+  if (!fx) return
+  const local = Math.max(0, playhead - clip.start)
+  if (local < fx.start || local > fx.end) return
+  const span = fx.end - fx.start
+  if (span < 1e-3) return
+  const rest = resolveClipTransform(clip, clip.start + fx.end)
+  const specks = stampDustSpecks(
+    clip.id, (local - fx.start) / span,
+    w / 2 + rest.x * w / 2, h / 2 + rest.y * h / 2,
+    elementDustSpread(w, h, mediaW, mediaH, rest.scaleX, rest.scaleY, 1 - rest.cropL - rest.cropR, 1 - rest.cropT - rest.cropB),
+    fx.strength,
+  )
+  if (!specks.length) return
+  ctx.save()
+  paintStampDust(ctx, specks)
   ctx.restore()
 }
 

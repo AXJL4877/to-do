@@ -14,7 +14,7 @@ import type { MediaItem } from '../types'
 import { aiFetch, aiUrl } from './aiFetch'
 import { importAiJob, isSameAiMedia, jobGroupSlot, shouldImport } from './aiJobImport'
 import type { TimelinePlacement } from './aiSkills'
-import { elementTransform, setChalkHand } from './chalkHand'
+import { chalkEnterLabel, elementTransform, setChalkHand } from './chalkHand'
 import { pollProductions } from './productionTimeline'
 import { isStoreAuthority } from './storeSync'
 
@@ -22,6 +22,7 @@ export type NarratedClipElement = {
   id: string
   label: string
   role: string
+  enter?: 'draw' | 'stamp' | 'fade'
   box: number[]
   crop?: number[]
   startMs: number
@@ -187,15 +188,16 @@ function placeStage(j: NarratedJob, stage: NarratedStage & { voice: NonNullable<
       const holdSec = Math.max(0, t2 - t1)
       const size = e.crop ? { width: e.crop[2], height: e.crop[3] } : frame
       const name = e.label || e.id
-      const video = ensureMedia({ name: `${scene.id}_${name}_书写.webm`, url: aiUrl(e.video), kind: 'video', duration: e.frames / fps, ...size, alpha: true }, folderId)
+      const motion = chalkEnterLabel(e.enter)
+      const video = ensureMedia({ name: `${scene.id}_${name}_${motion}.webm`, url: aiUrl(e.video), kind: 'video', duration: e.frames / fps, ...size, alpha: true }, folderId)
       const still = ensureMedia({ name: `${scene.id}_${name}.png`, url: aiUrl(e.hold), kind: 'image', duration: holdSec || 1, ...size }, folderId)
       if (!place) return
       const transform = e.crop ? elementTransform(e.crop, frame, proj) : undefined
       const key = `${scene.id}/${e.id}`
-      const chalk = stage.hand && e.tip?.length
+      const chalk = (!e.enter || e.enter === 'draw') && stage.hand && e.tip?.length
         ? { tip: e.tip, frame, hand: { ...stage.hand, url: aiUrl(stage.hand.url) } }
         : undefined
-      if (video) items.push({ mediaId: video, start: t0, duration: drawSec, lane: k + 1, name: `${name} · 书写`, transform, source: { key: `${key}/draw`, chalk } })
+      if (video) items.push({ mediaId: video, start: t0, duration: drawSec, lane: k + 1, name: `${name} · ${motion}`, transform, source: { key: `${key}/draw`, chalk } })
       if (still && holdSec > 0.02) items.push({ mediaId: still, start: t1, duration: holdSec, lane: k + 1, name, transform, source: { key: `${key}/hold` } })
     })
     if (!items.length) continue

@@ -3,6 +3,7 @@ import { Loader2, Mic, Pause, Play, Plus, RotateCcw, Trash2 } from 'lucide-react
 import clsx from 'clsx'
 import { CreativeProgress } from './CreativeProgress'
 import { useApp } from '../store'
+import { readSpokenBody } from '../lib/scriptMemoDocument'
 import { aiFetch, aiUrl } from '../lib/aiFetch'
 import { importAiJob, placeTtsVoice, shouldImport } from '../lib/aiJobImport'
 import {
@@ -10,10 +11,9 @@ import {
   type SkillJob, type SkillPack, type SkillParams, type TtsOutput,
 } from '../lib/aiSkills'
 import { SkillParamControl } from './SkillStudio'
+import { TTS_VOICE_EVENT, VOICE_STORE } from '../lib/ttsVoicePrefs'
 
 type TtsJob = SkillJob<TtsOutput>
-
-const VOICE_STORE = 'todo.tts.voice'
 
 function scriptStats(text: string) {
   const chars = text.replace(/[\p{P}\s]/gu, '').length
@@ -102,6 +102,8 @@ export function VoicePanel() {
   const [pack, setPack] = useState<SkillPack | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [script, setScript] = useState('')
+  const voiceSeed = useApp((s) => s.voiceSeed)
+  const scriptRevision = useApp((s) => s.scriptMemo?.revision ?? s.scriptWorkspace?.revision ?? 0)
   const [params, setParams] = useState<SkillParams>({})
   const [autoTimeline, setAutoTimeline] = useState(true)
   const [submitting, setSubmitting] = useState(false)
@@ -135,10 +137,25 @@ export function VoicePanel() {
     return () => window.clearInterval(t)
   }, [])
 
+  useEffect(() => {
+    if (!voiceSeed) return
+    setScript(voiceSeed.text)
+  }, [voiceSeed])
+
+  useEffect(() => {
+    if (!pack) return
+    const sync = () => setParams(loadVoiceParams(pack))
+    window.addEventListener(TTS_VOICE_EVENT, sync)
+    return () => window.removeEventListener(TTS_VOICE_EVENT, sync)
+  }, [pack])
+
   function setParam(id: string, v: SkillParams[string]) {
     const next = { ...params, [id]: v }
     setParams(next)
-    try { localStorage.setItem(VOICE_STORE, JSON.stringify(next)) } catch { /* */ }
+    try {
+      localStorage.setItem(VOICE_STORE, JSON.stringify(next))
+      window.dispatchEvent(new Event(TTS_VOICE_EVENT))
+    } catch { /* */ }
   }
 
   const stats = scriptStats(script)
@@ -198,6 +215,16 @@ export function VoicePanel() {
           onChange={(e) => setScript(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) void submit() }}
         />
+        {voiceSeed ? <p className="text-[10px] m-0" style={{ color: 'var(--text-muted)' }}>来自稿件版本 {voiceSeed.revision}。选好音色后点生成，不会自动开始付费任务。</p> : null}
+        {voiceSeed && scriptRevision !== voiceSeed.revision ? (
+          <p className="text-[10px] m-0" style={{ color: 'var(--accent)' }}>
+            对应旧稿。没有局部重做，下面会按当前全文重做。
+            <button type="button" className="btn text-[11px]" onClick={() => {
+              const live = useApp.getState()
+              setScript(readSpokenBody(live.script, live.scriptMemo))
+            }}>填入当前正文</button>
+          </p>
+        ) : null}
       </div>
       <label className="flex items-center gap-2 text-[11px] px-0.5 cursor-pointer" style={{ color: 'var(--text-secondary)' }}>
         <input type="checkbox" checked={autoTimeline} data-testid="voice-auto-timeline" onChange={(e) => setAutoTimeline(e.target.checked)} />
@@ -215,7 +242,10 @@ export function VoicePanel() {
           <label>配音</label>
           <div className="flex flex-col gap-1.5">
             {jobs.slice(0, 12).map((j) => (
-              <TtsJobCard key={j.id} pack={pack} j={j} onRetry={() => void retry(j.id)} onRemove={() => void remove(j.id)} />
+              <div key={j.id}>
+                {j.prompt.trim() !== script.trim() ? <p className="text-[10px] m-0" style={{ color: 'var(--accent)' }}>对应旧稿 · 全量重做</p> : null}
+                <TtsJobCard pack={pack} j={j} onRetry={() => void retry(j.id)} onRemove={() => void remove(j.id)} />
+              </div>
             ))}
           </div>
         </div>

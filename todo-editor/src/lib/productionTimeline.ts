@@ -18,7 +18,7 @@ import { defaultText, type ChalkStroke, type Clip, type MediaItem, type Producti
 import { aiUrl } from './aiFetch'
 import { isSameAiMedia } from './aiJobImport'
 import { subtitleClipStyle, type TimelinePlacement } from './aiSkills'
-import { elementTransform, setChalkHand } from './chalkHand'
+import { chalkEnterLabel, elementTransform, setChalkHand } from './chalkHand'
 import { getProduction, listProductions, type Production, type ProductionSegment } from './production'
 import { isStoreAuthority } from './storeSync'
 
@@ -178,9 +178,10 @@ export function syncProduction(p: Production): boolean {
   }
   const startOf = (c: Clip) => (patches[c.id]?.start as number | undefined) ?? c.start
 
-  // 2. 元素：每个渲好的镜头，每个元素一段书写 + 一段定格
+  // 2. 元素：先放定格（没有入场的样子），书写 / 盖章 / 显现稍后再叠上去，单独可撤销
   const addLater: { items: AddItem[]; linkTo?: string }[] = []
   const handOn: string[] = []
+  const entrances: { holdKey: string; t1: number; tail: number; draw: AddItem; linkTo?: string; hand: boolean }[] = []
   for (const seg of p.segments) {
     const m = maps.get(seg.id)
     if (!m || !seg.voice) continue
@@ -224,26 +225,36 @@ export function syncProduction(p: Production): boolean {
         const t2 = snap(toTimeline(m, isLast && k === seg.boards.length - 1 ? Math.max(boardEnd, seg.voice.duration + (Number(p.params.tail) || 0)) : boardEnd))
         const t1 = Math.max(t0 + 1 / projFps, Math.min(t2, snap(t0 + Math.max(1, e.frames - 1) / fps / m.speed)))
         const size = e.crop ? { width: e.crop[2], height: e.crop[3] } : frame
-        const video = ensureMedia({ name: `${seg.title || seg.id}_${k + 1}_${name}_书写.webm`, url: aiUrl(e.video), kind: 'video', duration: e.frames / fps, ...size, alpha: true }, folderId)
-        const still = ensureMedia({ name: `${seg.title || seg.id}_${k + 1}_${name}.png`, url: aiUrl(e.hold), kind: 'image', duration: Math.max(1, t2 - t1), ...size }, folderId)
+        const motion = chalkEnterLabel(e.enter)
+        const video = ensureMedia({ name: `${seg.title || seg.id}_${k + 1}_${name}_${motion}.webm`, url: aiUrl(e.video), kind: 'video', duration: e.frames / fps, ...size, alpha: true }, folderId)
+        const still = ensureMedia({ name: `${seg.title || seg.id}_${k + 1}_${name}.png`, url: aiUrl(e.hold), kind: 'image', duration: Math.max(1, t2 - t0), ...size }, folderId)
         // 用户挪过 / 缩放过这个元素：新产物沿用用户的位置
         const auto = e.crop ? elementTransform(e.crop, frame, proj) : undefined
         const prev = oldDraw ?? oldHold
         const userMoved = prev && prev.meta?.source?.layout != null && layoutSig(prev.transform) !== prev.meta.source.layout
         const transform = userMoved ? { ...prev!.transform } : auto
         const layout = layoutSig(transform ?? {})
-        const chalk: ChalkStroke | undefined = p.hand && e.tip?.length
+        const chalk: ChalkStroke | undefined = (!e.enter || e.enter === 'draw') && p.hand && e.tip?.length
           ? { tip: e.tip, frame, hand: { url: aiUrl(p.hand.url), width: p.hand.width, height: p.hand.height, tipX: p.hand.tipX, tipY: p.hand.tipY } }
           : undefined
         const keepHand = oldDraw?.meta?.source?.chalk ? !!oldDraw.meta.source.chalk.on : wantHand
         const lane = j + 1
         if (oldDraw) patches[oldDraw.id] = null
         if (oldHold) patches[oldHold.id] = null
-        if (video) items.push({ mediaId: video, start: t0, duration: t1 - t0, lane, name: `${name} · 书写`, transform, source: { key: dk, rev, layout, chalk } })
-        if (still && t2 - t1 > 0.02) items.push({ mediaId: still, start: t1, duration: t2 - t1, lane, name, transform, source: { key: hk, rev, layout } })
+        const drawItem: AddItem | null = video
+          ? { mediaId: video, start: t0, duration: t1 - t0, lane, name: `${name} · ${motion}`, transform, source: { key: dk, rev, layout, chalk } }
+          : null
+        // 定格和入场视频都在：先铺满定格，入场作为后一步，Ctrl+Z 只撤掉入场
+        if (drawItem && still && t2 - t0 > 0.02 && t1 - t0 > 0.02) {
+          items.push({ mediaId: still, start: t0, duration: t2 - t0, lane, name, transform, source: { key: hk, rev, layout } })
+          entrances.push({ holdKey: hk, t1, tail: t2 - t1, draw: drawItem, linkTo: voiceIds.get(seg.id), hand: !!(keepHand && chalk) })
+        } else {
+          if (drawItem) items.push(drawItem)
+          if (still && t2 - t1 > 0.02) items.push({ mediaId: still, start: t1, duration: t2 - t1, lane, name, transform, source: { key: hk, rev, layout } })
+          if (keepHand && chalk && drawItem) handOn.push(dk)
+        }
         placed[dk] = rev
         placed[hk] = rev
-        if (keepHand && chalk) handOn.push(dk)
       }
     }
     if (items.length) addLater.push({ items, linkTo: voiceIds.get(seg.id) })
@@ -326,6 +337,37 @@ export function syncProduction(p: Production): boolean {
   } else if (byKey.get('plate')?.length && p.params.plate === 'none') {
     useApp.getState().patchClipsQuiet(Object.fromEntries(byKey.get('plate')!.map((c) => [c.id, null])))
     changed = true
+  }
+
+  // 入场（书写视频 / 盖章 / 显现，以及粉笔手）叠在已经铺好的定格上，单独一笔撤销
+  if (entrances.length) {
+    const clipsNow = useApp.getState().seq().clips
+    const jobs = entrances.flatMap((ent) => {
+      const hold = clipsNow.find((c) => c.meta?.source?.jobId === p.id && c.meta.source.key === ent.holdKey)
+      return hold ? [{ hold, ent }] : []
+    })
+    if (jobs.length) {
+      useApp.getState().pushHistory()
+      const holdPatch: Record<string, Partial<Clip> | null> = {}
+      const groups = new Map<string, { linkTo?: string; items: AddItem[]; hands: string[] }>()
+      for (const { hold, ent } of jobs) {
+        holdPatch[hold.id] = ent.tail > 0.02
+          ? { start: ent.t1, duration: ent.tail, outPoint: ent.tail }
+          : null
+        const gk = ent.linkTo ?? ''
+        const g = groups.get(gk) ?? { linkTo: ent.linkTo, items: [], hands: [] }
+        g.items.push(ent.draw)
+        if (ent.hand && ent.draw.source?.key) g.hands.push(ent.draw.source.key)
+        groups.set(gk, g)
+      }
+      useApp.getState().patchClipsQuiet(holdPatch)
+      for (const g of groups.values()) {
+        const ids = useApp.getState().addAiLayerClips(g.items, { ...opts, linkTo: g.linkTo })
+        const draws = ids.filter((id, i): id is string => !!id && g.hands.includes(g.items[i].source?.key ?? ''))
+        if (draws.length) setChalkHand(draws, true, { history: false })
+      }
+      changed = true
+    }
   }
 
   const st = useApp.getState()

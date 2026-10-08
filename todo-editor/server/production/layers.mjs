@@ -27,7 +27,7 @@ import { DRAW_MAX, LABEL_MAX, fileExists, newElement, nextId, pickedVariant, sta
 
 export const SUBTITLE_SKILL_ID = 'builtin.voice-subtitle'
 /** 影响渲染结果的参数；改了就要重渲 */
-export const RENDER_PARAM_KEYS = ['size', 'fps', 'layout', 'tone', 'drawSpeed', 'stroke', 'fill', 'quality', 'handSize']
+export const RENDER_PARAM_KEYS = ['size', 'fps', 'layout', 'tone', 'drawSpeed', 'stroke', 'fill', 'quality', 'handSize', 'enter']
 
 const has = (ctx, name) => fileExists(ctx.outDir, name)
 const errText = (e) => String(e instanceof Error ? e.message : e).slice(0, 160)
@@ -109,6 +109,7 @@ const phrasesOf = (seg) => (seg.voice?.phrases ?? []).map((p, i) => ({ ...p, i }
 
 export const storyboard = {
   hash: (ctx, seg) => stableHash({
+    ...(isDynamicText(ctx) ? { textPlan: 2 } : {}),
     voice: seg.voice?.hash ?? null, boardSec: ctx.doc.params.boardSec, cast: ctx.doc.cast, planner: ctx.pack.planner.system, max: ctx.pack.planner.maxElements,
   }),
   dirty(ctx, seg) {

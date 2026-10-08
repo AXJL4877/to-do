@@ -35,6 +35,8 @@ export type RenderedElement = {
   id: string
   label: string
   role: string
+  /** draw 手写 / stamp 下压盖章扬尘 / fade 渐渐显现；旧产物没有这个字段，按手写 */
+  enter?: 'draw' | 'stamp' | 'fade'
   box: number[]
   crop?: number[]
   startMs: number

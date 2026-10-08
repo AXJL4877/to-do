@@ -1,6 +1,7 @@
 import { appendGroupSlot, useApp, type GroupLanes } from '../store'
 import { aiFetch, aiUrl } from './aiFetch'
 import { subtitleClipStyle, type SkillOutput, type SkillParams, type TimelinePlacement, type TtsOutput } from './aiSkills'
+import type { Clip } from '../types'
 import { isNarratedJob, syncNarratedJob, type NarratedJob } from './narratedTimeline'
 import { isStoreAuthority } from './storeSync'
 import { narrationJobId } from '../../shared/ttsNarration.mjs'
@@ -17,7 +18,7 @@ export type ImportableAiJob = {
     anchorClipId?: string | null
     width?: number | null
     height?: number | null
-    purpose?: 'texture'
+    purpose?: 'texture' | 'douyin-cover'
     skill?: { name: string; pipeline?: string } | null
     request?: { params: SkillParams } | null
     output?: object | null
@@ -34,7 +35,8 @@ const KIND_LABEL: Record<string, string> = { anim: '动画', skill: '黑板手�
 const claimed = new Set<string>()
 
 export function shouldImport(j: ImportableAiJob & { status: string }) {
-  return j.status === 'done' && !!j.resultUrl && j.params.purpose !== 'texture' && !claimed.has(j.id)
+  const skip = j.params.purpose === 'texture' || j.params.purpose === 'douyin-cover'
+  return j.status === 'done' && !!j.resultUrl && !skip && !claimed.has(j.id)
 }
 
 type ImportItem = Parameters<ReturnType<typeof useApp.getState>['importMedia']>[0][number]
@@ -152,6 +154,41 @@ export function placeSubtitles(j: ImportableAiJob): 'aligned' | 'playhead' | nul
 }
 
 /**
+ * 进度条 WebM 铺到画面最上方的视频轨，从最早一段音频开始。
+ * 画布与成片同大、只有顶部一条不透明，其余透明，所以不用改位置。
+ * 这条 WebM 没有音轨，拆出来的链接音频删掉，避免导出时去读不存在的音轨。
+ */
+export function placeChapterBar(j: ImportableAiJob): boolean {
+  const bar = (j.params.output as SkillOutput | null | undefined)?.chapterBar
+  if (!bar?.video || !(bar.duration > 0)) return false
+  const mediaId = addToAiFolder({
+    name: `进度条_${j.id}.webm`,
+    url: aiUrl(bar.video),
+    kind: 'video',
+    duration: bar.duration,
+    width: bar.width,
+    height: bar.height,
+    alpha: true,
+  })
+  if (!mediaId || !j.params.autoTimeline) return false
+  const placeAt = Number.isFinite(bar.placeAt) ? bar.placeAt : 0
+  useApp.getState().addClipFromMedia(mediaId, undefined, placeAt, {
+    source: { type: 'ai', jobId: j.id, kind: j.kind },
+  })
+  const st = useApp.getState()
+  const seq = st.seq()
+  const patches: Record<string, Partial<Clip> | null> = {}
+  for (const c of seq.clips) {
+    if (c.mediaId !== mediaId) continue
+    const kind = seq.tracks.find((t) => t.id === c.trackId)?.kind
+    if (kind === 'audio') patches[c.id] = null
+    else if (kind === 'video' && c.linkedId) patches[c.id] = { linkedId: undefined }
+  }
+  if (Object.keys(patches).length) st.patchClipsQuiet(patches)
+  return true
+}
+
+/**
  * 完成的 AI 任务 → 媒体库（AI 文件夹），按需自动入轨。
  * 配音：wav 入库，自动入轨时放到播放头；字幕：透明 WebM 入库备用，自动入轨时字幕条目对齐配音。
  * @returns 新媒体 id；已被其它窗口入库时返回 null
@@ -207,7 +244,9 @@ async function importClaimed(j: ImportableAiJob, narrated: boolean): Promise<str
   if (!addedId) return null
   if (subtitleOutput(j)) {
     const placed = j.params.autoTimeline ? placeSubtitles(j) : null
-    useApp.getState().setToast(placed === 'aligned' ? '字幕已对齐配音入轨' : `${label ?? '字幕'}已入库`)
+    const bar = placeChapterBar(j)
+    const base = placed === 'aligned' ? '字幕已对齐配音入轨' : `${label ?? '字幕'}已入库`
+    useApp.getState().setToast(bar ? `${base}，进度条在画面顶部` : base)
     return addedId
   }
   if (j.params.autoTimeline) {

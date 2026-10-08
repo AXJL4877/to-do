@@ -14,10 +14,21 @@ import { mayHaveAlpha } from './lib/mediaAlpha'
 import { clampZoom } from './lib/timelineZoom'
 import { aiFetch } from './lib/aiFetch'
 import { setLivePlayhead } from './lib/livePlayhead'
+import { bedSpan, planBgmPieces, type BgmEntry } from './lib/bgmLibrary'
 import { reviveMediaList, parseDesktopMedia, pathToFileUrl } from './lib/importFiles'
 import { buildEditGraph } from './lib/editGraph'
 import { tidyTimeline } from './lib/timelineTidy'
 import { exportSize, mainSourceShortEdge, type ExportResolution } from './lib/exportResolution'
+import { parseWorkspace, sealManualDraft, syncDraftBody, type ScriptWorkspace } from './lib/scriptWorkspace'
+import { migrateScriptDocument, emptyScriptMemo, parseScriptMemo, type ScriptMemoMeta } from './lib/scriptMemoDocument'
+
+function loadScriptState(data: Record<string, unknown>) {
+  return migrateScriptDocument(
+    typeof data.script === 'string' ? data.script : '',
+    parseScriptMemo(data.scriptMemo),
+    parseWorkspace(data.scriptWorkspace),
+  )
+}
 
 function sampleAt(c: Clip, prop: string, localT: number): number {
   const tr = c.transform
@@ -79,6 +90,7 @@ function buildClipMeta(clip: Clip, track?: Track, source?: ClipMeta['source']): 
     trackHidden,
     trackMuted: !!track?.muted,
     visible: enabled && !trackHidden,
+    ...(clip.meta?.role ? { role: clip.meta.role } : {}),
     source: source ?? clip.meta?.source,
     updatedAt: Date.now(),
   }
@@ -109,6 +121,7 @@ function newTrackOfKind(seq: Sequence, kind: TrackKind): Track {
 function renameKindTracks(tracks: Track[]): Track[] {
   const counts: Partial<Record<TrackKind, number>> = {}
   return tracks.map((t) => {
+    if (t.role === 'bgm') return { ...t, name: '配乐' }
     if (t.kind !== 'video' && t.kind !== 'audio') return t
     counts[t.kind] = (counts[t.kind] || 0) + 1
     const n = counts[t.kind]!
@@ -139,12 +152,12 @@ function insertTrack(
 }
 
 /**
- * 无片段的轨道自动删除；始终保留至少 1 条视频轨 + 1 条音频轨。
- * 字幕等其它轨：有片段才保留。
+ * 无片段的轨道自动删除；始终保留至少 1 条视频轨 + 1 条配音轨。
+ * 配乐轨单独保留。字幕等其它轨：有片段才保留。
  */
 function pruneEmptyTracks(seq: Sequence): Sequence {
   const used = new Set(seq.clips.map((c) => c.trackId))
-  let tracks = seq.tracks.filter((t) => used.has(t.id))
+  let tracks = seq.tracks.filter((t) => used.has(t.id) || t.role === 'bgm')
 
   if (!tracks.some((t) => t.kind === 'video')) {
     tracks.push({
@@ -152,11 +165,15 @@ function pruneEmptyTracks(seq: Sequence): Sequence {
       locked: false, muted: false, solo: false, hidden: false, height: 48,
     })
   }
-  if (!tracks.some((t) => t.kind === 'audio')) {
-    tracks.push({
+  if (!tracks.some((t) => t.kind === 'audio' && t.role !== 'bgm')) {
+    const fresh: Track = {
       id: uid('track'), kind: 'audio', name: 'A1',
       locked: false, muted: false, solo: false, hidden: false, height: 40,
-    })
+    }
+    const bgmAt = tracks.findIndex((t) => t.role === 'bgm')
+    tracks = bgmAt >= 0
+      ? [...tracks.slice(0, bgmAt), fresh, ...tracks.slice(bgmAt)]
+      : [...tracks, fresh]
   }
 
   tracks = [
@@ -607,7 +624,7 @@ export type DraftEntry = { id: string; name: string; updatedAt: number; path?: s
 /** 工程文件 JSON 版本；v2 起素材带 relPath、文件带 savedAt */
 const PROJECT_FILE_VERSION = 2
 /** 工程内容相关字段：任一变化即视为未保存 */
-const DIRTY_KEYS = ['sequences', 'activeSeqId', 'media', 'folders', 'settings', 'presets', 'fonts', 'monitorCompose', 'script'] as const
+const DIRTY_KEYS = ['sequences', 'activeSeqId', 'media', 'folders', 'settings', 'presets', 'fonts', 'monitorCompose', 'script', 'scriptMemo', 'scriptWorkspace'] as const
 /** >0 时的 set 不标脏（加载/保存本身引起的字段变化） */
 let dirtyMute = 0
 let fileSaving: Promise<boolean> | null = null
@@ -721,9 +738,18 @@ export type AppStore = {
   monitorView: 'program' | 'edit' | 'dual' | 'source'
   /** 节目监视器合成模式：2D Canvas 或 3D WebGL */
   monitorCompose: '2d' | '3d'
-  /** 口播稿（随工程文件保存）；scriptOpen = 当前显示口播备忘录 */
+  /** 口播正文。迁移后只存可朗读正文，元信息在 scriptWorkspace / scriptMemo。 */
   script: string
   scriptOpen: boolean
+  scriptMemo: ScriptMemoMeta | null
+  /** 交互式口播阶段状态（PRD v1.1）；null 表示未启用向导 */
+  scriptWorkspace: ScriptWorkspace | null
+  scriptPast: { script: string; scriptWorkspace: ScriptWorkspace | null; scriptMemo: ScriptMemoMeta | null }[]
+  scriptFuture: { script: string; scriptWorkspace: ScriptWorkspace | null; scriptMemo: ScriptMemoMeta | null }[]
+  scriptTxn: { script: string; scriptWorkspace: ScriptWorkspace | null; scriptMemo: ScriptMemoMeta | null } | null
+  voiceSeed: { text: string; revision: number; projectId: string } | null
+  coverSeed: { title: string; coverText: string; theme: string; visual: string; revision: number } | null
+  publishSeed: { title: string; description: string; tags: string[]; body: string; revision: number; projectId: string } | null
   /** K帧模式：拖位置自动在播放头打点，并显示运动路径 */
   autoKeyframe: boolean
   timelineZoom: number
@@ -761,6 +787,15 @@ export type AppStore = {
   updatePrefs: (p: Partial<AppStore['prefs']>) => void
   setMonitorCompose: (m: '2d' | '3d') => void
   setScript: (text: string) => void
+  sealScriptEdit: () => void
+  undoScript: () => void
+  redoScript: () => void
+  commitScriptState: (patch: { script?: string; scriptWorkspace?: ScriptWorkspace | null; scriptMemo?: ScriptMemoMeta | null }) => void
+  setVoiceSeed: (seed: AppStore['voiceSeed']) => void
+  setCoverSeed: (seed: AppStore['coverSeed']) => void
+  setPublishSeed: (seed: AppStore['publishSeed']) => void
+  setScriptWorkspace: (ws: ScriptWorkspace | null) => void
+  patchScriptWorkspace: (patch: Partial<ScriptWorkspace>) => void
   toggleScript: (open?: boolean) => void
   setAutoKeyframe: (on: boolean) => void
   toggleAutoKeyframe: () => void
@@ -894,6 +929,8 @@ export type AppStore = {
   tidyTimeline: () => void
   /** 一键调音：把片段响度统一到约 -12 LUFS（短视频平台听感；有选中则只调选中，否则整条时间线） */
   levelAudioLoudness: () => Promise<void>
+  /** 把曲库里的一首铺到锁定的配乐轨，换掉原来的配乐 */
+  placeBgm: (entry: Pick<BgmEntry, 'title' | 'path' | 'duration' | 'gainDb' | 'loop'> & { url?: string }) => void
   /** 把选中图层合成透明底 PNG（水印设计器里的「从选中层合成」） */
   saveSelectionAsWatermark: (opts?: { placeOnTimeline?: boolean }) => Promise<void>
   /** 按自定义设计生成文字水印并可选铺满时间线 */
@@ -1426,6 +1463,7 @@ export const useApp = create<AppStore>((set, get) => {
     settings: s.settings, media: s.media, folders: s.folders, sequences: s.sequences,
     activeSeqId: s.activeSeqId, prefs: s.prefs, presets: s.presets, fonts: s.fonts,
     monitorCompose: s.monitorCompose, playhead: s.playhead, script: s.script,
+    scriptMemo: s.scriptMemo, scriptWorkspace: s.scriptWorkspace,
   })
 
   const drafts0 = loadDraftsIndex()
@@ -1498,6 +1536,14 @@ export const useApp = create<AppStore>((set, get) => {
     monitorCompose: '2d',
     script: '',
     scriptOpen: false,
+    scriptMemo: null,
+    scriptWorkspace: null,
+    scriptPast: [],
+    scriptFuture: [],
+    scriptTxn: null,
+    voiceSeed: null,
+    coverSeed: null,
+    publishSeed: null,
     autoKeyframe: false,
     transformGesture: null,
 
@@ -1561,7 +1607,7 @@ export const useApp = create<AppStore>((set, get) => {
       setClean({
         projectId: id, projectName: name, projectPath: null, settings: defaultSettings(), media: [],
         sequences: [s], activeSeqId: s.id, selectedClipIds: [], playhead: 0,
-        drafts, script: '', scriptOpen: false,
+        drafts, script: '', scriptOpen: false, scriptMemo: null, scriptWorkspace: null, scriptPast: [], scriptFuture: [], scriptTxn: null, voiceSeed: null, coverSeed: null, publishSeed: null,
         history: [], future: [], modal: null,
       })
       notify('已新建项目')
@@ -1594,7 +1640,7 @@ export const useApp = create<AppStore>((set, get) => {
         setClean({
           projectId: uid('draft'), media: [], folders: defaultFolders(), sequences: [s], activeSeqId: s.id,
           selectedClipIds: [], selectedMediaId: null, sourceMediaId: null, playhead: 0, playing: false,
-          history: [], future: [], monitorCompose: '2d', settings: defaultSettings(), script: '', scriptOpen: false,
+          history: [], future: [], monitorCompose: '2d', settings: defaultSettings(), script: '', scriptOpen: false, scriptMemo: null, scriptWorkspace: null, scriptPast: [], scriptFuture: [], scriptTxn: null, voiceSeed: null, coverSeed: null, publishSeed: null,
         })
       }
       applySettings()
@@ -1620,7 +1666,7 @@ export const useApp = create<AppStore>((set, get) => {
       setClean({
         started: false, projectPath: null, media: [], sequences: [s], activeSeqId: s.id,
         selectedClipIds: [], selectedMediaId: null, sourceMediaId: null, playhead: 0, playing: false,
-        history: [], future: [], modal: null, script: '', scriptOpen: false,
+        history: [], future: [], modal: null, script: '', scriptOpen: false, scriptMemo: null, scriptWorkspace: null, scriptPast: [], scriptFuture: [], scriptTxn: null, voiceSeed: null, coverSeed: null, publishSeed: null,
       })
       await desktop()?.setProject?.(null)
       void get().refreshRecentProjects()
@@ -1678,7 +1724,9 @@ export const useApp = create<AppStore>((set, get) => {
             playhead: typeof data.playhead === 'number' ? data.playhead : 0,
             history: [], future: [], modal: null,
             monitorCompose: data.monitorCompose === '3d' ? '3d' : '2d',
-            script: typeof data.script === 'string' ? data.script : '', scriptOpen: false,
+            ...loadScriptState(data),
+            scriptOpen: false,
+            scriptPast: [], scriptFuture: [], scriptTxn: null,
           })
           notify(offlineN
             ? `已打开「${d.name}」· ${offlineN} 个素材需重新导入（旧 blob 链接已失效）`
@@ -1690,7 +1738,7 @@ export const useApp = create<AppStore>((set, get) => {
       setClean({
         projectId: id, projectName: d.name, projectPath: d.path ?? null,
         sequences: [s], activeSeqId: s.id, media: [], history: [], future: [], modal: null,
-        script: '', scriptOpen: false,
+        script: '', scriptOpen: false, scriptMemo: null, scriptWorkspace: null, scriptPast: [], scriptFuture: [], scriptTxn: null, voiceSeed: null, coverSeed: null, publishSeed: null,
       })
     },
 
@@ -1706,7 +1754,7 @@ export const useApp = create<AppStore>((set, get) => {
         localStorage.setItem(`todo-draft-${s.projectId}`, JSON.stringify({
           settings: s.settings, media: s.media, folders: s.folders, sequences,
           activeSeqId: s.activeSeqId, prefs: s.prefs, presets: s.presets, fonts: s.fonts,
-          monitorCompose: s.monitorCompose, script: s.script,
+          monitorCompose: s.monitorCompose, script: s.script, scriptMemo: s.scriptMemo, scriptWorkspace: s.scriptWorkspace,
           selectedClipIds: s.selectedClipIds,
           playhead: s.playhead,
         }))
@@ -1807,7 +1855,9 @@ export const useApp = create<AppStore>((set, get) => {
         presets: (data.presets as EffectPreset[]) ?? get().presets,
         fonts: (data.fonts as AppStore['fonts']) ?? get().fonts,
         monitorCompose: data.monitorCompose === '3d' ? '3d' : '2d',
-        script: typeof data.script === 'string' ? data.script : '', scriptOpen: false,
+        ...loadScriptState(data),
+        scriptOpen: false,
+        scriptPast: [], scriptFuture: [], scriptTxn: null,
         selectedClipIds: [], playhead: typeof data.playhead === 'number' ? data.playhead : 0,
         history: [], future: [], modal: null, newProjectDialog: null,
         drafts, started: true,
@@ -2591,7 +2641,97 @@ export const useApp = create<AppStore>((set, get) => {
       try { localStorage.setItem('todo-monitor-view', v) } catch { /* ignore */ }
     },
     setScript(text) {
-      set({ script: text })
+      const cur = get()
+      const workspace = cur.scriptWorkspace
+        ? { ...syncDraftBody(cur.scriptWorkspace, text), body: text }
+        : null
+      const same = text === cur.script
+      const txn = cur.scriptTxn ?? {
+        script: cur.script,
+        scriptWorkspace: cur.scriptWorkspace,
+        scriptMemo: cur.scriptMemo,
+      }
+      const memo = cur.scriptMemo ?? emptyScriptMemo({ legacy_raw: cur.script })
+      set({
+        script: text,
+        scriptWorkspace: workspace,
+        scriptMemo: memo,
+        scriptTxn: same ? cur.scriptTxn : txn,
+        scriptFuture: same ? cur.scriptFuture : [],
+      })
+    },
+    sealScriptEdit() {
+      const cur = get()
+      const workspace = cur.scriptWorkspace ? sealManualDraft(cur.scriptWorkspace) : cur.scriptWorkspace
+      if (!cur.scriptTxn || cur.scriptTxn.script === cur.script) {
+        set({ scriptTxn: null, scriptWorkspace: workspace })
+        return
+      }
+      const revision = (cur.scriptMemo?.revision ?? workspace?.revision ?? 0) + 1
+      const memo = cur.scriptMemo ? { ...cur.scriptMemo, revision } : cur.scriptMemo
+      set({
+        scriptPast: [...cur.scriptPast.slice(-49), cur.scriptTxn],
+        scriptFuture: [],
+        scriptTxn: null,
+        scriptWorkspace: workspace ? { ...workspace, revision } : workspace,
+        scriptMemo: memo,
+      })
+    },
+    undoScript() {
+      const cur = get()
+      const present = { script: cur.script, scriptWorkspace: cur.scriptWorkspace, scriptMemo: cur.scriptMemo }
+      if (cur.scriptTxn && cur.scriptTxn.script !== cur.script) {
+        set({ ...cur.scriptTxn, scriptTxn: null, scriptFuture: [present, ...cur.scriptFuture] })
+        return
+      }
+      const prev = cur.scriptPast[cur.scriptPast.length - 1]
+      if (!prev) return
+      set({
+        scriptPast: cur.scriptPast.slice(0, -1),
+        scriptFuture: [present, ...cur.scriptFuture],
+        scriptTxn: null,
+        script: prev.script,
+        scriptWorkspace: prev.scriptWorkspace,
+        scriptMemo: prev.scriptMemo,
+      })
+    },
+    redoScript() {
+      const cur = get()
+      const next = cur.scriptFuture[0]
+      if (!next) return
+      const present = { script: cur.script, scriptWorkspace: cur.scriptWorkspace, scriptMemo: cur.scriptMemo }
+      set({
+        scriptFuture: cur.scriptFuture.slice(1),
+        scriptPast: [...cur.scriptPast.slice(-49), present],
+        scriptTxn: null,
+        script: next.script,
+        scriptWorkspace: next.scriptWorkspace,
+        scriptMemo: next.scriptMemo,
+      })
+    },
+    commitScriptState(patch) {
+      const cur = get()
+      if (cur.scriptTxn && patch.script !== undefined && patch.script !== cur.scriptTxn.script) {
+        get().sealScriptEdit()
+      }
+      const base = get()
+      set({
+        script: patch.script !== undefined ? patch.script : base.script,
+        scriptWorkspace: patch.scriptWorkspace !== undefined ? patch.scriptWorkspace : base.scriptWorkspace,
+        scriptMemo: patch.scriptMemo !== undefined ? patch.scriptMemo : base.scriptMemo,
+        scriptTxn: null,
+      })
+    },
+    setVoiceSeed(seed) { set({ voiceSeed: seed }) },
+    setCoverSeed(seed) { set({ coverSeed: seed }) },
+    setPublishSeed(seed) { set({ publishSeed: seed }) },
+    setScriptWorkspace(ws) {
+      set({ scriptWorkspace: ws })
+    },
+    patchScriptWorkspace(patch) {
+      const cur = get().scriptWorkspace
+      if (!cur) return
+      set({ scriptWorkspace: { ...cur, ...patch } })
     },
     toggleScript(open) {
       const next = open ?? !get().scriptOpen
@@ -3232,8 +3372,9 @@ export const useApp = create<AppStore>((set, get) => {
       }
       const candidates = seq.clips.filter((c) => {
         if (!c.enabled || c.audio.mute || !c.mediaId) return false
+        if (c.meta?.role === 'bgm') return false
         const t = tracks.get(c.trackId)
-        if (!t || t.kind !== 'audio' || t.muted) return false
+        if (!t || t.kind !== 'audio' || t.muted || t.role === 'bgm') return false
         if (selected.size && !selected.has(c.id)) return false
         const m = mediaById.get(c.mediaId)
         return !!(m?.path && !m.offline)
@@ -3273,6 +3414,86 @@ export const useApp = create<AppStore>((set, get) => {
       get().pushHistory()
       get().patchClipsQuiet(patches)
       notify(`已统一 ${okN} 段响度到约 ${TARGET_LUFS} LUFS${skipN ? `（跳过 ${skipN}）` : ''}，可撤销`)
+    },
+
+    placeBgm(entry) {
+      if (!get().started) { notify('请先打开工程'); return }
+      const url = entry.path ? pathToFileUrl(entry.path) : entry.url
+      if (!url) { notify('找不到这首曲子的文件'); return }
+      const musicDuration = Number(entry.duration)
+      if (!(musicDuration > 0.05)) { notify('这首曲子没有可用时长'); return }
+      const span = bedSpan(get().seq())
+      if (!span) { notify('时间线上还没有画面或配音，无法铺配乐'); return }
+      const pieces = planBgmPieces(musicDuration, span.start, span.end, entry.loop !== false)
+      if (!pieces.length) { notify('这首曲子没有可用时长'); return }
+
+      const norm = (p?: string) => (p || '').replace(/\\/g, '/').toLowerCase()
+      let mediaId = entry.path
+        ? get().media.find((m) => m.kind === 'audio' && norm(m.path) === norm(entry.path))?.id
+        : undefined
+      if (!mediaId) {
+        const [id] = get().importMedia([{
+          name: entry.title || '配乐',
+          url,
+          path: entry.path || undefined,
+          kind: 'audio',
+          duration: musicDuration,
+          hasAudio: true,
+          folderId: 'f_audio',
+        }], { silent: true })
+        mediaId = id
+      }
+      if (!mediaId) { notify('配乐没有放进工程'); return }
+
+      get().pushHistory()
+      let seq = get().seq()
+      const bgmTrackIds = new Set(seq.tracks.filter((t) => t.role === 'bgm').map((t) => t.id))
+      seq = {
+        ...seq,
+        clips: seq.clips.filter((c) => c.meta?.role !== 'bgm' && !bgmTrackIds.has(c.trackId)),
+      }
+      let track = seq.tracks.find((t) => t.role === 'bgm')
+      if (!track) {
+        track = {
+          id: uid('track'), kind: 'audio', name: '配乐', role: 'bgm',
+          locked: true, muted: false, solo: false, hidden: false, height: 40,
+        }
+        seq = { ...seq, tracks: insertTrack(seq.tracks, track, 'after') }
+      } else {
+        track = { ...track, name: '配乐', role: 'bgm', locked: true }
+        seq = { ...seq, tracks: seq.tracks.map((t) => (t.id === track!.id ? track! : t)) }
+      }
+      const bed = track
+      const gainRaw = Number(entry.gainDb)
+      const gainDb = Number.isFinite(gainRaw) ? Math.max(-60, Math.min(0, gainRaw)) : -20
+      const added: Clip[] = pieces.map((p) => {
+        const clip: Clip = {
+          id: uid('clip'), trackId: bed.id, mediaId, name: entry.title || '配乐',
+          start: p.start, duration: p.duration, inPoint: p.inPoint, outPoint: p.outPoint,
+          enabled: true, speed: 1, reverse: false, speedKeyframes: [],
+          transform: defaultTransform(), color: defaultColor(),
+          audio: { ...defaultAudio(), gainDb },
+          effects: [], blend: 'normal', keyframes: {},
+        }
+        clip.meta = { ...buildClipMeta(clip, bed), role: 'bgm' }
+        return clip
+      })
+      patchSeq(() => enforceNoOverlap({
+        ...seq,
+        clips: [...seq.clips, ...added],
+        workOut: Math.max(seq.workOut, span.end),
+      }))
+      set({ selectedClipIds: added.map((c) => c.id) })
+      const covered = pieces.reduce((sum, p) => sum + p.duration, 0)
+      const spanDur = span.end - span.start
+      const note = pieces.length > 1
+        ? `，接龙 ${pieces.length} 段`
+        : covered < spanDur - 0.05
+          ? '，曲子较短，没有循环'
+          : musicDuration > spanDur + 0.05
+            ? '，已按成片时长裁切'
+            : ''
+      notify(`已铺配乐「${entry.title || '配乐'}」${note}`)
     },
 
     async saveSelectionAsWatermark(opts) {

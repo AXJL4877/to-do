@@ -30,18 +30,19 @@ app.whenReady().then(async () => {
     const ui = await win.webContents.executeJavaScript(`(async () => {
       const wait = () => new Promise(r => setTimeout(r, 180));
       const get = id => document.querySelector('[data-testid="' + id + '"]');
+      const click = id => { const el = get(id); if (!el) throw new Error('Missing UI control: ' + id); el.click() };
       const check = (v, m) => { if (!v) throw new Error(m) };
       window.__TODO__.setState({ selectedClipIds: [] }); await wait();
-      get('fancy-cat-chalk').click(); await wait();
+      click('fancy-cat-chalk'); await wait();
       const draft = get('fancy-content');
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(draft, '今天也要认真生活');
       draft.dispatchEvent(new Event('input', { bubbles: true })); await wait();
-      get('preview-focus').click(); await wait(); get('preview-focus').click(); await wait();
+      click('preview-focus'); await wait(); click('preview-focus'); await wait();
       check(get('fancy-content').value === '今天也要认真生活', 'preview focus lost unsaved chalk draft');
       check(get('fancy-text-panel'), 'flower text module missing');
       check(!get('fancy-preset-variety'), 'old presets remain');
-      get('fancy-preset-chalk-blue').click(); await wait();
-      get('fancy-add').click(); await wait();
+      click('fancy-preset-chalk-blue'); await wait();
+      click('fancy-add'); await wait();
       let s = window.__TODO__.getState(); let c = s.seq().clips.find(c => s.selectedClipIds.includes(c.id));
       check(c.text.fancy.chalk && c.text.fancy.fill[0] === '#8ad4ef', 'chalk title not added');
       const input = get('inspector-x').querySelector('input[type=number]');
@@ -52,14 +53,14 @@ app.whenReady().then(async () => {
       s.undo(); await wait();
       s = window.__TODO__.getState(); c = s.seq().clips.find(c => s.selectedClipIds.includes(c.id));
       check(c && c.transform.x === 0, 'undo did not restore transform');
-      get('monitor-view-program').click(); await wait();
+      click('monitor-view-program'); await wait();
       check(window.__TODO__.getState().monitorView === 'program', 'direct view switch failed');
-      get('preview-focus').click(); await wait();
+      click('preview-focus'); await wait();
       check(!get('inspector-panel')?.offsetParent && !get('dock-left')?.offsetParent, 'focus mode still obstructed');
-      get('preview-focus').click(); await wait();
+      click('preview-focus'); await wait();
       check(get('inspector-panel') && get('dock-left'), 'focus mode lost layout');
-      get('inspector-toggle').click(); await wait(); check(!get('inspector-panel'), 'collapse failed');
-      get('inspector-toggle').click(); await wait();
+      document.querySelector('[aria-label="收起属性栏"]').click(); await wait(); check(!get('inspector-panel'), 'collapse failed');
+      click('inspector-toggle'); await wait();
       window.__TODO__.getState().setPlayhead(c.start + 2.5); await wait();
       return { width: document.documentElement.scrollWidth, viewport: innerWidth, text: c.text.content };
     })()`)

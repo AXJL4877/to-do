@@ -49,7 +49,7 @@ export function SkillParamControl({ p, values, onChange }: {
   values: SkillParams
   onChange: (id: string, v: string | number) => void
 }) {
-  const v = values[p.id]
+  const v = values[p.id] ?? p.default
   if (p.type === 'number') {
     return (
       <div className="field" data-testid={`skill-param-${p.id}`}>

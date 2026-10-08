@@ -10,6 +10,8 @@ import { DYNAMIC_TEXT_PRESETS } from '../src/lib/dynamicTextPack'
 import { useApp } from '../src/store'
 import { defaultText, type Clip, type TextStyle } from '../src/types'
 import { progressThemeForJob } from '../src/components/CreativeProgress'
+import { buildFullCompositionPlan } from '../src/lib/jizura/fullComposition'
+import { JIZURA_CATALOG } from '../src/lib/jizura/catalog'
 
 const results: { name: string; ok: boolean; error?: string }[] = []
 let chain = Promise.resolve()
@@ -24,7 +26,7 @@ const textFor = (i = 0, content = '把灵感 写下来'): TextStyle => ({ ...def
 function render(text: TextStyle, time = 1.2, w = 640, h = 360, duration = 3, target?: HTMLCanvasElement) {
   const canvas = target ?? document.createElement('canvas')
   if (!target) { canvas.width = w; canvas.height = h }
-  const ctx = canvas.getContext('2d')!
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })!
   ctx.save(); ctx.translate(w / 2, h / 2)
   drawTextClip(ctx, { text, start: 0, duration, keyframes: {} } as Clip, w, h, time)
   ctx.restore()
@@ -35,11 +37,93 @@ const same = (a: Uint8ClampedArray, b: Uint8ClampedArray) => a.length === b.leng
 const visible = (d: Uint8ClampedArray) => d.filter((_, i) => i % 4 === 3 && d[i] > 0).length
 const frames = () => new Promise<void>(r => requestAnimationFrame(() => requestAnimationFrame(() => r())))
 
+test('full engine registers every expression family rather than six layouts', () => {
+  check(JIZURA_CATALOG.groups.layout.length > 150, 'full layout catalogue missing')
+  for (const group of ['enter', 'hold', 'exit', 'decor', 'treat', 'bg', 'cam', 'fx', 'trans'] as const)
+    check(JIZURA_CATALOG.groups[group].length > 5, `missing ${group} catalogue`)
+  check(JIZURA_CATALOG.styles.length >= 27, 'style collection missing')
+})
+
+function fullTextFor() {
+  const t = textFor(0, '#原文/不是*控制符')
+  t.fancy!.dynamic = { version: 2, engine: 'jizura', presetId: 'dynamic-full', seed: 2026, duration: 3, motion: .7, accent: '#ffb454',
+    composition: { style: 'noir', mood: 'graphic', background: 'style', unify: true, parts: {},
+      fx: { decor: .6, chroma: .4, glitch: .25, texture: .5, bgSwitch: .5 }, offset: 0,
+      scenes: [{content:t.content,start:0,end:3},{content:'镜头之间自动转场',start:3,end:6}] } }
+  return t
+}
+
+test('complete composition preserves literal timing, renders styles and seeks deterministically', () => {
+  const t = fullTextFor()
+  const a = data(render(t, 1.2)); render(t, 2.6)
+  check(same(a, data(render(t, 1.2))), 'complete renderer seeking must reproduce pixels')
+  for (const style of JIZURA_CATALOG.styles) {
+    t.fancy!.dynamic.composition!.style = style.id
+    check(visible(data(render(t, 1.2))) > 100, `empty complete style ${style.id}`)
+  }
+  t.fancy!.dynamic.composition!.background = 'transparent'
+  check(visible(data(render(t, 1.2))) < 640*360, 'transparent mode is opaque')
+})
+
+test('full literal plan retains punctuation, exact boundaries and edited scene content', () => {
+  const text = fullTextFor(); const cfg = text.fancy!.dynamic!
+  const plan = buildFullCompositionPlan(text,cfg,640,360)
+  check(plan.cuts.filter((c: any) => c.line === 0).map((c: any) => c.text).join('') === text.content, 'lyric syntax changed narration')
+  check(plan.cuts[0].start === 0 && plan.cuts[0].end === 3, 'timestamps drifted')
+  text.content = '修改后的原文'
+  const edited = buildFullCompositionPlan(text,cfg,640,360)
+  check(edited.cuts[0].text === text.content, 'edited text reuses stale cached plan')
+})
+
+test('full composition supports portrait and square frames with alpha and deterministic seeks', () => {
+  for (const [w,h] of [[360,640],[480,480]]) {
+    const text = fullTextFor()
+    check(visible(data(render(text,1.2,w,h))) === w*h, 'style background must cover the frame')
+    text.fancy!.dynamic!.composition!.background = 'transparent'
+    const a=data(render(text,1.2,w,h)); render(text,2.6,w,h)
+    check(visible(a)>100 && visible(a)<w*h,'transparent portrait/square frame lost content or alpha')
+    check(same(a,data(render(text,1.2,w,h))),'portrait/square seek differs')
+  }
+})
+
 test('dynamic templates belong to a separate extension, outside the font library', () => {
   check(!FANCY_CATEGORIES.some(c => c.id === 'dynamic'), 'dynamic category remains in font library')
   check(!FANCY_PRESETS.some(p => p.fancy.dynamic), 'dynamic templates remain in font library')
   check(presets().length === 6, 'expected six dynamic presets')
   check(FANCY_PRESETS.some(p => p.category === 'chalk'), 'chalk must remain available')
+})
+
+test('full explicit choices survive unification and disabled parts stay off', () => {
+  const t = fullTextFor(), cfg = t.fancy!.dynamic!, c = cfg.composition!
+  c.scenes = [...c.scenes, { content: t.content, start: 6, end: 9 }]
+  c.parts = { layout: 'center', enter: 'type', exit: 'drift', hold: 'still', cam: 'none', decor: 'none', treat: 'none', bg: 'none', trans: 'none', fx: 'none' }
+  const p = buildFullCompositionPlan(t, cfg, 640, 360)
+  for (const cut of p.cuts) {
+    check(cut.layout === 'center' && cut.enter === 'type' && cut.exit === 'drift' && cut.hold === 'still', 'unification replaced explicit text effects')
+    check(cut.cam === 'hostStill' && cut.bg === 'none' && cut.treat === 'none' && !cut.decor.length && !cut.trans && !cut.morph, 'disabled component still selected')
+  }
+  const beforeStyle = data(render(t, 1.2))
+  t.fancy!.dynamic.composition!.style = 'noir'
+  check(same(beforeStyle, data(render(t, 1.2))), 're-planning the same style must stay pixel-stable')
+  check(!p.events.length, 'disabled screen effects still active')
+  c.parts = { cam: 'earthquake', decor: 'rings', treat: 'baselineShift', trans: JIZURA_CATALOG.groups.trans[0].id }
+  const explicit = buildFullCompositionPlan(t, cfg, 640, 360)
+  for (const cut of explicit.cuts) {
+    check(cut.cam === c.parts.cam && cut.treat === c.parts.treat && cut.decor.length === 1 && cut.decor[0].id === 'rings', 'unification replaced selected components')
+    if (cut.index) check(cut.trans === c.parts.trans && cut.transDur > 0 && !cut.morph, 'explicit transition was replaced')
+  }
+  const frame = data(render(t, 3.1)); render(t, 7.2)
+  check(same(frame, data(render(t, 3.1))), 'explicit transition is not deterministic')
+})
+
+test('full scene clips share the same plan when their effective narration is unchanged', () => {
+  const a = fullTextFor(), cfg = a.fancy!.dynamic!
+  const p = buildFullCompositionPlan(a, cfg, 640, 360)
+  const b = structuredClone(a)
+  b.content = cfg.composition!.scenes[1].content
+  b.fancy!.dynamic!.composition!.offset = 3
+  b.fancy!.dynamic!.duration = 2
+  check(buildFullCompositionPlan(b, b.fancy!.dynamic!, 640, 360) === p, 'per-clip offset duplicates complete plans')
 })
 test('progress theme handles jobs with null skill data', () => {
   check(progressThemeForJob({ kind: 'image', params: { skill: null } } as any) === 'brush', 'nullable job skill must be safe')
@@ -151,6 +235,10 @@ test('library creates editable dynamic clip; edits, undo and JSON roundtrip reta
     check(reopened.text.content === '修改之后' && reopened.text.fancy.dynamic.seed === (shuffled.text!.fancy as any).dynamic.seed, 'save data changed')
     flushSync(() => useApp.getState().undo())
     check(useApp.getState().sequences.find(s => s.id === seq.id)!.clips.find(c => c.id === clip.id)!.text!.content === original, 'undo fails')
+    flushSync(() => host.querySelector<HTMLButtonElement>('[data-testid="dynamic-full"]')!.click())
+    await frames()
+    check(host.querySelector('[data-testid="jizura-composition-controls"]'), 'full composition controls missing')
+    check(host.querySelector<HTMLSelectElement>('[aria-label="排版"]')!.options.length > 180, 'full layout selector missing')
     flushSync(() => root.render(<FancyTextPanel />))
     check(!host.querySelector('[data-testid="dynamic-controls"]'), 'font editor must not edit dynamic clips')
     flushSync(() => root.render(<SkillsPanel />))
@@ -161,7 +249,9 @@ test('library creates editable dynamic clip; edits, undo and JSON roundtrip reta
 })
 
 let gallery: string | undefined
+let fullGallery: string | undefined
 const exportFixtures: any[] = []
+const fullExportFixtures: any[] = []
 test('produce reference frames for independently loaded export renderer', () => {
   for (let i = 0; i < 6; i++) {
     const text = textFor(i)
@@ -169,7 +259,26 @@ test('produce reference frames for independently loaded export renderer', () => 
     exportFixtures.push({ text, time: 0.75, duration: 1.5, w: 640, h: 360, png: render(text, 0.75, 640, 360, 1.5).toDataURL('image/png').split(',')[1] })
   }
 })
-test('generate acceptance gallery', () => {
+test('full composition reference frames include background, alpha and inter-scene transitions', () => {
+  for (const [background, time] of [['style',1.2],['transparent',1.2],['style',3.15]] as const) {
+    const text = fullTextFor(); text.fancy!.dynamic!.composition!.background = background
+    fullExportFixtures.push({text,time,duration:6,w:640,h:360,png:render(text,time,640,360,6).toDataURL('image/png').split(',')[1]})
+  }
+})
+
+test('generate complete style acceptance gallery', () => {
+  const cv=document.createElement('canvas');cv.width=1200;cv.height=2160
+  const x=cv.getContext('2d')!;x.fillStyle='#17191f';x.fillRect(0,0,cv.width,cv.height)
+  JIZURA_CATALOG.styles.forEach((style,i)=>{
+    const text=fullTextFor();text.content='让文字跟着声音起舞';text.fancy!.dynamic!.composition!.style=style.id
+    const px=i%3*400,py=Math.floor(i/3)*240
+    x.drawImage(render(text,1.2,384,216),px+8,py+8)
+    x.font='12px "Microsoft YaHei"';x.fillStyle='#ffffff';x.fillText(style.name,px+12,py+236)
+  })
+  fullGallery=cv.toDataURL('image/png')
+})
+
+test('generate acceptance gallery' , () => {
   const c = document.createElement('canvas'); c.width = 1200; c.height = 780
   const x = c.getContext('2d')!; x.fillStyle = '#161a21'; x.fillRect(0, 0, c.width, c.height)
   for (let i = 0; i < 6; i++) {
@@ -180,4 +289,4 @@ test('generate acceptance gallery', () => {
   }
   gallery = c.toDataURL('image/png')
 })
-;(window as any).dynamicTests = chain.then(() => ({ results, failed: results.filter(r => !r.ok).length, gallery, exportFixtures }))
+;(window as any).dynamicTests = chain.then(() => ({ results, failed: results.filter(r => !r.ok).length, gallery, fullGallery, exportFixtures, fullExportFixtures }))

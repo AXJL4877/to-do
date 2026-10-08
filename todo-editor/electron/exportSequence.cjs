@@ -147,18 +147,21 @@ async function exportSequence(seq, outPath, opts = {}) {
   let result
   if (!seq.audioOnly && (seq.clips || []).some(c => c.enabled !== false && c.text)) {
     let prepared
+    // 动态/花字预渲染往往占导出大半时间，进度条按 5%→75% 反映，避免长时间停在个位数
+    const textHeavy = (seq.clips || []).some(c => c.enabled !== false && c.text?.fancy)
+    const textEnd = textHeavy ? 75 : 20
     try {
       const { prepareTextLayers } = require('./chalkTextExport.cjs')
       prepared = await prepareTextLayers(seq, {
         ffmpeg: resolveFfmpeg(opts.nativeBin),
         rendererUrl: opts.chalkRendererUrl,
-        onProgress: (p, stage) => opts.onProgress?.(10 + p * 0.1, stage),
+        onProgress: (p, stage) => opts.onProgress?.(5 + (p / 100) * (textEnd - 5), stage),
       })
     } catch (e) { return { ok: false, error: e.message || '字幕渲染失败' } }
     try {
       result = await exportPreparedSequence(prepared.sequence, outPath, {
         ...opts,
-        onProgress: (p, stage) => opts.onProgress?.(20 + Math.max(0, p - 10) * (80 / 90), stage),
+        onProgress: (p, stage) => opts.onProgress?.(textEnd + Math.max(0, p) * ((95 - textEnd) / 100), stage),
       })
     } finally { prepared.cleanup() }
   } else {

@@ -5,7 +5,7 @@ export type Ease = 'linear' | 'easeIn' | 'easeOut' | 'easeInOut' | 'hold' | 'bez
 export type BlendMode = 'normal' | 'multiply' | 'screen' | 'overlay' | 'soft-light' | 'add'
 export type FitMode = 'contain' | 'cover' | 'stretch' | 'manual'
 export type TransitionType = 'dissolve' | 'fadeBlack' | 'fadeWhite' | 'push' | 'wipe'
-export type EffectType = 'blur' | 'sharpen' | 'vignette' | 'glow' | 'glitch' | 'mosaic' | 'noiseReduce' | 'filter'
+export type EffectType = 'blur' | 'sharpen' | 'vignette' | 'glow' | 'glitch' | 'mosaic' | 'noiseReduce' | 'filter' | 'chalkDust'
 export type MaskType = 'rect' | 'ellipse' | 'linear' | 'pen' | 'text'
 
 /** 贝塞尔手柄：相对本段 (dt, dv) 的偏移；出手柄 x∈(0,1)，入手柄 x∈(-1,0) */
@@ -60,13 +60,20 @@ export interface TextStyle {
 export interface FancyStroke { color: string; width: number }
 
 export interface DynamicText {
-  version: 1
+  version: 1 | 2
   engine: 'jizura'
   presetId: string
   seed: number
   duration: number
   motion: number
   accent: string
+  composition?: {
+    style: string; mood: string; background: 'style' | 'transparent'; unify: boolean
+    parts: Partial<Record<'layout' | 'enter' | 'hold' | 'exit' | 'decor' | 'treat' | 'bg' | 'cam' | 'fx' | 'trans', string>>
+    fx: { decor: number; chroma: number; glitch: number; texture: number; bgSwitch: number }
+    offset: number
+    scenes: { content: string; start: number; end: number }[]
+  }
 }
 
 export interface FancyText {
@@ -193,6 +200,8 @@ export interface ClipMeta {
   trackMuted?: boolean
   /** 最终是否可见：片段启用且轨道未隐藏 */
   visible?: boolean
+  /** 配乐垫底：一键调音跳过，再次铺曲时整段换掉 */
+  role?: 'bgm'
   source?: {
     type: 'ai' | 'import' | 'manual'
     jobId?: string
@@ -238,6 +247,8 @@ export interface Clip {
 export interface Track {
   id: string; kind: TrackKind; name: string
   locked: boolean; muted: boolean; solo: boolean; hidden: boolean; height: number
+  /** 配乐轨：锁定，不参与成片配音入轨，整理时间轴时保留 */
+  role?: 'bgm'
 }
 
 export interface Marker { id: string; t: number; color: string; label: string }

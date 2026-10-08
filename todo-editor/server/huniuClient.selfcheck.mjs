@@ -59,6 +59,16 @@ assert(generation.body.output_resolution === '2K', 'maps quality to output_resol
 assert(generation.body.response_format === 'url', 'requests URL results')
 assert(!('image' in generation.body), 'text-to-image has no image field')
 
+const emptyRef = buildImageRequest({
+  model: 'gpt-image-2',
+  prompt: 'test',
+  size: '1:1',
+  quality: '1K',
+  imageDataUrl: '',
+})
+assert(emptyRef.path === '/v1/images/generations', 'empty imageDataUrl must not enter edits')
+assert(!('image' in emptyRef.body), 'empty imageDataUrl must not send image field')
+
 const edit = buildImageRequest({
   model: 'gpt-image-2',
   prompt: 'edit',

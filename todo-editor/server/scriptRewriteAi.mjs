@@ -1,11 +1,16 @@
 /**
  * 口播稿 AI：选词提问 / 按指示改写 / 在光标处插入。
- * 默认模型 gemini-3.8-flash（与技能规划一致）。
+ * 默认模型 gemini-3.8-flash（可由 ai-config.chatModel / TODO_AI_SCRIPT_MODEL 覆盖）。
  */
 import { normalizeBaseUrl } from './huniuClient.mjs'
 import { extractJson } from './fancyTextAi.mjs'
+import { DEFAULT_CHAT_MODEL } from './huniuConfig.mjs'
 
-export const SCRIPT_AI_MODEL = process.env.TODO_AI_SCRIPT_MODEL || process.env.TODO_AI_SKILL_MODEL || 'gemini-3.8-flash'
+export const SCRIPT_AI_MODEL = process.env.TODO_AI_SCRIPT_MODEL || process.env.TODO_AI_SKILL_MODEL || DEFAULT_CHAT_MODEL
+
+function resolveModel(config) {
+  return String(config?.chatModel || SCRIPT_AI_MODEL || DEFAULT_CHAT_MODEL)
+}
 
 const MODES = new Set(['ask', 'rewrite', 'insert', 'explain'])
 
@@ -70,11 +75,12 @@ export async function assistScript(config, body = {}) {
     mode === 'insert' ? `光标前：\n${before || '（开头）'}\n\n光标后：\n${after || '（结尾）'}` : '',
   ].filter(Boolean)
 
+  const model = resolveModel(config)
   const res = await fetch(`${normalizeBaseUrl(config.baseUrl)}/v1/chat/completions`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${config.apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: SCRIPT_AI_MODEL,
+      model,
       messages: [
         { role: 'system', content: system },
         { role: 'user', content: userParts.join('\n\n') },
@@ -104,6 +110,6 @@ export async function assistScript(config, body = {}) {
     mode,
     text,
     reply: reply || (mode === 'rewrite' ? '已改写选区' : mode === 'insert' ? '已生成插入文案' : ''),
-    model: SCRIPT_AI_MODEL,
+    model: resolveModel(config),
   }
 }

@@ -2,6 +2,7 @@ import React from 'react'
 import { createRoot } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 import { Timeline } from '../src/components/Timeline'
+import { TimelineResizeHandle } from '../src/components/Workspace'
 import { Monitor } from '../src/components/Monitor'
 import { useApp } from '../src/store'
 import { tidyTimeline } from '../src/lib/timelineTidy'
@@ -41,6 +42,43 @@ function frames() {
   })
 }
 const settings = { ...useApp.getState().settings, width: 320, height: 180, safeFrame: false }
+test('docked timeline respects both larger and smaller user heights', async () => {
+  const previousLayout = useApp.getState().layout
+  useApp.setState({ sequences: [sequence], activeSeqId: sequence.id, playing: false,
+    layout: { ...previousLayout, timelineH: 400 } })
+  const container = document.createElement('div')
+  container.style.cssText = 'height:600px;width:900px;display:flex;flex-direction:column'
+  document.body.append(container)
+  const root = createRoot(container)
+  try {
+    flushSync(() => root.render(<><TimelineResizeHandle /><Timeline /></>))
+    await frames()
+    const panel = container.querySelector<HTMLElement>('[data-testid="timeline"]')!
+    const expandedHeight = Math.min(400, Math.max(280, Math.floor(window.innerHeight * 0.72)))
+    check(Math.abs(panel.getBoundingClientRect().height - expandedHeight) <= 1, 'growing must change actual panel height within viewport limit')
+    const handle = container.querySelector<HTMLElement>('[data-testid="resize-timeline"]')!
+    // Synthetic pointer events have no native active pointer to capture.
+    handle.setPointerCapture = () => {}
+    handle.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 1, clientY: 100 }))
+    flushSync(() => window.dispatchEvent(new PointerEvent('pointermove', { pointerId: 1, clientY: 180 })))
+    await frames()
+    check(useApp.getState().layout.timelineH === 320, 'first drag step must decrease height')
+    flushSync(() => window.dispatchEvent(new PointerEvent('pointermove', { pointerId: 1, clientY: 340 })))
+    window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1 }))
+    await frames()
+    check(useApp.getState().layout.timelineH === 160, 'automatic sizing must not overwrite a smaller user height')
+    check(Math.abs(panel.getBoundingClientRect().height - 160) <= 1, 'shrinking must change actual panel height')
+    handle.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 2, clientY: 340 }))
+    flushSync(() => window.dispatchEvent(new PointerEvent('pointermove', { pointerId: 2, clientY: 260 })))
+    window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 2 }))
+    await frames()
+    check(Math.abs(panel.getBoundingClientRect().height - 240) <= 1, 'dragging upward must grow the panel again')
+  } finally {
+    root.unmount()
+    container.remove()
+    useApp.setState({ layout: previousLayout })
+  }
+})
 const pixels = (seq: Sequence, t: number) => {
   const canvas = document.createElement('canvas')
   renderProgramFrame(canvas, seq, [], settings, t, new Map(), 320, 180, [], undefined, false, undefined, true)

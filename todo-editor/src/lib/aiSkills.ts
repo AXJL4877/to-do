@@ -49,6 +49,8 @@ export type SkillOutput = {
   /** subtitle 管线：字幕条目 + 对应的配音 */
   subtitles?: { url: string; ass: string; cues: SubtitleCue[] }
   source?: { jobId: string; audio: string; duration: number }
+  /** 整段只出一条：透明画布，进度条画在顶部，其余透明 */
+  chapterBar?: { video: string; width: number; height: number; barH: number; duration: number; placeAt: number }
   params?: SkillParams
 }
 
@@ -208,6 +210,8 @@ export async function enqueueSkill(body: {
   sourceJobId?: string
   sourceMedia?: SubtitleSourceMedia
   anchorClipId?: string
+  /** 只挂在第一段任务上：整段进度条，时间相对 placeAt */
+  chapters?: { titles: string[]; duration: number; ranges: [number, number][]; placeAt: number }
 }) {
   const r = await aiFetch('/api/ai-jobs', {
     method: 'POST',

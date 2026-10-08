@@ -2,7 +2,7 @@
   "spec": "todo-skill-pack/1",
   "id": "builtin.chalk-hand",
   "name": "黑板手绘",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "author": "TO DO",
   "description": "长口播一键成片：AI 先按意思把全文切成口播段，每段单独配音、拆成几块黑板，每块 1~4 个粉笔元素；配音、黑板底、元素书写片段和字幕按时间戳自动铺进时间轴。每个元素可以多出几张候选图挑选、换描述重画或上传自己的图，改哪里只重做哪里。",
   "tags": ["黑板报", "口播", "成片", "配音", "粉笔", "字幕"],
@@ -105,14 +105,23 @@
     {
       "id": "hand", "type": "select", "group": "stroke", "label": "粉笔手", "default": "chalk",
       "options": [
-        { "value": "chalk", "label": "自动加", "hint": "每个元素入轨时自动套「粉笔手书写」入场动画，之后可在动效里删掉或重加" },
-        { "value": "none", "label": "不加", "hint": "只有笔画生长；需要时再在动效里给元素加" }
+        { "value": "chalk", "label": "自动加", "hint": "手写的元素入轨时自动套「粉笔手书写」；盖章和渐显不加手" },
+        { "value": "none", "label": "不加", "hint": "手写元素只有笔画生长；需要时再在动效里给元素加" }
       ]
     },
     {
       "id": "handSize", "type": "number", "group": "stroke", "label": "手部大小",
       "min": 0.6, "max": 1.4, "step": 0.1, "default": 1, "unit": "×",
       "when": { "hand": ["chalk"] }
+    },
+    {
+      "id": "enter", "type": "select", "group": "stroke", "label": "进场", "default": "mix",
+      "options": [
+        { "value": "mix", "label": "混合", "hint": "主视觉仍用手写；配角渐渐显现；标题和大字下压盖章，砸到板上扬起粉笔灰" },
+        { "value": "draw", "label": "全部手写" },
+        { "value": "stamp", "label": "全部盖章" },
+        { "value": "fade", "label": "全部显现" }
+      ]
     },
     {
       "id": "stroke", "type": "select", "group": "stroke", "label": "笔迹", "default": "skeleton",

@@ -215,6 +215,13 @@ export default function App() {
       }
 
       if (mod && e.code === 'KeyZ') {
+        const inMemo = e.target instanceof HTMLElement && e.target.hasAttribute('data-script-memo')
+        if (inMemo) {
+          e.preventDefault()
+          if (e.shiftKey) s.redoScript()
+          else s.undoScript()
+          return
+        }
         if (isPlainTextField(e.target)) return
         e.preventDefault()
         if (e.shiftKey) s.redo()
@@ -222,6 +229,8 @@ export default function App() {
         return
       }
       if (mod && e.code === 'KeyY') {
+        const inMemo = e.target instanceof HTMLElement && e.target.hasAttribute('data-script-memo')
+        if (inMemo) { e.preventDefault(); s.redoScript(); return }
         if (isPlainTextField(e.target)) return
         e.preventDefault()
         s.redo()

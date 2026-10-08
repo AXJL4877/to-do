@@ -100,6 +100,18 @@ test('首次入轨：配音首尾相接、元素书写 + 定格、字幕链接�
   near(plate.start + plate.duration, 21, '底板铺到整片结束')
   const tracks = useApp.getState().seq().tracks
   check(tracks.findIndex((t) => t.id === plate.trackId) > tracks.findIndex((t) => t.id === d.trackId), '底板在元素下面')
+  check(useApp.getState().history.length === 1, '入场单独记一笔撤销')
+  const holdEnd = h.start + h.duration
+  useApp.getState().undo()
+  check(byKey('g1/xe1/draw').length === 0, '撤销后入场消失')
+  const back = one('g1/xe1/hold')
+  near(back.start, 2, '撤销后定格从元素出现时就开始')
+  near(back.start + back.duration, holdEnd, '撤销后定格盖住原来的入场')
+  check(one('g1/voice').id === v1.id && one('plate').id === plate.id, '撤销入场不动配音和底板')
+  check(byKey('g1/subs').length === 2, '字幕还在')
+  useApp.getState().redo()
+  check(one('g1/xe1/draw').meta?.source?.chalk?.on, '重做恢复入场和粉笔手')
+  near(one('g1/xe1/hold').start, h.start, '重做后定格接回入场后面')
 })
 
 test('幂等：再对账一次什么都不动', () => {

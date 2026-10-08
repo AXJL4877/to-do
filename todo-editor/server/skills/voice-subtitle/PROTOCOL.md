@@ -1,4 +1,4 @@
-# 字幕技能包协议 v2.2（`builtin.voice-subtitle`）
+# 字幕技能包协议 v2.3（`builtin.voice-subtitle`）
 
 给一段音频生成字幕。有来源配音（[`builtin.tts-voice`](../tts-voice/PROTOCOL.md)）时按它的文案和逐字时间戳；没有文案时对素材做语音识别。走 `subtitle` 管线，和黑板手绘共用同一套三层协议（`todo-skill-pack/1` / `todo-skill-render/1` / `todo-skill-output/1`）、同一个任务队列和 HTTP / CLI 入口，通用部分见 [`../chalk-hand/PROTOCOL.md`](../chalk-hand/PROTOCOL.md)，这里只写差异。
 
@@ -6,6 +6,7 @@
 - 识别模式（`asr`）：素材没有配音文案时，用 burn-subtitles 的 `asr_char_timeline`（faster-whisper，本机 CPU）识别逐字文本和时间，转简体（装了 `zhconv` 时），按字间停顿补标点（≥0.35s 逗号、≥0.8s 句号）后照常切条。识别可能认错字，约为音频时长的 3~5 倍耗时。
 - 切条、对齐、关键词、识别都调用 burn-subtitles 本体（`align_chunks` / `pick_keywords` / `write_ass` / `asr_char_timeline`），不复制它的逻辑。
 - 产物：字幕条目（进时间轴成为可编辑文字片段）+ ASS + 透明底 WebM（不带音频，备用）。
+- 顶部进度条默认关。烧录弹窗打开后，把章名和所选音频的时间交给 burn-subtitles 的 `parse_chapters` / `write_ass`，整段只出一条透明 WebM（条在顶部，其余透明），铺到画面最上方。
 
 ---
 
@@ -95,6 +96,7 @@ npm run skill -- fetch <jobId> --out ./out --wait
 | `source` | `{ mode, jobId, audio, name, duration }`；文案模式 `jobId` 为来源配音，识别模式为 null、`audio` 为素材 url |
 | `transcript` | 仅识别模式：补过标点的识别全文 |
 | `subtitles` | `{ url, ass, cues: [{ text, start, end }] }`。时间相对音频开头；`url` 为完整 JSON（含 `keywords`） |
+| `chapterBar` | 仅打开进度条的那一段任务：`{ video, width, height, barH, duration, placeAt }`。`video` 与成片同尺寸，只有顶部 `barH` 是进度条，其余透明。时间覆盖所选音频从最早到最晚，`placeAt` 是时间线上的起点 |
 
 ## 5. 进时间轴
 
@@ -103,7 +105,8 @@ npm run skill -- fetch <jobId> --out ./out --wait
   - 否则只要服务端读得到文件（AI 生成的，或桌面版导入、带本机路径的素材）→ 识别模式；
   - 浏览器里拖进来的素材（只有 blob URL）读不到，跳过并提示；都烧不了时该项置灰。
 - 支持多选，每段各发一个任务，`anchorClipId` 为该片段。参数在「烧录字幕」弹窗里选（字体 / 字号 / 距底 + 底部·偏下·居中·顶部预设 / 每条字数 / 关键词，右侧实时预览，背景取节目画面当前帧；选择记在本机，下次沿用），弹窗标题会注明其中几段走语音识别。画幅取当前工程（不在选项里时取同比例的一档），`autoTimeline` 为 true。完成后自动入轨，失败时弹出提示。
-- WebM 进媒体库 AI 文件夹备用，不自动上轨。
+- 字幕 WebM 进媒体库 AI 文件夹备用，不自动上轨。
+- 进度条在弹窗里默认关，打开后写 1～6 个章名（建议 3～6 个、每个 4～6 字，最多 8 字）。章名数量和音频段数相同则一段一章，段间空隙并进前一章；否则在整段上均分。请求只挂在第一段任务的 `chapters`（`titles` / `ranges` / `duration` / `placeAt`）上，避免每段各自从 0 走到 100%。完成后进度条 WebM 入库并铺到最上方视频轨，拆出的无声音频删掉。条贴在当前画幅顶部，不改变成片比例。
 - 入轨时优先对齐 `anchorClipId` 那段音频片段（本机素材的 url 和服务端记下的对不上，所以按片段 id 直接认），其次是来源配音在当前序列里选中的片段、再次第一段，按它的起点、入点和速度把 cue 换算到时间线：`片段起点 + (cue 时间 − 入点) / 速度`，入出点以外的 cue 丢掉或裁短。每条 cue 成为字幕轨上一个文字片段，并链接到该音频片段。音频不在时间轴上时，从播放头开始放。
 - 文字片段样式按参数换算，无入场 / 出场动画。文字片段只能单色，关键词高亮只保留在 WebM 里。
 
@@ -111,7 +114,7 @@ npm run skill -- fetch <jobId> --out ./out --wait
 
 | 依赖 | 位置 | 约束 |
 |---|---|---|
-| burn-subtitles | `BURN_SUBTITLES_DIR`，默认 `~/.cursor/skills/burn-subtitles/scripts` | 只 import `burn_subtitles`，调用 `apply_options` / `set_font` / `detect_silences` / `align_chunks` / `pick_keywords` / `write_ass` / `asr_char_timeline` / `ffprobe_duration` |
+| burn-subtitles | `BURN_SUBTITLES_DIR`，默认 `~/.cursor/skills/burn-subtitles/scripts` | 只 import `burn_subtitles`，调用 `apply_options` / `set_font` / `detect_silences` / `align_chunks` / `pick_keywords` / `write_ass` / `parse_chapters` / `asr_char_timeline` / `ffprobe_duration` |
 | faster-whisper | burn-subtitles 的 Python 环境 | 仅识别模式；首次会加载模型 |
 | zhconv | 同上，可选 | 识别结果繁转简；没装时保持原样 |
 | ffmpeg | 宿主解析的 ffmpeg | 需要 libass 的 `alpha` 选项（ffmpeg ≥ 6）和 libvpx-vp9 |

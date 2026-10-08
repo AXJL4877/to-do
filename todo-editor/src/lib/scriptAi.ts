@@ -19,11 +19,12 @@ export async function requestScriptAi(input: {
   instruction?: string
   cursorBefore?: string
   cursorAfter?: string
-}): Promise<ScriptAiResult> {
+}, signal?: AbortSignal): Promise<ScriptAiResult> {
   const res = await aiFetch('/api/ai-script', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
+    signal,
   })
   const j = await res.json().catch(() => ({})) as {
     ok?: boolean

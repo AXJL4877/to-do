@@ -40,7 +40,7 @@ export function CreativeProgress({ theme = 'orbit', percent = null, label, compa
 
   return (
     <div
-      className={clsx('cp', `cp-${theme}`, compact && 'is-compact', className)}
+      className={clsx('cp', `cp-theme-${theme}`, compact && 'is-compact', className)}
       data-testid={`creative-progress-${theme}`}
       role="progressbar"
       aria-valuemin={0}

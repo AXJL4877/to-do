@@ -13,6 +13,8 @@ images and needs no Python renderer entry.
 
 The client inserts each scene as an editable transparent text clip linked to
 its voice clip. Subtitle production uses the existing subtitle runtime.
-Ordinary sequence export creates the final audio/video file through the
-existing hidden Canvas and FFmpeg pipeline. Local editing, saved projects and
-incremental retries use the same production document and hashes as blackboard.
+Ordinary sequence export bakes text in a hidden Canvas window, then FFmpeg
+composites. Animated / full-composition clips stream RGBA into qtrle (not
+per-frame PNG IPC); same-segment full scenes bake once and slice by inPoint.
+Local editing, saved projects and incremental retries use the same production
+document and hashes as blackboard.

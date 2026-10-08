@@ -232,6 +232,7 @@ bool parse_effects_array(const std::string &s, size_t *i, Clip *c) {
     std::string type;
     double strength = 0;
     bool enabled = true;
+    double start = 0, end = 0;
     for (;;) {
       skip_ws(s, i);
       if (*i < s.size() && s[*i] == '}') { ++(*i); break; }
@@ -246,6 +247,10 @@ bool parse_effects_array(const std::string &s, size_t *i, Clip *c) {
         if (!parse_number(s, i, &strength)) return false;
       } else if (key == "enabled") {
         if (!parse_bool(s, i, &enabled)) return false;
+      } else if (key == "start") {
+        if (!parse_number(s, i, &start)) return false;
+      } else if (key == "end") {
+        if (!parse_number(s, i, &end)) return false;
       } else {
         if (!skip_value(s, i)) return false;
       }
@@ -258,6 +263,11 @@ bool parse_effects_array(const std::string &s, size_t *i, Clip *c) {
       if (type == "blur") c->fx_blur = (std::max)(c->fx_blur, strength);
       else if (type == "sharpen") c->fx_sharpen = (std::max)(c->fx_sharpen, strength);
       else if (type == "filter") c->fx_filter = (std::max)(c->fx_filter, strength);
+      else if (type == "chalkDust") {
+        c->fx_dust = strength;
+        c->fx_dust_start = start;
+        c->fx_dust_end = end;
+      }
     }
     skip_ws(s, i);
     if (*i < s.size() && s[*i] == ',') { ++(*i); continue; }
@@ -543,6 +553,10 @@ bool parse_clip_obj(const std::string &s, size_t *i, Clip *c) {
       if (!parse_string(s, i, &c->id)) return false;
     } else if (key == "mediaPath") {
       if (!parse_string(s, i, &c->media_path)) return false;
+    } else if (key == "mediaWidth") {
+      if (!parse_number(s, i, &c->media_w)) return false;
+    } else if (key == "mediaHeight") {
+      if (!parse_number(s, i, &c->media_h)) return false;
     } else if (key == "trackId") {
       if (!parse_string(s, i, &c->track_id)) return false;
     } else if (key == "kind") {

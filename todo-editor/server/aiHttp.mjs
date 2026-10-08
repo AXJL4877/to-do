@@ -36,6 +36,7 @@ import { H3_QUALITIES, ensureH3, h3Health } from './h3Client.mjs'
 import { designFancyText, texturePrompt } from './fancyTextAi.mjs'
 import { designDouyinMeta, buildDouyinCoverPrompt } from './douyinMetaAi.mjs'
 import { assistScript } from './scriptRewriteAi.mjs'
+import { runScriptStage } from './scriptStageAi.mjs'
 import { directAnim } from './animDirector.mjs'
 import { getSkillEntry, listSkillPacks, planSkill, resolveSkillParams, skillPreviewPath } from './skillPacks.mjs'
 import { cleanText } from './stylePacks.mjs'
@@ -428,13 +429,26 @@ export async function handleAiHttp(req, res) {
       return true
     }
 
+    if (url === '/api/ai-script-stage' && req.method === 'POST') {
+      try {
+        const body = JSON.parse((await readBody(req)) || '{}')
+        const result = await runScriptStage(readAiConfig({ revealKey: true }), body)
+        sendJson(res, 200, { ok: true, ...result })
+      } catch (e) {
+        sendJson(res, 400, { ok: false, error: String(e instanceof Error ? e.message : e) })
+      }
+      return true
+    }
+
     if (url === '/api/ai-douyin-cover' && req.method === 'POST') {
       try {
         const body = JSON.parse((await readBody(req)) || '{}')
         const title = cleanText(body.title) || cleanText(body.projectName) || '成片'
+        // 封面硬锁纯文生图：忽略任何参考图/截帧，避免第一次按示例图改图、第二次才正常
         const prompt = buildDouyinCoverPrompt({
           title,
           styleHint: body.styleHint,
+          script: body.script,
         })
         const job = enqueueAiJob({
           kind: 'image',
@@ -443,7 +457,6 @@ export async function handleAiHttp(req, res) {
           quality: body.quality === '2K' ? '2K' : '1K',
           model: body.model || 'gpt-image-2',
           purpose: 'douyin-cover',
-          imageDataUrl: typeof body.imageDataUrl === 'string' ? body.imageDataUrl : undefined,
         })
         sendJson(res, 200, { ok: true, job, prompt })
       } catch (e) {

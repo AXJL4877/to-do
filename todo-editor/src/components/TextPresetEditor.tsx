@@ -4,6 +4,7 @@ import { useApp } from '../store'
 import { defaultText, type Clip, type DynamicText, type FancyText, type TextStyle } from '../types'
 import { FANCY_CATEGORIES, FANCY_PRESETS, availableFonts, clonePresetFancy, drawFancyText, onFancyTextureLoaded, pickFont, presetCategory, type FancyCategory, type FancyPreset } from '../lib/fancyText'
 import { DYNAMIC_TEXT_PACK, DYNAMIC_TEXT_PRESETS } from '../lib/dynamicTextPack'
+import { JizuraCompositionControls } from './JizuraCompositionControls'
 import { NumInput } from './NumInput'
 import { PropSection } from './PropUI'
 import { drawTextClip } from '../lib/monitorDraw'
@@ -135,7 +136,7 @@ export function TextPresetEditor({ extension = false }: { extension?: boolean })
     const name = `${presetName} · ${text.content.slice(0, 12)}`
     useApp.getState().addTextClip({ name, text: { ...text, fancy: style } })
     if (chalk || dynamic) {
-      const duration = Math.max(3, chalk ? total : dynamic!.duration)
+      const duration = dynamic?.version === 2 ? dynamic.duration : Math.max(3, chalk ? total : dynamic!.duration)
       useApp.getState().updateSelectedClip({ duration, outPoint: duration })
     }
   }
@@ -170,7 +171,7 @@ export function TextPresetEditor({ extension = false }: { extension?: boolean })
           <input aria-label="动画预览进度" data-testid="fancy-seek" type="range" min={0} max={total} step={0.01} value={Math.min(total, time)} onChange={e => { setPlaying(false); setTime(Number(e.target.value)) }} />
           <button type="button" aria-label="重新播放" onClick={() => { setTime(0); setPlaying(true); setPlayCycle(n => n + 1) }}>重播</button>
         </>}
-        <button type="button" className="ml-auto" onClick={() => setBoard(v => !v)} title="仅切换预览底色，导出始终透明">{board ? '透明底' : '深色底'}</button>
+        <button type="button" className="ml-auto" onClick={() => setBoard(v => !v)} title="仅切换预览底色；画面背景由编排参数决定">{board ? '透明底' : '深色底'}</button>
       </div>
     </div>
     {dynamic && <div className="flex flex-col gap-1" data-testid="dynamic-controls">
@@ -178,13 +179,20 @@ export function TextPresetEditor({ extension = false }: { extension?: boolean })
         const seed = new Uint32Array(1); crypto.getRandomValues(seed)
         setDynamic({ seed: seed[0] }); setTime(0); setPlaying(true)
       }}><Shuffle size={13} />换一版</button>
-      <NumInput label="动画时长" unit="s" value={dynamic.duration} min={0.5} max={12} step={0.1} defaultValue={3} testId="dynamic-duration" onChange={duration => setDynamic({ duration })} />
+      {dynamic.version === 1 && <NumInput label="动画时长" unit="s" value={dynamic.duration} min={0.5} max={12} step={0.1} defaultValue={3} testId="dynamic-duration" onChange={duration => setDynamic({ duration })} />}
       <NumInput label="运动强度" value={dynamic.motion} min={0} max={1} step={0.05} defaultValue={0.7} testId="dynamic-motion" onChange={motion => setDynamic({ motion })} />
-      <label className="editor-inline">强调色 <input aria-label="强调色" type="color" value={dynamic.accent} onChange={e => setDynamic({ accent: e.target.value })} /></label>
+      {dynamic.version === 2 && dynamic.composition && <JizuraCompositionControls value={dynamic.composition} onChange={composition => setDynamic({composition})} />}
+      {dynamic.version === 1 && <label className="editor-inline">强调色 <input aria-label="强调色" type="color" value={dynamic.accent} onChange={e => setDynamic({ accent: e.target.value })} /></label>}
       {clip && dynamic.duration > clip.duration && <p className="editor-hint">动画时长超过片段长度，尾部动画会被截断。</p>}
     </div>}
     {isDynamic && dynamicTextWarning(text) && <p className="editor-hint" data-testid="dynamic-warning">{dynamicTextWarning(text)}</p>}
     <textarea className="input fancy-content" rows={2} maxLength={300} value={text.content} placeholder="输入文字…" aria-label="文字内容" data-testid="fancy-content" onChange={e => patch({ content: e.target.value })} />
+    {extension && <button type="button" className="btn" data-testid="dynamic-full" onClick={() => {
+      const duration = clip?.duration || 3
+      setFancy({preset:'dynamic-full',dynamic:{version:2,engine:'jizura',presetId:'dynamic-full',seed:2026,duration,motion:.7,accent:'#ffb454',
+        composition:{style:'noir',mood:'graphic',background:'style',unify:true,parts:{},fx:{decor:.6,chroma:.4,glitch:.25,texture:.5,bgSwitch:.5},offset:0,scenes:[{content:text.content,start:0,end:duration}]}}})
+      setTime(0); setPlaying(true)
+    }}>完整编排 · 风格、背景与转场</button>}
     <div className="fancy-preset-grid">
       {presets.filter(p => p.category === category).map(p => <button type="button" key={p.id} title={p.name} className={style.preset === p.id ? 'is-selected' : ''} data-testid={`fancy-preset-${p.id}`} onClick={() => applyPreset(p)}>
         <span className="fancy-swatch" style={swatch(p.fancy)}>字</span>{p.name}
@@ -196,8 +204,9 @@ export function TextPresetEditor({ extension = false }: { extension?: boolean })
           {!fonts.some(f => f.family === text.fontFamily) && <option value={text.fontFamily}>{text.fontFamily}</option>}
           {fonts.map(f => <option key={f.family} value={f.family}>{f.label}</option>)}
         </select>
-        <input aria-label="文字颜色" title="文字颜色" type="color" value={hex(style.fill[0], '#ffffff')} onChange={e => patch({ fancy: { ...style, fill: [e.target.value] }, color: e.target.value })} />
+        {dynamic?.version !== 2 && <input aria-label="文字颜色" title="文字颜色" type="color" value={hex(style.fill[0], '#ffffff')} onChange={e => patch({ fancy: { ...style, fill: [e.target.value] }, color: e.target.value })} />}
       </div>
+      {dynamic?.version === 2 && <p className="editor-hint">配色由整体风格决定；衬线与等宽角色使用宋体和 Consolas，其余文字使用所选字体。</p>}
       <NumInput label="字号" value={text.fontSize} min={12} max={300} defaultValue={96} showSlider={false} onChange={fontSize => patch({ fontSize })} />
       {!isDynamic && <NumInput label="字距" value={text.letterSpacing} min={-10} max={40} defaultValue={0} showSlider={false} onChange={letterSpacing => patch({ letterSpacing })} />}
       {outer && <div className="editor-inline">

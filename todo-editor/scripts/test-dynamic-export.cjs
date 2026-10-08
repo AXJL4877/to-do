@@ -25,13 +25,15 @@ app.whenReady().then(async () => {
     win = new BrowserWindow({ show: false, webPreferences: { backgroundThrottling: false } })
     await win.loadFile(path.join(root, 'dist/chalk-render.html'))
     await win.webContents.executeJavaScript('window.loadTextFonts(["Microsoft YaHei"])')
-    for (const f of fixtures) {
+    const fullFixtures = JSON.parse(fs.readFileSync(path.join(out, 'full-export-fixtures.json'), 'utf8'))
+    for (const f of [...fixtures, ...fullFixtures]) {
       const png = await win.webContents.executeJavaScript(`window.renderChalkFrame(...${JSON.stringify([f.text, {}, f.duration, f.w, f.h, f.time])})`)
       const actual = PNG.sync.read(Buffer.from(png, 'base64')).data
       const expected = PNG.sync.read(Buffer.from(f.png, 'base64')).data
+      if (!actual.equals(expected)) { fs.writeFileSync(path.join(out,'mismatch-actual.png'),Buffer.from(png,'base64')); fs.writeFileSync(path.join(out,'mismatch-expected.png'),Buffer.from(f.png,'base64')); console.log('mismatch',f.text.fancy.dynamic.presetId,f.time,f.text.fancy.dynamic.composition?.background, actual.reduce((n,v,i)=>n+(v!==expected[i]),0)); }
       assert.ok(actual.equals(expected), `preview/export pixel mismatch: ${f.text.fancy.dynamic.presetId}`)
     }
-    console.log('PASS all six presets: built hidden renderer matches preview pixels exactly')
+    console.log('PASS legacy and full composition: built hidden renderer matches preview pixels exactly')
     const seq = { settings: { width: 640, height: 360, fps: 12 }, tracks: [{ id: 'title', kind: 'subtitle' }],
       clips: fixtures.map((f, i) => ({ id: `d${i}`, trackId: 'title', kind: 'text', start: i * 1.5, duration: 1.5,
         inPoint: 0, outPoint: 1.5, opacity: 1, text: f.text, keyframes: {} })), workIn: 0, workOut: 9 }

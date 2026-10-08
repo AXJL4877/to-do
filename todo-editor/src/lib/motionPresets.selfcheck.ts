@@ -1,5 +1,6 @@
 /** 自检：每个动效预设写出的关键帧有序、有限、落在范围内；循环 / 强调结束时回到原值，入场结束时到达原值 */
-import { applyPresetKeyframes, defaultValues, MOTION_PRESETS, presetDuration, resolveValues } from './motionPresets'
+import { applyPresetKeyframes, defaultValues, MOTION_PRESETS, presetDuration, resolveValues, stampPose } from './motionPresets'
+import { elementDustSpread, stampDustSpecks } from './stampDust'
 import { sampleKeyframes } from './keyframeEval'
 import { defaultAudio, defaultColor, defaultTransform, type Clip } from '../types'
 
@@ -14,7 +15,7 @@ const clip: Clip = {
   color: defaultColor(), audio: defaultAudio(), effects: [], blend: 'normal',
   keyframes: { x: [{ id: 'k0', t: 0, value: 0.1, ease: 'linear' }, { id: 'k1', t: 4, value: 0.3, ease: 'linear' }] },
 }
-const staticOf: Record<string, number> = { x: 0.1, y: 0, scale: 0.8, rotation: 0, opacity: 1 }
+const staticOf: Record<string, number> = { x: 0.1, y: 0, scale: 0.8, scaleY: 0.8, rotation: 0, opacity: 1 }
 
 const ids = new Set<string>()
 for (const p of MOTION_PRESETS) {
@@ -55,6 +56,18 @@ for (const p of MOTION_PRESETS) {
     }
   }
 }
+
+const stamp = MOTION_PRESETS.find((p) => p.id === 'stampIn')!
+const stamped = applyPresetKeyframes(clip, stamp, undefined, { t0: 0, t1: 4, fps: 30 })
+assert(stamped.effects.some((e) => e.type === 'chalkDust' && e.strength > 0), 'stamp adds dust')
+assert(sampleKeyframes(stamped.keyframes.y, 0, 0) < -0.05, 'stamp starts above')
+assert(Math.abs(stampPose(1).y) < 1e-6 && stampPose(1).sx === 1 && stampPose(1).sy === 1, 'stamp pose settles')
+const mid = stampDustSpecks('c1', 0.55, 100, 100, 40, 0.7)
+assert(mid.length > 8 && stampDustSpecks('c1', 0.1, 100, 100, 40, 0.7).length === 0, 'dust after impact')
+assert(stampDustSpecks('c1', 1, 100, 100, 40, 0.7).length === 0, 'dust clears')
+const dustSmall = elementDustSpread(1920, 1080, 200, 160, 0.25, 0.25)
+const dustLarge = elementDustSpread(1920, 1080, 200, 160, 1, 1)
+assert(dustLarge > dustSmall * 3, `dust spread follows element size (${dustSmall} vs ${dustLarge})`)
 
 const groups = MOTION_PRESETS.reduce<Record<string, number>>((m, p) => ({ ...m, [p.group]: (m[p.group] ?? 0) + 1 }), {})
 console.log(`motion-presets self-check ok (${MOTION_PRESETS.length} presets: ${JSON.stringify(groups)})`)

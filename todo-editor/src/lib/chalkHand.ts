@@ -10,6 +10,12 @@ export { elementTransform } from './chalkHandLayers'
 
 export const CHALK_HAND_PRESET_ID = 'chalkHand'
 
+export const CHALK_ENTER_LABEL: Record<string, string> = { draw: '书写', stamp: '盖章', fade: '显现' }
+
+export function chalkEnterLabel(enter?: string) {
+  return CHALK_ENTER_LABEL[enter || ''] || '书写'
+}
+
 function ensureHandMedia(chalk: ChalkStroke, folderId?: string) {
   const st = useApp.getState()
   if (chalk.hand.mediaId && st.media.some((m) => m.id === chalk.hand.mediaId)) return chalk.hand.mediaId

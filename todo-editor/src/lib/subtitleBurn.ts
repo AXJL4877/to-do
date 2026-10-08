@@ -9,6 +9,7 @@ import {
   clearSubtitleBurnPendingByJob,
   markSubtitleBurnPending,
 } from './subtitleBurnPending'
+import type { ChapterBarRequest } from './chapterBar'
 
 /** 服务端读得到文件的素材：AI 生成的（按 url 找）或带本机路径的；浏览器里拖进来的 blob 素材读不到 */
 function asrMedia(m: MediaItem | undefined): SubtitleSourceMedia | null {
@@ -78,8 +79,26 @@ export function initialSubtitleParams(pack: SkillPack): SkillParams {
   return p
 }
 
-export function saveSubtitleStyle(params: SkillParams) {
-  try { localStorage.setItem(STYLE_STORE, JSON.stringify(Object.fromEntries(STYLE_KEYS.map((k) => [k, params[k]])))) } catch { /* */ }
+export function saveSubtitleStyle(params: SkillParams, chapter?: { on: boolean; titles: string }) {
+  try {
+    const prev = JSON.parse(localStorage.getItem(STYLE_STORE) || '{}') as Record<string, unknown>
+    const next: Record<string, unknown> = { ...prev, ...Object.fromEntries(STYLE_KEYS.map((k) => [k, params[k]])) }
+    if (chapter) {
+      next.chapterBar = chapter.on ? 'on' : 'off'
+      next.chapterTitles = chapter.titles
+    }
+    localStorage.setItem(STYLE_STORE, JSON.stringify(next))
+  } catch { /* */ }
+}
+
+/** 上次是否打开进度条、写过的章名。没存过则关。 */
+export function loadChapterDraft(): { on: boolean; titles: string } {
+  try {
+    const saved = JSON.parse(localStorage.getItem(STYLE_STORE) || '{}') as { chapterBar?: string; chapterTitles?: string }
+    return { on: saved.chapterBar === 'on', titles: typeof saved.chapterTitles === 'string' ? saved.chapterTitles : '' }
+  } catch {
+    return { on: false, titles: '' }
+  }
 }
 
 /** 完整任务或已完成的配音阶段；确实没有时间戳才返回 null，网络错误不降级成识别。 */
@@ -133,22 +152,27 @@ function watch(jobId: string, clipId: string) {
   void tick()
 }
 
-/** 逐段烧录字幕（每段一个任务，完成后对齐并链接到该片段）；有 jobId 用配音文案，否则用 media 语音识别；入队失败时抛错 */
-export async function burnSubtitles(targets: { clipId: string; jobId?: string; media?: SubtitleSourceMedia }[], params: SkillParams) {
+/** 逐段烧录字幕（每段一个任务，完成后对齐并链接到该片段）；有 jobId 用配音文案，否则用 media 语音识别；入队失败时抛错。进度条只挂在第一段上，覆盖所选音频的整段时间。 */
+export async function burnSubtitles(
+  targets: { clipId: string; jobId?: string; media?: SubtitleSourceMedia }[],
+  params: SkillParams,
+  chapters?: ChapterBarRequest | null,
+) {
   if (!targets.length) throw new Error('选中的音频都读不到文件，烧不了字幕')
   saveSubtitleStyle(params)
   // 先打上「烧录中」标记，关弹窗后时间轴立刻能看到动效
   for (const t of targets) markSubtitleBurnPending(t.clipId, `pending:${t.clipId}`)
   try {
-    const jobs = await Promise.all(targets.map(({ clipId, jobId, media }) => enqueueSkill({
+    const jobs = await Promise.all(targets.map(({ clipId, jobId, media }, i) => enqueueSkill({
       skillId: SUBTITLE_SKILL_ID, prompt: '', params, autoTimeline: true, anchorClipId: clipId,
       ...(jobId ? { sourceJobId: jobId } : {}), ...(media ? { sourceMedia: media } : {}),
+      ...(i === 0 && chapters ? { chapters } : {}),
     })))
     jobs.forEach((j, i) => {
       const clipId = targets[i]?.clipId
       if (clipId) watch(j.id, clipId)
     })
-    useApp.getState().setToast(`正在烧录 ${jobs.length} 段字幕 · 看时间轴音频条扫光`)
+    useApp.getState().setToast(`正在烧录 ${jobs.length} 段字幕${chapters ? '和顶部进度条' : ''} · 看时间轴音频条扫光`)
   } catch (e) {
     for (const t of targets) clearSubtitleBurnPending(t.clipId)
     throw e

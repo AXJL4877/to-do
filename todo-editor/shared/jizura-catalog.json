@@ -1,0 +1,9285 @@
+{
+  "revision": "fc16bfe43ea4a6c25a21f1caf04d17326de14f00",
+  "groups": {
+    "layout": [
+      {
+        "id": "center",
+        "name": "居中",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "glitch",
+          "calm",
+          "pop",
+          "editorial",
+          "emotional",
+          "horror"
+        ]
+      },
+      {
+        "id": "mixed",
+        "name": "大小混排",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "calm",
+          "pop",
+          "editorial",
+          "emotional"
+        ]
+      },
+      {
+        "id": "vcols",
+        "name": "竖排",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "glitch",
+          "calm",
+          "editorial",
+          "emotional",
+          "horror"
+        ]
+      },
+      {
+        "id": "marquee",
+        "name": "流动横幅",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "glitch",
+          "graphic"
+        ]
+      },
+      {
+        "id": "tile",
+        "name": "满版平铺",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "glitch",
+          "graphic"
+        ]
+      },
+      {
+        "id": "scatter",
+        "name": "散落",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "glitch",
+          "pop"
+        ]
+      },
+      {
+        "id": "ring",
+        "name": "环形",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "pop"
+        ]
+      },
+      {
+        "id": "wave",
+        "name": "波浪轨迹",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "pop"
+        ]
+      },
+      {
+        "id": "huge",
+        "name": "超出画面",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "glitch",
+          "pop",
+          "graphic",
+          "emotional",
+          "horror"
+        ]
+      },
+      {
+        "id": "labels",
+        "name": "标签贴",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "condensed",
+        "name": "瘦长压缩",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "glitch",
+          "graphic",
+          "emotional"
+        ]
+      },
+      {
+        "id": "gloss",
+        "name": "注解",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "calm",
+          "editorial"
+        ]
+      },
+      {
+        "id": "type",
+        "name": "打字",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "calm",
+          "editorial",
+          "horror"
+        ]
+      },
+      {
+        "id": "diag",
+        "name": "斜带",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "circle",
+        "name": "圆窗",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "calm",
+          "graphic",
+          "editorial",
+          "emotional"
+        ]
+      },
+      {
+        "id": "stack",
+        "name": "残影堆叠",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "glitch",
+          "calm",
+          "editorial",
+          "emotional",
+          "horror"
+        ]
+      },
+      {
+        "id": "pill",
+        "name": "胶囊",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "hrFlashlight",
+        "name": "手电筒",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "emotional"
+        ]
+      },
+      {
+        "id": "hrDoorGap",
+        "name": "门缝",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "editorial"
+        ]
+      },
+      {
+        "id": "hrWallScrawl",
+        "name": "墙上涂写",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "glitch"
+        ]
+      },
+      {
+        "id": "hrCctv",
+        "name": "监控屏幕",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "glitch",
+          "editorial"
+        ]
+      },
+      {
+        "id": "hrOuija",
+        "name": "通灵板",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror"
+        ]
+      },
+      {
+        "id": "hrMissing",
+        "name": "寻人启事",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "editorial"
+        ]
+      },
+      {
+        "id": "hrWrongOne",
+        "name": "唯一不对的字",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "editorial",
+          "calm"
+        ]
+      },
+      {
+        "id": "hrRisingDark",
+        "name": "从黑暗爬出",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "emotional"
+        ]
+      },
+      {
+        "id": "hrRedacted",
+        "name": "涂黑文件",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "editorial"
+        ]
+      },
+      {
+        "id": "hrStaticTv",
+        "name": "雪花电视",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "glitch"
+        ]
+      },
+      {
+        "id": "hrSpiritPhoto",
+        "name": "灵异照片",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "emotional"
+        ]
+      },
+      {
+        "id": "hrWrongShadow",
+        "name": "不对劲的影子",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "emotional",
+          "graphic"
+        ]
+      },
+      {
+        "id": "knSlamStack",
+        "name": "堆叠重击",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "knQuarterTurn",
+        "name": "直角转向",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "pop",
+          "graphic",
+          "editorial"
+        ]
+      },
+      {
+        "id": "knSwapCenter",
+        "name": "逐字替换",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "pop",
+          "graphic",
+          "glitch"
+        ]
+      },
+      {
+        "id": "knZoomDive",
+        "name": "钻入字中",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "pop",
+          "emotional",
+          "graphic"
+        ]
+      },
+      {
+        "id": "knFlowSnap",
+        "name": "流动后对齐",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "graphic",
+          "pop",
+          "editorial"
+        ]
+      },
+      {
+        "id": "knSeesaw",
+        "name": "跷跷板",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "knTypeSlam",
+        "name": "打字→重击",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "pop",
+          "graphic",
+          "editorial"
+        ]
+      },
+      {
+        "id": "knRhythmCuts",
+        "name": "逐字分镜",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "pop",
+          "graphic",
+          "glitch"
+        ]
+      },
+      {
+        "id": "knPathRide",
+        "name": "环形轨道",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "knGearWords",
+        "name": "齿轮",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "knCollide",
+        "name": "正面冲撞",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "pop",
+          "graphic",
+          "glitch"
+        ]
+      },
+      {
+        "id": "knTumble",
+        "name": "翻滚方块",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "knReflow",
+        "name": "竖排转横排",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "editorial",
+          "graphic",
+          "emotional"
+        ]
+      },
+      {
+        "id": "knPadGrid",
+        "name": "打击垫",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "pop",
+          "graphic",
+          "glitch"
+        ]
+      },
+      {
+        "id": "lowerThird",
+        "name": "下方字幕条",
+        "pack": "layoutsA",
+        "set": null,
+        "tags": [
+          "editorial",
+          "calm",
+          "emotional"
+        ]
+      },
+      {
+        "id": "corners",
+        "name": "对角配置",
+        "pack": "layoutsA",
+        "set": null,
+        "tags": [
+          "graphic",
+          "editorial",
+          "calm"
+        ]
+      },
+      {
+        "id": "staircase",
+        "name": "阶梯",
+        "pack": "layoutsA",
+        "set": null,
+        "tags": [
+          "graphic",
+          "pop",
+          "editorial"
+        ]
+      },
+      {
+        "id": "zigzag",
+        "name": "锯齿",
+        "pack": "layoutsA",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "arcTop",
+        "name": "彩虹弧",
+        "pack": "layoutsA",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional",
+          "graphic"
+        ]
+      },
+      {
+        "id": "spiral",
+        "name": "螺旋",
+        "pack": "layoutsA",
+        "set": null,
+        "tags": [
+          "emotional",
+          "graphic",
+          "calm"
+        ]
+      },
+      {
+        "id": "gridCells",
+        "name": "方格",
+        "pack": "layoutsA",
+        "set": null,
+        "tags": [
+          "graphic",
+          "editorial",
+          "pop"
+        ]
+      },
+      {
+        "id": "dropCap",
+        "name": "首字放大",
+        "pack": "layoutsA",
+        "set": null,
+        "tags": [
+          "editorial",
+          "emotional",
+          "calm"
+        ]
+      },
+      {
+        "id": "justified",
+        "name": "版心",
+        "pack": "layoutsA",
+        "set": null,
+        "tags": [
+          "editorial",
+          "calm",
+          "emotional"
+        ]
+      },
+      {
+        "id": "frameBox",
+        "name": "画框",
+        "pack": "layoutsA",
+        "set": null,
+        "tags": [
+          "editorial",
+          "calm",
+          "graphic"
+        ]
+      },
+      {
+        "id": "bubble",
+        "name": "对话框",
+        "pack": "layoutsA",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional"
+        ]
+      },
+      {
+        "id": "subtitleBar",
+        "name": "字幕条",
+        "pack": "layoutsA",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm",
+          "editorial"
+        ]
+      },
+      {
+        "id": "ticker",
+        "name": "新闻跑马灯",
+        "pack": "layoutsA",
+        "set": null,
+        "tags": [
+          "pop",
+          "glitch",
+          "graphic"
+        ]
+      },
+      {
+        "id": "splitScreen",
+        "name": "二分割",
+        "pack": "layoutsA",
+        "set": null,
+        "tags": [
+          "graphic",
+          "pop",
+          "editorial"
+        ]
+      },
+      {
+        "id": "mirror",
+        "name": "镜像",
+        "pack": "layoutsA",
+        "set": null,
+        "tags": [
+          "calm",
+          "emotional",
+          "graphic"
+        ]
+      },
+      {
+        "id": "sideways",
+        "name": "横躺竖排",
+        "pack": "layoutsA",
+        "set": null,
+        "tags": [
+          "editorial",
+          "graphic",
+          "pop"
+        ]
+      },
+      {
+        "id": "edgeFrame",
+        "name": "沿边环绕",
+        "pack": "layoutsA",
+        "set": null,
+        "tags": [
+          "graphic",
+          "editorial",
+          "glitch"
+        ]
+      },
+      {
+        "id": "perspective",
+        "name": "景深",
+        "pack": "layoutsA",
+        "set": null,
+        "tags": [
+          "graphic",
+          "emotional",
+          "glitch"
+        ]
+      },
+      {
+        "id": "hanko",
+        "name": "落款",
+        "pack": "layoutsA",
+        "set": null,
+        "tags": [
+          "calm",
+          "emotional",
+          "editorial"
+        ]
+      },
+      {
+        "id": "genkou",
+        "name": "稿纸",
+        "pack": "layoutsA",
+        "set": null,
+        "tags": [
+          "calm",
+          "editorial",
+          "emotional"
+        ]
+      },
+      {
+        "id": "panels",
+        "name": "漫画分格",
+        "pack": "layoutsA",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "emotional"
+        ]
+      },
+      {
+        "id": "filmstrip",
+        "name": "胶片",
+        "pack": "layoutsA",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm",
+          "graphic"
+        ]
+      },
+      {
+        "id": "quote",
+        "name": "引用",
+        "pack": "layoutsA",
+        "set": null,
+        "tags": [
+          "editorial",
+          "emotional",
+          "calm"
+        ]
+      },
+      {
+        "id": "ruler",
+        "name": "尺寸线",
+        "pack": "layoutsA",
+        "set": null,
+        "tags": [
+          "graphic",
+          "editorial",
+          "glitch"
+        ]
+      },
+      {
+        "id": "searchBar",
+        "name": "搜索框",
+        "pack": "layoutsA",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "chat",
+        "name": "聊天",
+        "pack": "layoutsA",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional"
+        ]
+      },
+      {
+        "id": "notification",
+        "name": "通知",
+        "pack": "layoutsA",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional",
+          "calm"
+        ]
+      },
+      {
+        "id": "ticket",
+        "name": "票券",
+        "pack": "layoutsA",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "editorial"
+        ]
+      },
+      {
+        "id": "rain",
+        "name": "文字雨",
+        "pack": "layoutsB",
+        "set": null,
+        "tags": [
+          "glitch",
+          "graphic",
+          "emotional"
+        ]
+      },
+      {
+        "id": "hanging",
+        "name": "吊挂",
+        "pack": "layoutsB",
+        "set": null,
+        "tags": [
+          "pop",
+          "calm",
+          "emotional"
+        ]
+      },
+      {
+        "id": "orbit",
+        "name": "环绕",
+        "pack": "layoutsB",
+        "set": null,
+        "tags": [
+          "calm",
+          "graphic",
+          "emotional"
+        ]
+      },
+      {
+        "id": "tunnel",
+        "name": "隧道",
+        "pack": "layoutsB",
+        "set": null,
+        "tags": [
+          "glitch",
+          "graphic",
+          "emotional"
+        ]
+      },
+      {
+        "id": "wordCloud",
+        "name": "文字云",
+        "pack": "layoutsB",
+        "set": null,
+        "tags": [
+          "pop",
+          "editorial",
+          "graphic"
+        ]
+      },
+      {
+        "id": "bounceLine",
+        "name": "弹跳",
+        "pack": "layoutsB",
+        "set": null,
+        "tags": [
+          "pop"
+        ]
+      },
+      {
+        "id": "elastic",
+        "name": "橡皮筋",
+        "pack": "layoutsB",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "crossBands",
+        "name": "交叉带",
+        "pack": "layoutsB",
+        "set": null,
+        "tags": [
+          "graphic",
+          "pop",
+          "glitch"
+        ]
+      },
+      {
+        "id": "stickerBomb",
+        "name": "贴纸",
+        "pack": "layoutsB",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "neon",
+        "name": "霓虹",
+        "pack": "layoutsB",
+        "set": null,
+        "tags": [
+          "calm",
+          "emotional"
+        ]
+      },
+      {
+        "id": "keycaps",
+        "name": "键帽",
+        "pack": "layoutsB",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "bubbles",
+        "name": "泡泡",
+        "pack": "layoutsB",
+        "set": null,
+        "tags": [
+          "pop",
+          "calm"
+        ]
+      },
+      {
+        "id": "slotMachine",
+        "name": "老虎机",
+        "pack": "layoutsB",
+        "set": null,
+        "tags": [
+          "pop",
+          "glitch"
+        ]
+      },
+      {
+        "id": "flipBoard",
+        "name": "翻牌看板",
+        "pack": "layoutsB",
+        "set": null,
+        "tags": [
+          "graphic",
+          "editorial"
+        ]
+      },
+      {
+        "id": "credits",
+        "name": "片尾字幕",
+        "pack": "layoutsB",
+        "set": null,
+        "tags": [
+          "calm",
+          "editorial",
+          "emotional"
+        ]
+      },
+      {
+        "id": "zoomRepeat",
+        "name": "连续放大",
+        "pack": "layoutsB",
+        "set": null,
+        "tags": [
+          "glitch",
+          "emotional",
+          "graphic"
+        ]
+      },
+      {
+        "id": "splitHalves",
+        "name": "上下分割",
+        "pack": "layoutsB",
+        "set": null,
+        "tags": [
+          "graphic",
+          "glitch",
+          "editorial"
+        ]
+      },
+      {
+        "id": "columnsBig",
+        "name": "大小竖排",
+        "pack": "layoutsB",
+        "set": null,
+        "tags": [
+          "editorial",
+          "calm",
+          "emotional"
+        ]
+      },
+      {
+        "id": "circleWords",
+        "name": "同心圆",
+        "pack": "layoutsB",
+        "set": null,
+        "tags": [
+          "graphic",
+          "calm",
+          "editorial"
+        ]
+      },
+      {
+        "id": "dotMatrix",
+        "name": "点阵显示",
+        "pack": "layoutsB",
+        "set": null,
+        "tags": [
+          "graphic",
+          "glitch",
+          "pop"
+        ]
+      },
+      {
+        "id": "depthStack",
+        "name": "景深重叠",
+        "pack": "layoutsB",
+        "set": null,
+        "tags": [
+          "graphic",
+          "emotional",
+          "glitch"
+        ]
+      },
+      {
+        "id": "typeSpecimen",
+        "name": "字体样本",
+        "pack": "layoutsB",
+        "set": null,
+        "tags": [
+          "editorial",
+          "graphic"
+        ]
+      },
+      {
+        "id": "kanjiFocus",
+        "name": "单字强调",
+        "pack": "layoutsB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "editorial",
+          "calm"
+        ]
+      },
+      {
+        "id": "halfVertical",
+        "name": "直横混排",
+        "pack": "layoutsB",
+        "set": null,
+        "tags": [
+          "editorial",
+          "graphic"
+        ]
+      },
+      {
+        "id": "curtain",
+        "name": "布幕",
+        "pack": "layoutsB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "equalizer",
+        "name": "等化器",
+        "pack": "layoutsB",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "glitch"
+        ]
+      },
+      {
+        "id": "tape",
+        "name": "胶带",
+        "pack": "layoutsB",
+        "set": null,
+        "tags": [
+          "pop",
+          "editorial",
+          "graphic"
+        ]
+      },
+      {
+        "id": "magazine",
+        "name": "杂志跨页",
+        "pack": "layoutsC",
+        "set": null,
+        "tags": [
+          "editorial",
+          "calm",
+          "emotional"
+        ]
+      },
+      {
+        "id": "headlineDeck",
+        "name": "标题与导言",
+        "pack": "layoutsC",
+        "set": null,
+        "tags": [
+          "editorial",
+          "graphic",
+          "calm"
+        ]
+      },
+      {
+        "id": "contents",
+        "name": "目录",
+        "pack": "layoutsC",
+        "set": null,
+        "tags": [
+          "editorial",
+          "calm"
+        ]
+      },
+      {
+        "id": "footnote",
+        "name": "注脚",
+        "pack": "layoutsC",
+        "set": null,
+        "tags": [
+          "editorial",
+          "calm",
+          "emotional"
+        ]
+      },
+      {
+        "id": "proofread",
+        "name": "校样",
+        "pack": "layoutsC",
+        "set": null,
+        "tags": [
+          "editorial",
+          "graphic",
+          "calm"
+        ]
+      },
+      {
+        "id": "numbered",
+        "name": "编号",
+        "pack": "layoutsC",
+        "set": null,
+        "tags": [
+          "graphic",
+          "editorial",
+          "pop"
+        ]
+      },
+      {
+        "id": "poster",
+        "name": "海报",
+        "pack": "layoutsC",
+        "set": null,
+        "tags": [
+          "graphic",
+          "pop",
+          "editorial"
+        ]
+      },
+      {
+        "id": "swissGrid",
+        "name": "瑞士网格",
+        "pack": "layoutsC",
+        "set": null,
+        "tags": [
+          "graphic",
+          "editorial",
+          "calm"
+        ]
+      },
+      {
+        "id": "dictionary",
+        "name": "辞典",
+        "pack": "layoutsC",
+        "set": null,
+        "tags": [
+          "editorial",
+          "calm",
+          "emotional"
+        ]
+      },
+      {
+        "id": "ema",
+        "name": "绘马",
+        "pack": "layoutsC",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm",
+          "pop"
+        ]
+      },
+      {
+        "id": "ransom",
+        "name": "剪报字",
+        "pack": "layoutsC",
+        "set": null,
+        "tags": [
+          "pop",
+          "glitch",
+          "graphic"
+        ]
+      },
+      {
+        "id": "newspaper",
+        "name": "报纸",
+        "pack": "layoutsC",
+        "set": null,
+        "tags": [
+          "editorial",
+          "graphic",
+          "pop"
+        ]
+      },
+      {
+        "id": "vinyl",
+        "name": "黑胶唱片",
+        "pack": "layoutsC",
+        "set": null,
+        "tags": [
+          "emotional",
+          "pop",
+          "calm"
+        ]
+      },
+      {
+        "id": "cassette",
+        "name": "卡带",
+        "pack": "layoutsC",
+        "set": null,
+        "tags": [
+          "emotional",
+          "pop",
+          "calm"
+        ]
+      },
+      {
+        "id": "bookSpine",
+        "name": "书背",
+        "pack": "layoutsC",
+        "set": null,
+        "tags": [
+          "calm",
+          "editorial",
+          "emotional"
+        ]
+      },
+      {
+        "id": "polaroid",
+        "name": "拍立得",
+        "pack": "layoutsC",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm",
+          "pop"
+        ]
+      },
+      {
+        "id": "stampSheet",
+        "name": "邮票版张",
+        "pack": "layoutsC",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "calm"
+        ]
+      },
+      {
+        "id": "postcard",
+        "name": "明信片",
+        "pack": "layoutsC",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm",
+          "editorial"
+        ]
+      },
+      {
+        "id": "letterPaper",
+        "name": "信纸",
+        "pack": "layoutsC",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm"
+        ]
+      },
+      {
+        "id": "calendar",
+        "name": "月历",
+        "pack": "layoutsC",
+        "set": null,
+        "tags": [
+          "pop",
+          "editorial",
+          "calm"
+        ]
+      },
+      {
+        "id": "chochin",
+        "name": "灯笼",
+        "pack": "layoutsC",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm",
+          "pop"
+        ]
+      },
+      {
+        "id": "routeMap",
+        "name": "路线图",
+        "pack": "layoutsC",
+        "set": null,
+        "tags": [
+          "graphic",
+          "pop",
+          "editorial"
+        ]
+      },
+      {
+        "id": "stationSign",
+        "name": "站名牌",
+        "pack": "layoutsC",
+        "set": null,
+        "tags": [
+          "graphic",
+          "pop",
+          "editorial"
+        ]
+      },
+      {
+        "id": "noren",
+        "name": "暖帘",
+        "pack": "layoutsC",
+        "set": null,
+        "tags": [
+          "calm",
+          "emotional",
+          "graphic"
+        ]
+      },
+      {
+        "id": "tanzaku",
+        "name": "短签",
+        "pack": "layoutsC",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm",
+          "pop"
+        ]
+      },
+      {
+        "id": "omikuji",
+        "name": "御神签",
+        "pack": "layoutsC",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm",
+          "editorial"
+        ]
+      },
+      {
+        "id": "kakejiku",
+        "name": "挂轴",
+        "pack": "layoutsC",
+        "set": null,
+        "tags": [
+          "calm",
+          "emotional",
+          "editorial"
+        ]
+      },
+      {
+        "id": "shoji",
+        "name": "障子",
+        "pack": "layoutsC",
+        "set": null,
+        "tags": [
+          "calm",
+          "emotional",
+          "graphic"
+        ]
+      },
+      {
+        "id": "clapper",
+        "name": "场记板",
+        "pack": "layoutsC",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "editorial"
+        ]
+      },
+      {
+        "id": "warningLabel",
+        "name": "警告标签",
+        "pack": "layoutsC",
+        "set": null,
+        "tags": [
+          "graphic",
+          "glitch",
+          "pop"
+        ]
+      },
+      {
+        "id": "priceTag",
+        "name": "价格标签",
+        "pack": "layoutsC",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "nameTag",
+        "name": "名牌",
+        "pack": "layoutsC",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional"
+        ]
+      },
+      {
+        "id": "stickyNotes",
+        "name": "便利贴",
+        "pack": "layoutsC",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional",
+          "calm"
+        ]
+      },
+      {
+        "id": "karuta",
+        "name": "歌牌",
+        "pack": "layoutsC",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional",
+          "editorial"
+        ]
+      },
+      {
+        "id": "cube",
+        "name": "立方体",
+        "pack": "layoutsD",
+        "set": null,
+        "tags": [
+          "graphic",
+          "pop"
+        ]
+      },
+      {
+        "id": "cylinder",
+        "name": "圆柱",
+        "pack": "layoutsD",
+        "set": null,
+        "tags": [
+          "graphic",
+          "calm",
+          "emotional"
+        ]
+      },
+      {
+        "id": "flipCards",
+        "name": "翻卡",
+        "pack": "layoutsD",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "accordion",
+        "name": "风琴折",
+        "pack": "layoutsD",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "editorial"
+        ]
+      },
+      {
+        "id": "flag",
+        "name": "飘扬的旗",
+        "pack": "layoutsD",
+        "set": null,
+        "tags": [
+          "emotional",
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "ribbon",
+        "name": "缎带",
+        "pack": "layoutsD",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional",
+          "graphic"
+        ]
+      },
+      {
+        "id": "pendulum",
+        "name": "钟摆",
+        "pack": "layoutsD",
+        "set": null,
+        "tags": [
+          "calm",
+          "pop",
+          "emotional"
+        ]
+      },
+      {
+        "id": "pile",
+        "name": "文字堆",
+        "pack": "layoutsD",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional",
+          "graphic"
+        ]
+      },
+      {
+        "id": "blocks",
+        "name": "积木",
+        "pack": "layoutsD",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "balloons",
+        "name": "文字气球",
+        "pack": "layoutsD",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional",
+          "calm"
+        ]
+      },
+      {
+        "id": "magnets",
+        "name": "磁铁",
+        "pack": "layoutsD",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "tiles",
+        "name": "文字磁砖",
+        "pack": "layoutsD",
+        "set": null,
+        "tags": [
+          "pop",
+          "editorial",
+          "graphic"
+        ]
+      },
+      {
+        "id": "bulbs",
+        "name": "灯泡招牌",
+        "pack": "layoutsD",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional",
+          "graphic"
+        ]
+      },
+      {
+        "id": "ledScroll",
+        "name": "电子跑马灯",
+        "pack": "layoutsD",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "glitch"
+        ]
+      },
+      {
+        "id": "billboard",
+        "name": "广告牌",
+        "pack": "layoutsD",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional",
+          "graphic"
+        ]
+      },
+      {
+        "id": "crowdBubbles",
+        "name": "对话框群",
+        "pack": "layoutsD",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional",
+          "editorial"
+        ]
+      },
+      {
+        "id": "crossword",
+        "name": "填字游戏",
+        "pack": "layoutsD",
+        "set": null,
+        "tags": [
+          "editorial",
+          "graphic",
+          "pop"
+        ]
+      },
+      {
+        "id": "wordSearch",
+        "name": "找字游戏",
+        "pack": "layoutsD",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "editorial"
+        ]
+      },
+      {
+        "id": "puzzle",
+        "name": "拼图",
+        "pack": "layoutsD",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "emotional"
+        ]
+      },
+      {
+        "id": "shadowPlay",
+        "name": "皮影戏",
+        "pack": "layoutsD",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm",
+          "graphic"
+        ]
+      },
+      {
+        "id": "kaleido",
+        "name": "万花筒",
+        "pack": "layoutsD",
+        "set": null,
+        "tags": [
+          "glitch",
+          "emotional",
+          "graphic"
+        ]
+      },
+      {
+        "id": "dominoes",
+        "name": "骨牌",
+        "pack": "layoutsD",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "burst",
+        "name": "爆炸",
+        "pack": "layoutsD",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "emotional"
+        ]
+      },
+      {
+        "id": "fisheye",
+        "name": "鱼眼镜头",
+        "pack": "layoutsD",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "glitch"
+        ]
+      },
+      {
+        "id": "wall",
+        "name": "墙面透视",
+        "pack": "layoutsD",
+        "set": null,
+        "tags": [
+          "graphic",
+          "editorial",
+          "emotional"
+        ]
+      },
+      {
+        "id": "origami",
+        "name": "折纸",
+        "pack": "layoutsD",
+        "set": null,
+        "tags": [
+          "calm",
+          "pop",
+          "emotional"
+        ]
+      },
+      {
+        "id": "zipper",
+        "name": "拉链",
+        "pack": "layoutsD",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "emotional"
+        ]
+      },
+      {
+        "id": "sliceStack",
+        "name": "切片堆叠",
+        "pack": "layoutsD",
+        "set": null,
+        "tags": [
+          "glitch",
+          "graphic",
+          "pop"
+        ]
+      },
+      {
+        "id": "glitchGrid",
+        "name": "故障网格",
+        "pack": "layoutsD",
+        "set": null,
+        "tags": [
+          "glitch",
+          "graphic"
+        ]
+      },
+      {
+        "id": "mosaicTiles",
+        "name": "磁砖拼画",
+        "pack": "layoutsD",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "glitch"
+        ]
+      },
+      {
+        "id": "maskReveal",
+        "name": "文字窗",
+        "pack": "layoutsD",
+        "set": null,
+        "tags": [
+          "graphic",
+          "pop",
+          "emotional"
+        ]
+      },
+      {
+        "id": "contour",
+        "name": "等高线",
+        "pack": "layoutsD",
+        "set": null,
+        "tags": [
+          "calm",
+          "graphic",
+          "emotional"
+        ]
+      },
+      {
+        "id": "halftoneBig",
+        "name": "网点巨字",
+        "pack": "layoutsD",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "editorial"
+        ]
+      },
+      {
+        "id": "stencil",
+        "name": "镂空模板",
+        "pack": "layoutsD",
+        "set": null,
+        "tags": [
+          "graphic",
+          "pop",
+          "editorial"
+        ]
+      },
+      {
+        "id": "tyKeySplit",
+        "name": "大字夹排",
+        "pack": "typo",
+        "set": "typo",
+        "tags": [
+          "editorial",
+          "graphic",
+          "emotional"
+        ]
+      },
+      {
+        "id": "tyCropGiant",
+        "name": "出框大字",
+        "pack": "typo",
+        "set": "typo",
+        "tags": [
+          "graphic",
+          "editorial",
+          "pop"
+        ]
+      },
+      {
+        "id": "tyCross",
+        "name": "十字排",
+        "pack": "typo",
+        "set": "typo",
+        "tags": [
+          "graphic",
+          "editorial"
+        ]
+      },
+      {
+        "id": "tyBandHide",
+        "name": "带状遮字",
+        "pack": "typo",
+        "set": "typo",
+        "tags": [
+          "graphic",
+          "pop",
+          "editorial"
+        ]
+      },
+      {
+        "id": "tyRuby",
+        "name": "标音注记",
+        "pack": "typo",
+        "set": "typo",
+        "tags": [
+          "editorial",
+          "calm",
+          "emotional"
+        ]
+      },
+      {
+        "id": "tyBaseline",
+        "name": "格线排版",
+        "pack": "typo",
+        "set": "typo",
+        "tags": [
+          "editorial",
+          "calm",
+          "graphic"
+        ]
+      },
+      {
+        "id": "tyScaleSteps",
+        "name": "字级递增",
+        "pack": "typo",
+        "set": "typo",
+        "tags": [
+          "graphic",
+          "editorial",
+          "pop"
+        ]
+      },
+      {
+        "id": "tyJustify",
+        "name": "等宽堆叠",
+        "pack": "typo",
+        "set": "typo",
+        "tags": [
+          "graphic",
+          "pop",
+          "editorial"
+        ]
+      },
+      {
+        "id": "tyIndexTable",
+        "name": "字表",
+        "pack": "typo",
+        "set": "typo",
+        "tags": [
+          "editorial",
+          "graphic",
+          "calm"
+        ]
+      },
+      {
+        "id": "tySplitType",
+        "name": "断字错位",
+        "pack": "typo",
+        "set": "typo",
+        "tags": [
+          "graphic",
+          "glitch",
+          "pop"
+        ]
+      },
+      {
+        "id": "tyErode",
+        "name": "渐削重复",
+        "pack": "typo",
+        "set": "typo",
+        "tags": [
+          "emotional",
+          "editorial",
+          "calm"
+        ]
+      },
+      {
+        "id": "tyVRuler",
+        "name": "竖排刻度",
+        "pack": "typo",
+        "set": "typo",
+        "tags": [
+          "editorial",
+          "calm",
+          "graphic"
+        ]
+      },
+      {
+        "id": "tyFullTrack",
+        "name": "满版字距",
+        "pack": "typo",
+        "set": "typo",
+        "tags": [
+          "editorial",
+          "calm",
+          "graphic"
+        ]
+      },
+      {
+        "id": "tyStatCount",
+        "name": "字数显示",
+        "pack": "typo",
+        "set": "typo",
+        "tags": [
+          "editorial",
+          "graphic"
+        ]
+      },
+      {
+        "id": "tyMargin",
+        "name": "留白",
+        "pack": "typo",
+        "set": "typo",
+        "tags": [
+          "calm",
+          "editorial",
+          "emotional"
+        ]
+      },
+      {
+        "id": "tyRotBlock",
+        "name": "旋转字块",
+        "pack": "typo",
+        "set": "typo",
+        "tags": [
+          "graphic",
+          "pop",
+          "editorial"
+        ]
+      },
+      {
+        "id": "tySquare",
+        "name": "方块排",
+        "pack": "typo",
+        "set": "typo",
+        "tags": [
+          "graphic",
+          "editorial",
+          "pop"
+        ]
+      },
+      {
+        "id": "tyLineFocus",
+        "name": "行中强调",
+        "pack": "typo",
+        "set": "typo",
+        "tags": [
+          "editorial",
+          "emotional",
+          "calm"
+        ]
+      }
+    ],
+    "enter": [
+      {
+        "id": "cut",
+        "name": "直切",
+        "pack": "core",
+        "set": null,
+        "tags": []
+      },
+      {
+        "id": "assemble",
+        "name": "分解→聚合",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "glitch",
+          "calm",
+          "editorial",
+          "emotional"
+        ]
+      },
+      {
+        "id": "slice",
+        "name": "切片",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "glitch",
+          "graphic",
+          "emotional"
+        ]
+      },
+      {
+        "id": "type",
+        "name": "打字",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "calm",
+          "editorial",
+          "horror"
+        ]
+      },
+      {
+        "id": "pop",
+        "name": "弹出",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "pop"
+        ]
+      },
+      {
+        "id": "drop",
+        "name": "落下",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "pop"
+        ]
+      },
+      {
+        "id": "stretch",
+        "name": "伸缩",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "glitch",
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "wipe",
+        "name": "擦除",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "calm",
+          "graphic",
+          "editorial",
+          "emotional"
+        ]
+      },
+      {
+        "id": "blur",
+        "name": "模糊",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "calm",
+          "editorial",
+          "emotional",
+          "horror"
+        ]
+      },
+      {
+        "id": "spin",
+        "name": "旋转",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "pop"
+        ]
+      },
+      {
+        "id": "flicker",
+        "name": "闪烁",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "glitch",
+          "horror"
+        ]
+      },
+      {
+        "id": "scramble",
+        "name": "乱码",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "glitch",
+          "horror"
+        ]
+      },
+      {
+        "id": "zoom",
+        "name": "缩放",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "glitch",
+          "pop",
+          "graphic",
+          "emotional"
+        ]
+      },
+      {
+        "id": "riseMask",
+        "name": "由下浮现",
+        "pack": "enter",
+        "set": null,
+        "tags": [
+          "editorial",
+          "graphic",
+          "calm",
+          "emotional"
+        ]
+      },
+      {
+        "id": "dropMask",
+        "name": "由上浮现",
+        "pack": "enter",
+        "set": null,
+        "tags": [
+          "editorial",
+          "graphic",
+          "pop"
+        ]
+      },
+      {
+        "id": "slideL",
+        "name": "从左滑入",
+        "pack": "enter",
+        "set": null,
+        "tags": [
+          "editorial",
+          "calm",
+          "pop"
+        ]
+      },
+      {
+        "id": "slideR",
+        "name": "从右滑入",
+        "pack": "enter",
+        "set": null,
+        "tags": [
+          "editorial",
+          "graphic",
+          "pop"
+        ]
+      },
+      {
+        "id": "slideWhole",
+        "name": "整体滑入",
+        "pack": "enter",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "flipX",
+        "name": "纵轴翻转",
+        "pack": "enter",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "editorial"
+        ]
+      },
+      {
+        "id": "flipY",
+        "name": "横轴翻转",
+        "pack": "enter",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "domino",
+        "name": "骨牌",
+        "pack": "enter",
+        "set": null,
+        "tags": [
+          "pop"
+        ]
+      },
+      {
+        "id": "fold",
+        "name": "折叠展开",
+        "pack": "enter",
+        "set": null,
+        "tags": [
+          "graphic",
+          "editorial"
+        ]
+      },
+      {
+        "id": "unroll",
+        "name": "卷轴展开",
+        "pack": "enter",
+        "set": null,
+        "tags": [
+          "calm",
+          "editorial",
+          "emotional"
+        ]
+      },
+      {
+        "id": "strokeDraw",
+        "name": "线稿到上色",
+        "pack": "enter",
+        "set": null,
+        "tags": [
+          "calm",
+          "emotional",
+          "editorial"
+        ]
+      },
+      {
+        "id": "outlineFill",
+        "name": "轮廓→填色",
+        "pack": "enter",
+        "set": null,
+        "tags": [
+          "graphic",
+          "pop",
+          "editorial"
+        ]
+      },
+      {
+        "id": "splitJoin",
+        "name": "上下合体",
+        "pack": "enter",
+        "set": null,
+        "tags": [
+          "graphic",
+          "editorial"
+        ]
+      },
+      {
+        "id": "vSlice",
+        "name": "纵向切片",
+        "pack": "enter",
+        "set": null,
+        "tags": [
+          "graphic",
+          "glitch"
+        ]
+      },
+      {
+        "id": "shutter",
+        "name": "快门",
+        "pack": "enter",
+        "set": null,
+        "tags": [
+          "graphic",
+          "editorial"
+        ]
+      },
+      {
+        "id": "iris",
+        "name": "光圈",
+        "pack": "enter",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional",
+          "graphic"
+        ]
+      },
+      {
+        "id": "diagWipe",
+        "name": "斜向擦除",
+        "pack": "enter",
+        "set": null,
+        "tags": [
+          "graphic",
+          "editorial",
+          "pop"
+        ]
+      },
+      {
+        "id": "blinds",
+        "name": "百叶窗",
+        "pack": "enter",
+        "set": null,
+        "tags": [
+          "graphic",
+          "editorial"
+        ]
+      },
+      {
+        "id": "checker",
+        "name": "棋盘格",
+        "pack": "enter",
+        "set": null,
+        "tags": [
+          "graphic",
+          "glitch",
+          "pop"
+        ]
+      },
+      {
+        "id": "randomOrder",
+        "name": "随机顺序",
+        "pack": "enter",
+        "set": null,
+        "tags": [
+          "pop",
+          "glitch"
+        ]
+      },
+      {
+        "id": "bounceBig",
+        "name": "大跳跃",
+        "pack": "enter",
+        "set": null,
+        "tags": [
+          "pop"
+        ]
+      },
+      {
+        "id": "squashDrop",
+        "name": "压扁着地",
+        "pack": "enter",
+        "set": null,
+        "tags": [
+          "pop"
+        ]
+      },
+      {
+        "id": "rubber",
+        "name": "橡皮拉伸",
+        "pack": "enter",
+        "set": null,
+        "tags": [
+          "pop"
+        ]
+      },
+      {
+        "id": "glitchIn",
+        "name": "故障浮现",
+        "pack": "enter",
+        "set": null,
+        "tags": [
+          "glitch"
+        ]
+      },
+      {
+        "id": "echoIn",
+        "name": "残影聚合",
+        "pack": "enter",
+        "set": null,
+        "tags": [
+          "graphic",
+          "emotional",
+          "pop"
+        ]
+      },
+      {
+        "id": "whip",
+        "name": "急甩",
+        "pack": "enter",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "skewIn",
+        "name": "倾斜",
+        "pack": "enter",
+        "set": null,
+        "tags": [
+          "editorial",
+          "graphic"
+        ]
+      },
+      {
+        "id": "trackIn",
+        "name": "字距收拢",
+        "pack": "enter",
+        "set": null,
+        "tags": [
+          "calm",
+          "editorial",
+          "emotional"
+        ]
+      },
+      {
+        "id": "trackOut",
+        "name": "字距扩张",
+        "pack": "enter",
+        "set": null,
+        "tags": [
+          "calm",
+          "editorial",
+          "pop"
+        ]
+      },
+      {
+        "id": "blurStagger",
+        "name": "模糊错落",
+        "pack": "enter",
+        "set": null,
+        "tags": [
+          "calm",
+          "emotional"
+        ]
+      },
+      {
+        "id": "fadeStagger",
+        "name": "逐字淡入",
+        "pack": "enter",
+        "set": null,
+        "tags": [
+          "calm",
+          "emotional"
+        ]
+      },
+      {
+        "id": "waveIn",
+        "name": "波浪起伏",
+        "pack": "enter",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional"
+        ]
+      },
+      {
+        "id": "spiralIn",
+        "name": "螺旋聚合",
+        "pack": "enter",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional"
+        ]
+      },
+      {
+        "id": "zoomOut",
+        "name": "巨大→原尺寸",
+        "pack": "enter",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "glitch"
+        ]
+      },
+      {
+        "id": "resolve",
+        "name": "解码",
+        "pack": "enter",
+        "set": null,
+        "tags": [
+          "glitch",
+          "editorial"
+        ]
+      },
+      {
+        "id": "magnet",
+        "name": "磁吸",
+        "pack": "enter",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "inkBleed",
+        "name": "晕染",
+        "pack": "enter",
+        "set": null,
+        "tags": [
+          "calm",
+          "emotional"
+        ]
+      },
+      {
+        "id": "neonOn",
+        "name": "霓虹点亮",
+        "pack": "enter",
+        "set": null,
+        "tags": [
+          "glitch",
+          "emotional",
+          "pop"
+        ]
+      },
+      {
+        "id": "cursorSweep",
+        "name": "光标扫过",
+        "pack": "enter",
+        "set": null,
+        "tags": [
+          "editorial",
+          "graphic"
+        ]
+      },
+      {
+        "id": "stamp",
+        "name": "盖章",
+        "pack": "enter",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "springIn",
+        "name": "弹簧",
+        "pack": "enterB",
+        "set": null,
+        "tags": [
+          "pop"
+        ]
+      },
+      {
+        "id": "pendulum",
+        "name": "钟摆",
+        "pack": "enterB",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional",
+          "calm"
+        ]
+      },
+      {
+        "id": "rollIn",
+        "name": "滚入",
+        "pack": "enterB",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "slingshot",
+        "name": "弹弓",
+        "pack": "enterB",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "rockSettle",
+        "name": "摇晃着地",
+        "pack": "enterB",
+        "set": null,
+        "tags": [
+          "pop"
+        ]
+      },
+      {
+        "id": "bounceBall",
+        "name": "弹跳球",
+        "pack": "enterB",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional"
+        ]
+      },
+      {
+        "id": "snapRail",
+        "name": "吸附对齐",
+        "pack": "enterB",
+        "set": null,
+        "tags": [
+          "graphic",
+          "pop",
+          "editorial"
+        ]
+      },
+      {
+        "id": "fanOpen",
+        "name": "扇子展开",
+        "pack": "enterB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "graphic",
+          "calm"
+        ]
+      },
+      {
+        "id": "cylinder",
+        "name": "圆柱旋转",
+        "pack": "enterB",
+        "set": null,
+        "tags": [
+          "graphic",
+          "pop",
+          "editorial"
+        ]
+      },
+      {
+        "id": "shuffle",
+        "name": "洗牌",
+        "pack": "enterB",
+        "set": null,
+        "tags": [
+          "pop",
+          "glitch",
+          "graphic"
+        ]
+      },
+      {
+        "id": "stopMotion",
+        "name": "定格动画",
+        "pack": "enterB",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional"
+        ]
+      },
+      {
+        "id": "ripple",
+        "name": "涟漪",
+        "pack": "enterB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm",
+          "graphic"
+        ]
+      },
+      {
+        "id": "zipper",
+        "name": "拉链",
+        "pack": "enterB",
+        "set": null,
+        "tags": [
+          "graphic",
+          "pop"
+        ]
+      },
+      {
+        "id": "zoomAlt",
+        "name": "交错缩放",
+        "pack": "enterB",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "glitch"
+        ]
+      },
+      {
+        "id": "tiltUp",
+        "name": "站起",
+        "pack": "enterB",
+        "set": null,
+        "tags": [
+          "graphic",
+          "editorial",
+          "pop"
+        ]
+      },
+      {
+        "id": "stickerPeel",
+        "name": "贴上贴纸",
+        "pack": "enterB",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "editorial"
+        ]
+      },
+      {
+        "id": "crumple",
+        "name": "揉皱还原",
+        "pack": "enterB",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "emotional"
+        ]
+      },
+      {
+        "id": "noteUnfold",
+        "name": "展开信纸",
+        "pack": "enterB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm",
+          "graphic"
+        ]
+      },
+      {
+        "id": "tornJoin",
+        "name": "撕纸拼合",
+        "pack": "enterB",
+        "set": null,
+        "tags": [
+          "graphic",
+          "emotional",
+          "pop"
+        ]
+      },
+      {
+        "id": "splitFlap",
+        "name": "翻牌",
+        "pack": "enterB",
+        "set": null,
+        "tags": [
+          "glitch",
+          "editorial",
+          "graphic"
+        ]
+      },
+      {
+        "id": "overexpose",
+        "name": "过曝",
+        "pack": "enterB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "pop",
+          "glitch"
+        ]
+      },
+      {
+        "id": "glint",
+        "name": "反光一闪",
+        "pack": "enterB",
+        "set": null,
+        "tags": [
+          "editorial",
+          "emotional",
+          "graphic"
+        ]
+      },
+      {
+        "id": "loupe",
+        "name": "放大镜",
+        "pack": "enterB",
+        "set": null,
+        "tags": [
+          "editorial",
+          "pop",
+          "calm"
+        ]
+      },
+      {
+        "id": "filmFeed",
+        "name": "胶片滚动",
+        "pack": "enterB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "glitch",
+          "editorial"
+        ]
+      },
+      {
+        "id": "backlight",
+        "name": "逆光",
+        "pack": "enterB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm"
+        ]
+      },
+      {
+        "id": "lightLeak",
+        "name": "漏光",
+        "pack": "enterB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm",
+          "pop"
+        ]
+      },
+      {
+        "id": "heatHaze",
+        "name": "热浪扭曲",
+        "pack": "enterB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm",
+          "glitch"
+        ]
+      },
+      {
+        "id": "crtOn",
+        "name": "CRT 开机",
+        "pack": "enterB",
+        "set": null,
+        "tags": [
+          "glitch",
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "interlace",
+        "name": "交错扫描",
+        "pack": "enterB",
+        "set": null,
+        "tags": [
+          "glitch",
+          "graphic",
+          "editorial"
+        ]
+      },
+      {
+        "id": "loadingBar",
+        "name": "加载条",
+        "pack": "enterB",
+        "set": null,
+        "tags": [
+          "graphic",
+          "editorial",
+          "glitch"
+        ]
+      },
+      {
+        "id": "dither",
+        "name": "抖动",
+        "pack": "enterB",
+        "set": null,
+        "tags": [
+          "glitch",
+          "graphic"
+        ]
+      },
+      {
+        "id": "odometer",
+        "name": "数字滚轮",
+        "pack": "enterB",
+        "set": null,
+        "tags": [
+          "glitch",
+          "editorial",
+          "pop"
+        ]
+      },
+      {
+        "id": "matrixRain",
+        "name": "数据雨",
+        "pack": "enterB",
+        "set": null,
+        "tags": [
+          "glitch",
+          "graphic"
+        ]
+      },
+      {
+        "id": "hatchFill",
+        "name": "斜线→实心",
+        "pack": "enterB",
+        "set": null,
+        "tags": [
+          "graphic",
+          "editorial"
+        ]
+      },
+      {
+        "id": "brushReveal",
+        "name": "笔触扫出",
+        "pack": "enterB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "editorial",
+          "calm"
+        ]
+      },
+      {
+        "id": "inkDrop",
+        "name": "墨滴",
+        "pack": "enterB",
+        "set": null,
+        "tags": [
+          "calm",
+          "emotional",
+          "graphic"
+        ]
+      },
+      {
+        "id": "quarters",
+        "name": "四方聚合",
+        "pack": "enterB",
+        "set": null,
+        "tags": [
+          "graphic",
+          "pop"
+        ]
+      },
+      {
+        "id": "invertBox",
+        "name": "反转挖空",
+        "pack": "enterB",
+        "set": null,
+        "tags": [
+          "graphic",
+          "editorial",
+          "pop"
+        ]
+      },
+      {
+        "id": "printRegister",
+        "name": "套印错位",
+        "pack": "enterB",
+        "set": null,
+        "tags": [
+          "graphic",
+          "pop",
+          "editorial"
+        ]
+      },
+      {
+        "id": "echoCount",
+        "name": "数拍进场",
+        "pack": "enterB",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "glitch"
+        ]
+      },
+      {
+        "id": "liquidFill",
+        "name": "水位上升",
+        "pack": "enterB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm",
+          "pop"
+        ]
+      },
+      {
+        "id": "windBlown",
+        "name": "乘风而来",
+        "pack": "enterB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm"
+        ]
+      },
+      {
+        "id": "strokeOrder",
+        "name": "逐笔书写",
+        "pack": "enterB",
+        "set": null,
+        "tags": [
+          "calm",
+          "emotional",
+          "editorial"
+        ]
+      },
+      {
+        "id": "clockWipe",
+        "name": "顺时针",
+        "pack": "enterB",
+        "set": null,
+        "tags": [
+          "graphic",
+          "pop",
+          "editorial"
+        ]
+      },
+      {
+        "id": "shadowFirst",
+        "name": "影子先落",
+        "pack": "enterB",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "emotional"
+        ]
+      },
+      {
+        "id": "bubbles",
+        "name": "泡泡",
+        "pack": "enterB",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional",
+          "calm"
+        ]
+      },
+      {
+        "id": "tokoroten",
+        "name": "挤压成条",
+        "pack": "enterB",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "hrBlinkCreep",
+        "name": "眨眼之间",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "emotional"
+        ]
+      },
+      {
+        "id": "hrJumpScare",
+        "name": "突然跳出",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "glitch",
+          "pop"
+        ]
+      },
+      {
+        "id": "hrUneasy",
+        "name": "不安的出现",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "editorial"
+        ]
+      },
+      {
+        "id": "hrVhold",
+        "name": "垂直同步",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "glitch"
+        ]
+      },
+      {
+        "id": "hrMirrorSnap",
+        "name": "镜像字",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "glitch"
+        ]
+      },
+      {
+        "id": "hrManifest",
+        "name": "缓缓浮现",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "emotional",
+          "calm"
+        ]
+      },
+      {
+        "id": "hrClawReveal",
+        "name": "爪痕浮现",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "graphic"
+        ]
+      },
+      {
+        "id": "knWordSlam",
+        "name": "逐词重击",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "pop",
+          "graphic",
+          "glitch"
+        ]
+      },
+      {
+        "id": "knTypeToSlam",
+        "name": "打字→放大",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "pop",
+          "editorial",
+          "graphic"
+        ]
+      },
+      {
+        "id": "knReplaceIn",
+        "name": "替换登场",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "pop",
+          "graphic",
+          "glitch"
+        ]
+      },
+      {
+        "id": "knHingeDrop",
+        "name": "铰链落下",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "knLoopIn",
+        "name": "绕圈进场",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "knPushIn",
+        "name": "推入",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "pop",
+          "editorial",
+          "graphic"
+        ]
+      },
+      {
+        "id": "knInertia",
+        "name": "急刹车",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "knWordSpin",
+        "name": "逐词旋转",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "knDiveIn",
+        "name": "从镜头飞入",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "pop",
+          "emotional",
+          "graphic"
+        ]
+      },
+      {
+        "id": "knStretchOut",
+        "name": "伸展弹出",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "tyKeyFirst",
+        "name": "主字先行",
+        "pack": "typo",
+        "set": "typo",
+        "tags": [
+          "pop",
+          "graphic",
+          "editorial",
+          "emotional"
+        ]
+      },
+      {
+        "id": "tyLineWipe",
+        "name": "逐行擦入",
+        "pack": "typo",
+        "set": "typo",
+        "tags": [
+          "editorial",
+          "graphic",
+          "calm"
+        ]
+      },
+      {
+        "id": "tyZoomOne",
+        "name": "逐字放大",
+        "pack": "typo",
+        "set": "typo",
+        "tags": [
+          "pop",
+          "graphic",
+          "emotional"
+        ]
+      },
+      {
+        "id": "tyUnderLift",
+        "name": "从底线升起",
+        "pack": "typo",
+        "set": "typo",
+        "tags": [
+          "editorial",
+          "graphic",
+          "pop"
+        ]
+      },
+      {
+        "id": "tyDotGrow",
+        "name": "点化为字",
+        "pack": "typo",
+        "set": "typo",
+        "tags": [
+          "pop",
+          "calm",
+          "graphic"
+        ]
+      },
+      {
+        "id": "tyBracketOpen",
+        "name": "括号展开",
+        "pack": "typo",
+        "set": "typo",
+        "tags": [
+          "editorial",
+          "graphic",
+          "pop"
+        ]
+      },
+      {
+        "id": "tyRetype",
+        "name": "打错重打",
+        "pack": "typo",
+        "set": "typo",
+        "tags": [
+          "editorial",
+          "glitch",
+          "emotional"
+        ]
+      },
+      {
+        "id": "tyRubyDrop",
+        "name": "从注音落下",
+        "pack": "typo",
+        "set": "typo",
+        "tags": [
+          "calm",
+          "editorial",
+          "emotional"
+        ]
+      }
+    ],
+    "hold": [
+      {
+        "id": "still",
+        "name": "静止",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "calm",
+          "editorial",
+          "emotional",
+          "graphic"
+        ]
+      },
+      {
+        "id": "jitter",
+        "name": "抖动",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "glitch",
+          "pop"
+        ]
+      },
+      {
+        "id": "drift",
+        "name": "漂移",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "calm",
+          "emotional",
+          "editorial"
+        ]
+      },
+      {
+        "id": "breathe",
+        "name": "呼吸",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "calm",
+          "emotional"
+        ]
+      },
+      {
+        "id": "wave",
+        "name": "波浪",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "pop"
+        ]
+      },
+      {
+        "id": "glitchtick",
+        "name": "故障",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "glitch"
+        ]
+      },
+      {
+        "id": "float",
+        "name": "轻飘飘",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "calm",
+          "emotional"
+        ]
+      },
+      {
+        "id": "sway",
+        "name": "摇曳",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "calm",
+          "emotional"
+        ]
+      },
+      {
+        "id": "pulse",
+        "name": "脉动",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "shimmer",
+        "name": "闪耀",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm"
+        ]
+      },
+      {
+        "id": "colorRun",
+        "name": "流动色彩",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "rotateSlow",
+        "name": "缓慢旋转",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "calm",
+          "editorial"
+        ]
+      },
+      {
+        "id": "trackBreathe",
+        "name": "字距呼吸",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "calm",
+          "editorial"
+        ]
+      },
+      {
+        "id": "skewWobble",
+        "name": "斜向摇晃",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "pop",
+          "glitch"
+        ]
+      },
+      {
+        "id": "beatHop",
+        "name": "随拍跳动",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "pop"
+        ]
+      },
+      {
+        "id": "hWave",
+        "name": "横向波浪",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional"
+        ]
+      },
+      {
+        "id": "heartbeat",
+        "name": "心跳",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "emotional",
+          "pop"
+        ]
+      },
+      {
+        "id": "orbitSmall",
+        "name": "小圆周运动",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "calm",
+          "pop"
+        ]
+      },
+      {
+        "id": "jelly",
+        "name": "果冻",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "pop"
+        ]
+      },
+      {
+        "id": "scanBand",
+        "name": "扫描带",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "glitch",
+          "graphic"
+        ]
+      },
+      {
+        "id": "noiseDrift",
+        "name": "噪点漂移",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "calm",
+          "emotional"
+        ]
+      },
+      {
+        "id": "tilt",
+        "name": "翘翘板",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "calm",
+          "editorial"
+        ]
+      },
+      {
+        "id": "zoomSlow",
+        "name": "缓慢推近",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "calm",
+          "emotional",
+          "editorial"
+        ]
+      },
+      {
+        "id": "stretchPulse",
+        "name": "随拍横向拉伸",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "glitchJump",
+        "name": "偶尔错位",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "glitch"
+        ]
+      },
+      {
+        "id": "echoTrail",
+        "name": "残影拖尾",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "emotional",
+          "glitch"
+        ]
+      },
+      {
+        "id": "glowFlicker",
+        "name": "烛火摇曳",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "calm",
+          "emotional"
+        ]
+      },
+      {
+        "id": "windGust",
+        "name": "阵风",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional"
+        ]
+      },
+      {
+        "id": "dangle",
+        "name": "悬吊",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "calm",
+          "emotional"
+        ]
+      },
+      {
+        "id": "eqBounce",
+        "name": "随音量伸缩",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "flashBox",
+        "name": "随拍反转",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "glitch"
+        ]
+      },
+      {
+        "id": "glintSweep",
+        "name": "光泽扫过",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "graphic",
+          "calm"
+        ]
+      },
+      {
+        "id": "flipSwap",
+        "name": "偶尔翻面",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "glitch",
+          "pop"
+        ]
+      },
+      {
+        "id": "shadowSway",
+        "name": "影子摇晃",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "calm",
+          "emotional"
+        ]
+      },
+      {
+        "id": "magnetJiggle",
+        "name": "磁力",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "pop",
+          "glitch"
+        ]
+      },
+      {
+        "id": "typeRattle",
+        "name": "打字震动",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "editorial",
+          "glitch"
+        ]
+      },
+      {
+        "id": "focusRack",
+        "name": "移焦",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "calm",
+          "emotional"
+        ]
+      },
+      {
+        "id": "pluckString",
+        "name": "拨弦",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional"
+        ]
+      },
+      {
+        "id": "hrTwitch",
+        "name": "抽搐",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "glitch"
+        ]
+      },
+      {
+        "id": "hrStare",
+        "name": "凝视的字",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "emotional"
+        ]
+      },
+      {
+        "id": "hrLagOne",
+        "name": "慢一拍的字",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "calm"
+        ]
+      },
+      {
+        "id": "hrFlickerLight",
+        "name": "将熄的灯",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "glitch",
+          "emotional"
+        ]
+      },
+      {
+        "id": "knWordPulse",
+        "name": "逐词节拍",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "knCounterRock",
+        "name": "反向摇摆",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "pop",
+          "calm",
+          "graphic"
+        ]
+      },
+      {
+        "id": "knWordRide",
+        "name": "词语冲浪",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "calm",
+          "emotional",
+          "pop"
+        ]
+      },
+      {
+        "id": "knTickShift",
+        "name": "滴答位移",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "graphic",
+          "pop",
+          "editorial"
+        ]
+      },
+      {
+        "id": "knBeatLean",
+        "name": "随拍倾斜",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "pop",
+          "glitch",
+          "graphic"
+        ]
+      },
+      {
+        "id": "knGapBreath",
+        "name": "词间呼吸",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "calm",
+          "editorial",
+          "emotional"
+        ]
+      },
+      {
+        "id": "tyKeyPulse",
+        "name": "主字脉动",
+        "pack": "typo",
+        "set": "typo",
+        "tags": [
+          "emotional",
+          "pop",
+          "calm"
+        ]
+      },
+      {
+        "id": "tyReadCursor",
+        "name": "阅读光标",
+        "pack": "typo",
+        "set": "typo",
+        "tags": [
+          "calm",
+          "editorial",
+          "pop"
+        ]
+      },
+      {
+        "id": "tyOutlineBlink",
+        "name": "空心闪烁",
+        "pack": "typo",
+        "set": "typo",
+        "tags": [
+          "glitch",
+          "graphic",
+          "pop"
+        ]
+      },
+      {
+        "id": "tyTrackStep",
+        "name": "字距跳段",
+        "pack": "typo",
+        "set": "typo",
+        "tags": [
+          "graphic",
+          "editorial",
+          "pop"
+        ]
+      }
+    ],
+    "exit": [
+      {
+        "id": "cut",
+        "name": "直切",
+        "pack": "core",
+        "set": null,
+        "tags": []
+      },
+      {
+        "id": "explode",
+        "name": "爆散",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "glitch",
+          "emotional"
+        ]
+      },
+      {
+        "id": "fall",
+        "name": "崩落",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "glitch",
+          "emotional",
+          "horror"
+        ]
+      },
+      {
+        "id": "drift",
+        "name": "雾散",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "calm",
+          "editorial",
+          "emotional",
+          "horror"
+        ]
+      },
+      {
+        "id": "slice",
+        "name": "切片退场",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "glitch",
+          "graphic"
+        ]
+      },
+      {
+        "id": "wipe",
+        "name": "擦除退场",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "calm",
+          "graphic",
+          "editorial"
+        ]
+      },
+      {
+        "id": "shrink",
+        "name": "收缩",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "calm",
+          "pop"
+        ]
+      },
+      {
+        "id": "blur",
+        "name": "模糊退场",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "calm",
+          "pop",
+          "editorial",
+          "emotional",
+          "horror"
+        ]
+      },
+      {
+        "id": "stretch",
+        "name": "伸缩退场",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "scatter",
+        "name": "飞散",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "pop"
+        ]
+      },
+      {
+        "id": "glitch",
+        "name": "故障退场",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "glitch",
+          "horror"
+        ]
+      },
+      {
+        "id": "sinkMask",
+        "name": "下沉",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "calm",
+          "editorial",
+          "graphic"
+        ]
+      },
+      {
+        "id": "riseOut",
+        "name": "向上消失",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "calm",
+          "emotional",
+          "editorial"
+        ]
+      },
+      {
+        "id": "slideOutL",
+        "name": "向左滑出",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "slideOutR",
+        "name": "向右滑出",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "flipOutX",
+        "name": "关门",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "graphic",
+          "pop",
+          "editorial"
+        ]
+      },
+      {
+        "id": "flipOutY",
+        "name": "啪地倒下",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "foldOut",
+        "name": "折叠收起",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "graphic",
+          "editorial"
+        ]
+      },
+      {
+        "id": "squash",
+        "name": "压扁",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "glitch",
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "trackOutWide",
+        "name": "字距散开",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "calm",
+          "emotional",
+          "editorial"
+        ]
+      },
+      {
+        "id": "collapse",
+        "name": "吸入",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "zoomThrough",
+        "name": "冲向镜头",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "emotional",
+          "pop"
+        ]
+      },
+      {
+        "id": "zoomFar",
+        "name": "退向远方",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm"
+        ]
+      },
+      {
+        "id": "spinOut",
+        "name": "旋转消失",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "pop"
+        ]
+      },
+      {
+        "id": "twist",
+        "name": "扭转",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "waveOut",
+        "name": "波浪崩解",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional"
+        ]
+      },
+      {
+        "id": "blurOutStagger",
+        "name": "逐字模糊",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "calm",
+          "emotional"
+        ]
+      },
+      {
+        "id": "undraw",
+        "name": "回到线稿",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "editorial",
+          "calm",
+          "graphic"
+        ]
+      },
+      {
+        "id": "outlineOut",
+        "name": "填色褪去",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "graphic",
+          "emotional"
+        ]
+      },
+      {
+        "id": "irisClose",
+        "name": "光圈",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "graphic",
+          "pop",
+          "editorial"
+        ]
+      },
+      {
+        "id": "diagWipeOut",
+        "name": "斜向擦除",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "graphic",
+          "editorial"
+        ]
+      },
+      {
+        "id": "blindsClose",
+        "name": "百叶窗",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "graphic",
+          "editorial"
+        ]
+      },
+      {
+        "id": "checkerOut",
+        "name": "棋盘格",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "graphic",
+          "glitch"
+        ]
+      },
+      {
+        "id": "splitApart",
+        "name": "上下裂开",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "graphic",
+          "pop"
+        ]
+      },
+      {
+        "id": "vSliceDrop",
+        "name": "纵向切片掉落",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "graphic",
+          "glitch"
+        ]
+      },
+      {
+        "id": "melt",
+        "name": "融化",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "emotional",
+          "glitch"
+        ]
+      },
+      {
+        "id": "dissolve",
+        "name": "碎散",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "calm",
+          "emotional"
+        ]
+      },
+      {
+        "id": "backspace",
+        "name": "退格删除",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "editorial",
+          "glitch"
+        ]
+      },
+      {
+        "id": "scrambleOut",
+        "name": "变成符号",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "glitch"
+        ]
+      },
+      {
+        "id": "glitchDissolve",
+        "name": "化为方块",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "glitch"
+        ]
+      },
+      {
+        "id": "echoOut",
+        "name": "残响",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm"
+        ]
+      },
+      {
+        "id": "whipOut",
+        "name": "急甩",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "gravity",
+        "name": "重力坠落",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional"
+        ]
+      },
+      {
+        "id": "popOut",
+        "name": "迸裂",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "pop"
+        ]
+      },
+      {
+        "id": "burn",
+        "name": "烧毁",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "emotional",
+          "glitch"
+        ]
+      },
+      {
+        "id": "sweepCover",
+        "name": "横条遮盖",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "graphic",
+          "editorial",
+          "pop"
+        ]
+      },
+      {
+        "id": "shatterLite",
+        "name": "四分飞散",
+        "pack": "exitHold",
+        "set": null,
+        "tags": [
+          "pop",
+          "glitch"
+        ]
+      },
+      {
+        "id": "peelOff",
+        "name": "撕下贴纸",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "crumpleOut",
+        "name": "揉成纸团丢掉",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional"
+        ]
+      },
+      {
+        "id": "tearOut",
+        "name": "撕掉",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "graphic"
+        ]
+      },
+      {
+        "id": "scorchOut",
+        "name": "烧焦消失",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "glitch"
+        ]
+      },
+      {
+        "id": "overexposeOut",
+        "name": "过曝泛白",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm",
+          "pop"
+        ]
+      },
+      {
+        "id": "scanOut",
+        "name": "扫描线消除",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "glitch",
+          "graphic"
+        ]
+      },
+      {
+        "id": "stripesOut",
+        "name": "条纹消除",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "graphic",
+          "pop"
+        ]
+      },
+      {
+        "id": "halftoneOut",
+        "name": "化为网点",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "graphic",
+          "calm"
+        ]
+      },
+      {
+        "id": "eraserOut",
+        "name": "黑板擦擦掉",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "editorial",
+          "calm"
+        ]
+      },
+      {
+        "id": "vacuumOut",
+        "name": "吸入一点",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "sandOut",
+        "name": "化沙飞散",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm"
+        ]
+      },
+      {
+        "id": "shredOut",
+        "name": "碎纸机",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "graphic",
+          "pop"
+        ]
+      },
+      {
+        "id": "dominoOut",
+        "name": "骨牌倒下",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "hingeOut",
+        "name": "单边脱落",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "pop",
+          "editorial"
+        ]
+      },
+      {
+        "id": "rocketOff",
+        "name": "发射升空",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "pop"
+        ]
+      },
+      {
+        "id": "bounceOff",
+        "name": "弹跳离开",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "pop"
+        ]
+      },
+      {
+        "id": "balloonOff",
+        "name": "气球飞走",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm",
+          "pop"
+        ]
+      },
+      {
+        "id": "deflateOut",
+        "name": "泄气飞走",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "pop"
+        ]
+      },
+      {
+        "id": "hazeOut",
+        "name": "消失于热浪",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm"
+        ]
+      },
+      {
+        "id": "glassBreak",
+        "name": "玻璃碎裂",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "graphic",
+          "pop",
+          "glitch"
+        ]
+      },
+      {
+        "id": "zipOut",
+        "name": "拉链",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "graphic",
+          "pop"
+        ]
+      },
+      {
+        "id": "clapShut",
+        "name": "中央闭合",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "graphic",
+          "pop"
+        ]
+      },
+      {
+        "id": "lampOff",
+        "name": "熄灯",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "glitch",
+          "emotional"
+        ]
+      },
+      {
+        "id": "slotOut",
+        "name": "老虎机转动",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "glitch",
+          "pop"
+        ]
+      },
+      {
+        "id": "clockOut",
+        "name": "时钟擦除",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "graphic",
+          "editorial"
+        ]
+      },
+      {
+        "id": "matrixOut",
+        "name": "数字雨",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "glitch"
+        ]
+      },
+      {
+        "id": "tornadoOut",
+        "name": "龙卷风",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "pop"
+        ]
+      },
+      {
+        "id": "rollUpOut",
+        "name": "卷起",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "graphic",
+          "editorial"
+        ]
+      },
+      {
+        "id": "snakeOut",
+        "name": "排队离开",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "calm",
+          "pop"
+        ]
+      },
+      {
+        "id": "flutterOut",
+        "name": "飘落",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm"
+        ]
+      },
+      {
+        "id": "rollOff",
+        "name": "滚走",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "pop"
+        ]
+      },
+      {
+        "id": "fanClose",
+        "name": "收起扇子",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "graphic",
+          "editorial",
+          "emotional"
+        ]
+      },
+      {
+        "id": "rgbSplitOut",
+        "name": "分色",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "glitch",
+          "pop"
+        ]
+      },
+      {
+        "id": "shockOut",
+        "name": "冲击波",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "floodOut",
+        "name": "淹没",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm"
+        ]
+      },
+      {
+        "id": "slashOut",
+        "name": "一刀两断",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "graphic",
+          "emotional",
+          "pop"
+        ]
+      },
+      {
+        "id": "mosaicOut",
+        "name": "马赛克",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "glitch",
+          "graphic"
+        ]
+      },
+      {
+        "id": "scribbleOut",
+        "name": "乱涂抹消",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "editorial",
+          "emotional",
+          "pop"
+        ]
+      },
+      {
+        "id": "candleOut",
+        "name": "吹熄",
+        "pack": "exitB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm"
+        ]
+      },
+      {
+        "id": "hrPulledDown",
+        "name": "被拖下去",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "glitch",
+          "emotional"
+        ]
+      },
+      {
+        "id": "hrLookBack",
+        "name": "留下一字",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "emotional"
+        ]
+      },
+      {
+        "id": "hrTurnAway",
+        "name": "转身背对",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "calm",
+          "emotional"
+        ]
+      },
+      {
+        "id": "hrShiver",
+        "name": "颤抖消失",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "glitch"
+        ]
+      },
+      {
+        "id": "hrSwallow",
+        "name": "被黑暗吞没",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "emotional",
+          "graphic"
+        ]
+      },
+      {
+        "id": "hrFlickerDie",
+        "name": "闪烁熄灭",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "glitch"
+        ]
+      },
+      {
+        "id": "hrDrain",
+        "name": "滴落",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "emotional"
+        ]
+      },
+      {
+        "id": "knWordKick",
+        "name": "逐词踢飞",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "knPushOut",
+        "name": "推出退场",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "editorial",
+          "graphic",
+          "pop"
+        ]
+      },
+      {
+        "id": "knDiveGlyph",
+        "name": "冲入一字",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "pop",
+          "emotional",
+          "graphic"
+        ]
+      },
+      {
+        "id": "knLaunch",
+        "name": "急起步",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "knWordBlink",
+        "name": "逐词熄灭",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "pop",
+          "glitch",
+          "graphic"
+        ]
+      },
+      {
+        "id": "knCloseGap",
+        "name": "收拢消失",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "editorial",
+          "graphic",
+          "pop"
+        ]
+      },
+      {
+        "id": "knJumpCutOut",
+        "name": "跳切",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "pop",
+          "glitch",
+          "graphic"
+        ]
+      },
+      {
+        "id": "knStackAway",
+        "name": "叠起落下",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "tyStrike",
+        "name": "划线删除",
+        "pack": "typo",
+        "set": "typo",
+        "tags": [
+          "editorial",
+          "graphic",
+          "emotional"
+        ]
+      },
+      {
+        "id": "tyToDot",
+        "name": "缩回圆点",
+        "pack": "typo",
+        "set": "typo",
+        "tags": [
+          "calm",
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "tyLineFeed",
+        "name": "换行送出",
+        "pack": "typo",
+        "set": "typo",
+        "tags": [
+          "editorial",
+          "calm",
+          "graphic"
+        ]
+      },
+      {
+        "id": "tyBracketClose",
+        "name": "括号合上",
+        "pack": "typo",
+        "set": "typo",
+        "tags": [
+          "editorial",
+          "graphic",
+          "pop"
+        ]
+      },
+      {
+        "id": "tyToIndex",
+        "name": "化为编号",
+        "pack": "typo",
+        "set": "typo",
+        "tags": [
+          "editorial",
+          "glitch",
+          "graphic"
+        ]
+      },
+      {
+        "id": "tyKeyLast",
+        "name": "留下一字",
+        "pack": "typo",
+        "set": "typo",
+        "tags": [
+          "emotional",
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "tyUnderSink",
+        "name": "沉入底线",
+        "pack": "typo",
+        "set": "typo",
+        "tags": [
+          "editorial",
+          "calm",
+          "graphic"
+        ]
+      },
+      {
+        "id": "tyFoldVert",
+        "name": "折成竖排",
+        "pack": "typo",
+        "set": "typo",
+        "tags": [
+          "graphic",
+          "editorial",
+          "pop"
+        ]
+      }
+    ],
+    "decor": [
+      {
+        "id": "brackets",
+        "name": "框角标记",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "graphic",
+          "editorial"
+        ]
+      },
+      {
+        "id": "rings",
+        "name": "座标圆",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "graphic",
+          "emotional"
+        ]
+      },
+      {
+        "id": "dots",
+        "name": "点状圆环",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "arrows",
+        "name": "箭头",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "slash",
+        "name": "斜线",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "glitch",
+          "graphic"
+        ]
+      },
+      {
+        "id": "sparks",
+        "name": "火花",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "pop"
+        ]
+      },
+      {
+        "id": "leaders",
+        "name": "引线",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "editorial",
+          "calm"
+        ]
+      },
+      {
+        "id": "waveform",
+        "name": "波形",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm"
+        ]
+      },
+      {
+        "id": "barcode",
+        "name": "条码",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "glitch",
+          "graphic"
+        ]
+      },
+      {
+        "id": "grid",
+        "name": "网格",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "graphic",
+          "editorial"
+        ]
+      },
+      {
+        "id": "stripes",
+        "name": "条纹",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "graphic",
+          "pop"
+        ]
+      },
+      {
+        "id": "blobs",
+        "name": "墨渍",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional"
+        ]
+      },
+      {
+        "id": "bars",
+        "name": "粗糙色带",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "graphic",
+          "glitch"
+        ]
+      },
+      {
+        "id": "shapes",
+        "name": "几何图形",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "counter",
+        "name": "大数字",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "graphic",
+          "editorial"
+        ]
+      },
+      {
+        "id": "crosshair",
+        "name": "十字准线",
+        "pack": "decor",
+        "set": null,
+        "tags": [
+          "graphic",
+          "editorial",
+          "glitch"
+        ]
+      },
+      {
+        "id": "cropMarks",
+        "name": "裁切标记",
+        "pack": "decor",
+        "set": null,
+        "tags": [
+          "editorial",
+          "graphic",
+          "calm"
+        ]
+      },
+      {
+        "id": "reticle",
+        "name": "锁定框",
+        "pack": "decor",
+        "set": null,
+        "tags": [
+          "glitch",
+          "graphic"
+        ]
+      },
+      {
+        "id": "radar",
+        "name": "雷达",
+        "pack": "decor",
+        "set": null,
+        "tags": [
+          "glitch",
+          "graphic"
+        ]
+      },
+      {
+        "id": "progressRing",
+        "name": "进度环",
+        "pack": "decor",
+        "set": null,
+        "tags": [
+          "graphic",
+          "editorial",
+          "calm"
+        ]
+      },
+      {
+        "id": "timecodeBar",
+        "name": "时间码",
+        "pack": "decor",
+        "set": null,
+        "tags": [
+          "editorial",
+          "glitch",
+          "graphic"
+        ]
+      },
+      {
+        "id": "rulerEdge",
+        "name": "边缘尺规",
+        "pack": "decor",
+        "set": null,
+        "tags": [
+          "editorial",
+          "graphic",
+          "calm"
+        ]
+      },
+      {
+        "id": "dimension",
+        "name": "尺寸线",
+        "pack": "decor",
+        "set": null,
+        "tags": [
+          "editorial",
+          "graphic"
+        ]
+      },
+      {
+        "id": "indexNum",
+        "name": "流水号",
+        "pack": "decor",
+        "set": null,
+        "tags": [
+          "editorial",
+          "graphic",
+          "calm"
+        ]
+      },
+      {
+        "id": "dateStamp",
+        "name": "相片日期",
+        "pack": "decor",
+        "set": null,
+        "tags": [
+          "emotional",
+          "pop",
+          "calm"
+        ]
+      },
+      {
+        "id": "qrBlock",
+        "name": "QR 风格方块",
+        "pack": "decor",
+        "set": null,
+        "tags": [
+          "graphic",
+          "glitch",
+          "pop"
+        ]
+      },
+      {
+        "id": "glitchRects",
+        "name": "故障碎片",
+        "pack": "decor",
+        "set": null,
+        "tags": [
+          "glitch"
+        ]
+      },
+      {
+        "id": "concentricSquares",
+        "name": "同心方框",
+        "pack": "decor",
+        "set": null,
+        "tags": [
+          "graphic",
+          "calm",
+          "editorial"
+        ]
+      },
+      {
+        "id": "triangleSpin",
+        "name": "旋转三角",
+        "pack": "decor",
+        "set": null,
+        "tags": [
+          "graphic",
+          "pop",
+          "glitch"
+        ]
+      },
+      {
+        "id": "lineBurst",
+        "name": "放射线",
+        "pack": "decor",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "emotional"
+        ]
+      },
+      {
+        "id": "plusGrid",
+        "name": "十字网格",
+        "pack": "decor",
+        "set": null,
+        "tags": [
+          "graphic",
+          "editorial",
+          "calm"
+        ]
+      },
+      {
+        "id": "guides",
+        "name": "辅助线",
+        "pack": "decor",
+        "set": null,
+        "tags": [
+          "editorial",
+          "graphic",
+          "calm"
+        ]
+      },
+      {
+        "id": "waveLine",
+        "name": "波浪线",
+        "pack": "decor",
+        "set": null,
+        "tags": [
+          "calm",
+          "emotional",
+          "graphic"
+        ]
+      },
+      {
+        "id": "spiralLine",
+        "name": "漩涡",
+        "pack": "decor",
+        "set": null,
+        "tags": [
+          "graphic",
+          "pop",
+          "calm"
+        ]
+      },
+      {
+        "id": "halftonePatch",
+        "name": "网点",
+        "pack": "decor",
+        "set": null,
+        "tags": [
+          "graphic",
+          "pop",
+          "editorial"
+        ]
+      },
+      {
+        "id": "checkerStrip",
+        "name": "棋盘格带",
+        "pack": "decor",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "beatRing",
+        "name": "节拍圆环",
+        "pack": "decor",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional",
+          "calm"
+        ]
+      },
+      {
+        "id": "orbitDots",
+        "name": "环绕圆点",
+        "pack": "decor",
+        "set": null,
+        "tags": [
+          "calm",
+          "emotional",
+          "graphic"
+        ]
+      },
+      {
+        "id": "constellation",
+        "name": "星座",
+        "pack": "decor",
+        "set": null,
+        "tags": [
+          "calm",
+          "emotional",
+          "editorial"
+        ]
+      },
+      {
+        "id": "confetti",
+        "name": "彩纸",
+        "pack": "decor",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional"
+        ]
+      },
+      {
+        "id": "petals",
+        "name": "花瓣",
+        "pack": "decor",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm",
+          "pop"
+        ]
+      },
+      {
+        "id": "rainStreaks",
+        "name": "雨丝",
+        "pack": "decor",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm",
+          "glitch"
+        ]
+      },
+      {
+        "id": "snow",
+        "name": "雪",
+        "pack": "decor",
+        "set": null,
+        "tags": [
+          "calm",
+          "emotional"
+        ]
+      },
+      {
+        "id": "lightLeak",
+        "name": "漏光",
+        "pack": "decor",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm",
+          "pop"
+        ]
+      },
+      {
+        "id": "bokeh",
+        "name": "散景光点",
+        "pack": "decor",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm",
+          "pop"
+        ]
+      },
+      {
+        "id": "speedCorner",
+        "name": "集中线",
+        "pack": "decor",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional",
+          "glitch"
+        ]
+      },
+      {
+        "id": "risingParticles",
+        "name": "上升粒子",
+        "pack": "decor",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm",
+          "glitch"
+        ]
+      },
+      {
+        "id": "twinkle",
+        "name": "闪烁星光",
+        "pack": "decor",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional",
+          "calm"
+        ]
+      },
+      {
+        "id": "brushStroke",
+        "name": "笔刷痕",
+        "pack": "decor",
+        "set": null,
+        "tags": [
+          "emotional",
+          "editorial",
+          "pop"
+        ]
+      },
+      {
+        "id": "tapePieces",
+        "name": "纸胶带",
+        "pack": "decor",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional",
+          "editorial"
+        ]
+      },
+      {
+        "id": "scribbleCircle",
+        "name": "手绘圈",
+        "pack": "decor",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional",
+          "editorial"
+        ]
+      },
+      {
+        "id": "scribbleUnder",
+        "name": "手绘底线",
+        "pack": "decor",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional",
+          "editorial"
+        ]
+      },
+      {
+        "id": "crossOut",
+        "name": "推敲笔记",
+        "pack": "decor",
+        "set": null,
+        "tags": [
+          "editorial",
+          "emotional"
+        ]
+      },
+      {
+        "id": "highlightMark",
+        "name": "荧光笔",
+        "pack": "decor",
+        "set": null,
+        "tags": [
+          "pop",
+          "editorial",
+          "emotional"
+        ]
+      },
+      {
+        "id": "heartsStars",
+        "name": "爱心与星星",
+        "pack": "decor",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional"
+        ]
+      },
+      {
+        "id": "watermarkKanji",
+        "name": "浮水印大字",
+        "pack": "decor",
+        "set": null,
+        "tags": [
+          "editorial",
+          "emotional",
+          "calm"
+        ]
+      },
+      {
+        "id": "verticalStrip",
+        "name": "竖排条",
+        "pack": "decor",
+        "set": null,
+        "tags": [
+          "editorial",
+          "calm",
+          "emotional"
+        ]
+      },
+      {
+        "id": "romajiLine",
+        "name": "罗马字",
+        "pack": "decor",
+        "set": null,
+        "tags": [
+          "editorial",
+          "calm",
+          "graphic"
+        ]
+      },
+      {
+        "id": "bracketsJP",
+        "name": "方头括号",
+        "pack": "decor",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "editorial"
+        ]
+      },
+      {
+        "id": "seal",
+        "name": "落款",
+        "pack": "decor",
+        "set": null,
+        "tags": [
+          "editorial",
+          "emotional",
+          "calm"
+        ]
+      },
+      {
+        "id": "kamon",
+        "name": "家纹",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "editorial",
+          "calm",
+          "emotional"
+        ]
+      },
+      {
+        "id": "seigaiha",
+        "name": "青海波",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "calm",
+          "emotional",
+          "editorial"
+        ]
+      },
+      {
+        "id": "asanoha",
+        "name": "麻叶纹",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "calm",
+          "editorial",
+          "emotional"
+        ]
+      },
+      {
+        "id": "hanabi",
+        "name": "烟火",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "pop",
+          "calm"
+        ]
+      },
+      {
+        "id": "chochin",
+        "name": "灯笼",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "pop",
+          "calm"
+        ]
+      },
+      {
+        "id": "shimenawa",
+        "name": "注连绳",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "editorial",
+          "emotional",
+          "calm"
+        ]
+      },
+      {
+        "id": "sensu",
+        "name": "扇子",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "editorial",
+          "calm"
+        ]
+      },
+      {
+        "id": "tsukiKumo",
+        "name": "云中月",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm",
+          "editorial"
+        ]
+      },
+      {
+        "id": "momiji",
+        "name": "枫叶",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm"
+        ]
+      },
+      {
+        "id": "namiGashira",
+        "name": "浪头",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "editorial",
+          "graphic"
+        ]
+      },
+      {
+        "id": "kasumi",
+        "name": "霞",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "calm",
+          "emotional",
+          "editorial"
+        ]
+      },
+      {
+        "id": "hexGrid",
+        "name": "六角网格",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "glitch",
+          "graphic"
+        ]
+      },
+      {
+        "id": "spectrumRing",
+        "name": "环形频谱",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "glitch",
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "dataColumns",
+        "name": "数据列",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "glitch",
+          "editorial",
+          "graphic"
+        ]
+      },
+      {
+        "id": "spinner",
+        "name": "加载中",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "glitch",
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "headingTape",
+        "name": "方位刻度",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "glitch",
+          "graphic",
+          "editorial"
+        ]
+      },
+      {
+        "id": "glyphLock",
+        "name": "文字锁定",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "glitch",
+          "graphic",
+          "editorial"
+        ]
+      },
+      {
+        "id": "atomOrbit",
+        "name": "原子轨道",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "graphic",
+          "glitch",
+          "calm"
+        ]
+      },
+      {
+        "id": "sonarArcs",
+        "name": "声波",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional",
+          "graphic"
+        ]
+      },
+      {
+        "id": "circuit",
+        "name": "电路",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "glitch",
+          "graphic"
+        ]
+      },
+      {
+        "id": "swatches",
+        "name": "色票",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "editorial",
+          "graphic"
+        ]
+      },
+      {
+        "id": "ruledLines",
+        "name": "横线笔记",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "editorial",
+          "calm",
+          "emotional"
+        ]
+      },
+      {
+        "id": "registration",
+        "name": "套准标记",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "editorial",
+          "graphic",
+          "glitch"
+        ]
+      },
+      {
+        "id": "punchHoles",
+        "name": "打孔",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "editorial",
+          "calm",
+          "graphic"
+        ]
+      },
+      {
+        "id": "staple",
+        "name": "钉书针",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "editorial",
+          "pop",
+          "emotional"
+        ]
+      },
+      {
+        "id": "paperClip",
+        "name": "回纹针",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "editorial",
+          "pop",
+          "emotional"
+        ]
+      },
+      {
+        "id": "indexTabs",
+        "name": "索引标签",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "editorial",
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "vines",
+        "name": "藤蔓",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm",
+          "pop"
+        ]
+      },
+      {
+        "id": "cloudPuffs",
+        "name": "云朵",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "calm",
+          "pop",
+          "emotional"
+        ]
+      },
+      {
+        "id": "starField",
+        "name": "星空",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "calm",
+          "emotional"
+        ]
+      },
+      {
+        "id": "moonPhases",
+        "name": "月相",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "calm",
+          "emotional",
+          "editorial"
+        ]
+      },
+      {
+        "id": "sunRays",
+        "name": "阳光",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "pop",
+          "calm"
+        ]
+      },
+      {
+        "id": "rainRipples",
+        "name": "雨滴涟漪",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "calm",
+          "emotional"
+        ]
+      },
+      {
+        "id": "bubbles",
+        "name": "肥皂泡",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional",
+          "calm"
+        ]
+      },
+      {
+        "id": "smoke",
+        "name": "烟",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "calm",
+          "emotional",
+          "editorial"
+        ]
+      },
+      {
+        "id": "dandelion",
+        "name": "蒲公英",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "calm",
+          "emotional"
+        ]
+      },
+      {
+        "id": "fireflies",
+        "name": "萤火虫",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm"
+        ]
+      },
+      {
+        "id": "memphis",
+        "name": "孟菲斯",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "zigzagRibbon",
+        "name": "锯齿缎带",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "polkaPatch",
+        "name": "圆点",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "calm"
+        ]
+      },
+      {
+        "id": "stripeCircle",
+        "name": "条纹圆",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "graphic",
+          "pop"
+        ]
+      },
+      {
+        "id": "decoCorners",
+        "name": "装饰角",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "editorial",
+          "graphic",
+          "calm"
+        ]
+      },
+      {
+        "id": "halfCircles",
+        "name": "半圆堆叠",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "graphic",
+          "pop",
+          "calm"
+        ]
+      },
+      {
+        "id": "loopArrows",
+        "name": "循环箭头",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "graphic",
+          "pop",
+          "editorial"
+        ]
+      },
+      {
+        "id": "starburst",
+        "name": "星芒",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "tally",
+        "name": "画正字",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "editorial",
+          "pop",
+          "emotional"
+        ]
+      },
+      {
+        "id": "cursorClick",
+        "name": "光标",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "glitch"
+        ]
+      },
+      {
+        "id": "windowChrome",
+        "name": "窗口",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "glitch"
+        ]
+      },
+      {
+        "id": "progressBar",
+        "name": "进度条",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "glitch"
+        ]
+      },
+      {
+        "id": "toggleSwitch",
+        "name": "切换开关",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "notifBell",
+        "name": "通知",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional"
+        ]
+      },
+      {
+        "id": "likeCounter",
+        "name": "按赞数",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional"
+        ]
+      },
+      {
+        "id": "mediaControls",
+        "name": "播放按钮",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "emotional"
+        ]
+      },
+      {
+        "id": "volumeBars",
+        "name": "音量",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "pop",
+          "glitch",
+          "graphic"
+        ]
+      },
+      {
+        "id": "musicNotes",
+        "name": "音符",
+        "pack": "decorB",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional",
+          "calm"
+        ]
+      },
+      {
+        "id": "hrScratches",
+        "name": "抓痕",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "glitch"
+        ]
+      },
+      {
+        "id": "hrSigil",
+        "name": "魔法阵",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "graphic"
+        ]
+      },
+      {
+        "id": "hrWatchEye",
+        "name": "注视之眼",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "graphic"
+        ]
+      },
+      {
+        "id": "hrStaticPatch",
+        "name": "杂讯碎片",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "glitch"
+        ]
+      },
+      {
+        "id": "hrDustBeam",
+        "name": "光束与尘埃",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "calm",
+          "emotional"
+        ]
+      },
+      {
+        "id": "hrDrips",
+        "name": "垂落的墨",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "emotional"
+        ]
+      },
+      {
+        "id": "hrCracks",
+        "name": "裂痕",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "graphic",
+          "glitch"
+        ]
+      },
+      {
+        "id": "knSpeedTrail",
+        "name": "跟随速度线",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "pop",
+          "graphic",
+          "glitch"
+        ]
+      },
+      {
+        "id": "knWordTicks",
+        "name": "词数计数器",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "graphic",
+          "editorial",
+          "pop"
+        ]
+      },
+      {
+        "id": "tyColophon",
+        "name": "版权页",
+        "pack": "typo",
+        "set": "typo",
+        "tags": [
+          "editorial",
+          "calm",
+          "graphic"
+        ]
+      },
+      {
+        "id": "tyRunningHead",
+        "name": "书眉页码",
+        "pack": "typo",
+        "set": "typo",
+        "tags": [
+          "editorial",
+          "calm"
+        ]
+      },
+      {
+        "id": "tyGlyphBody",
+        "name": "字身分割线",
+        "pack": "typo",
+        "set": "typo",
+        "tags": [
+          "editorial",
+          "graphic",
+          "calm"
+        ]
+      },
+      {
+        "id": "tyTextRule",
+        "name": "文字线条",
+        "pack": "typo",
+        "set": "typo",
+        "tags": [
+          "editorial",
+          "graphic",
+          "calm"
+        ]
+      },
+      {
+        "id": "tyTypeScale",
+        "name": "字级样本",
+        "pack": "typo",
+        "set": "typo",
+        "tags": [
+          "editorial",
+          "graphic"
+        ]
+      },
+      {
+        "id": "tyBigPunct",
+        "name": "巨大引号",
+        "pack": "typo",
+        "set": "typo",
+        "tags": [
+          "editorial",
+          "emotional",
+          "graphic"
+        ]
+      }
+    ],
+    "treat": [
+      {
+        "id": "none",
+        "name": "无",
+        "pack": "core",
+        "set": null,
+        "tags": []
+      },
+      {
+        "id": "hrInkBleed",
+        "name": "晕染滴落",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "emotional"
+        ]
+      },
+      {
+        "id": "hrEroded",
+        "name": "风化",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "editorial",
+          "graphic"
+        ]
+      },
+      {
+        "id": "hrRedact",
+        "name": "涂黑",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "editorial",
+          "graphic"
+        ]
+      },
+      {
+        "id": "hrDoubleExp",
+        "name": "双重曝光",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "emotional",
+          "glitch"
+        ]
+      },
+      {
+        "id": "knWordScale",
+        "name": "大小词",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "pop",
+          "graphic",
+          "editorial"
+        ]
+      },
+      {
+        "id": "knWordPlate",
+        "name": "逐词反白",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "pop",
+          "graphic",
+          "glitch"
+        ]
+      },
+      {
+        "id": "outline",
+        "name": "空心字",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "graphic",
+          "pop",
+          "glitch",
+          "emotional"
+        ]
+      },
+      {
+        "id": "outlineFill",
+        "name": "描边",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "doubleOutline",
+        "name": "双层描边",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "extrude",
+        "name": "立体字",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "longShadow",
+        "name": "长阴影",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "hardShadow",
+        "name": "错位阴影",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "glitch"
+        ]
+      },
+      {
+        "id": "softShadow",
+        "name": "柔和阴影",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "calm",
+          "emotional",
+          "editorial"
+        ]
+      },
+      {
+        "id": "glow",
+        "name": "发光",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm",
+          "glitch"
+        ]
+      },
+      {
+        "id": "marker",
+        "name": "荧光笔",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "editorial"
+        ]
+      },
+      {
+        "id": "underline",
+        "name": "底线",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "editorial",
+          "calm",
+          "graphic"
+        ]
+      },
+      {
+        "id": "strike",
+        "name": "删除线",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "glitch",
+          "editorial",
+          "emotional"
+        ]
+      },
+      {
+        "id": "boxed",
+        "name": "方框字",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "graphic",
+          "editorial",
+          "pop"
+        ]
+      },
+      {
+        "id": "gradientV",
+        "name": "垂直渐变",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "emotional",
+          "pop"
+        ]
+      },
+      {
+        "id": "splitColor",
+        "name": "上下双色",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "halftone",
+        "name": "网点",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "stripes",
+        "name": "条纹",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "hatch",
+        "name": "斜线",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "graphic",
+          "editorial",
+          "glitch"
+        ]
+      },
+      {
+        "id": "dotted",
+        "name": "点线轮廓",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "calm",
+          "editorial",
+          "graphic"
+        ]
+      },
+      {
+        "id": "alternate",
+        "name": "交错配色",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "italic",
+        "name": "斜体",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "editorial",
+          "pop",
+          "emotional"
+        ]
+      },
+      {
+        "id": "wide",
+        "name": "扁平字",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "graphic",
+          "pop"
+        ]
+      },
+      {
+        "id": "tall",
+        "name": "瘦长字",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "editorial",
+          "calm",
+          "graphic",
+          "emotional"
+        ]
+      },
+      {
+        "id": "echoOutline",
+        "name": "轮廓残响",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "glitch",
+          "emotional",
+          "graphic"
+        ]
+      },
+      {
+        "id": "emphasisDots",
+        "name": "着重号",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "editorial",
+          "emotional",
+          "calm"
+        ]
+      },
+      {
+        "id": "neonOutline",
+        "name": "霓虹灯管",
+        "pack": "treattrans",
+        "set": null,
+        "tags": [
+          "glitch",
+          "emotional",
+          "pop"
+        ]
+      },
+      {
+        "id": "chrome",
+        "name": "镀铬",
+        "pack": "treattrans",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "rainbow",
+        "name": "彩虹色",
+        "pack": "treattrans",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional"
+        ]
+      },
+      {
+        "id": "glitchSplit",
+        "name": "色版错位",
+        "pack": "treattrans",
+        "set": null,
+        "tags": [
+          "glitch",
+          "pop"
+        ]
+      },
+      {
+        "id": "shadowStack",
+        "name": "多重阴影",
+        "pack": "treattrans",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "stencilGap",
+        "name": "镂空字",
+        "pack": "treattrans",
+        "set": null,
+        "tags": [
+          "graphic",
+          "editorial",
+          "glitch"
+        ]
+      },
+      {
+        "id": "waterline",
+        "name": "水位",
+        "pack": "treattrans",
+        "set": null,
+        "tags": [
+          "emotional",
+          "pop",
+          "calm"
+        ]
+      },
+      {
+        "id": "karaoke",
+        "name": "卡拉 OK",
+        "pack": "treattrans",
+        "set": null,
+        "tags": [
+          "emotional",
+          "pop",
+          "editorial"
+        ]
+      },
+      {
+        "id": "sizeWave",
+        "name": "大小节奏",
+        "pack": "treattrans",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "editorial"
+        ]
+      },
+      {
+        "id": "rotateAlt",
+        "name": "摇摆字",
+        "pack": "treattrans",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional"
+        ]
+      },
+      {
+        "id": "baselineShift",
+        "name": "高低错落",
+        "pack": "treattrans",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "fauxBold",
+        "name": "超粗",
+        "pack": "treattrans",
+        "set": null,
+        "tags": [
+          "graphic",
+          "pop",
+          "editorial"
+        ]
+      },
+      {
+        "id": "circled",
+        "name": "圆圈字",
+        "pack": "treattrans",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "editorial"
+        ]
+      },
+      {
+        "id": "bracketsQuote",
+        "name": "引号",
+        "pack": "treattrans",
+        "set": null,
+        "tags": [
+          "editorial",
+          "emotional",
+          "calm"
+        ]
+      },
+      {
+        "id": "reflection",
+        "name": "倒影",
+        "pack": "treattrans",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm",
+          "editorial"
+        ]
+      },
+      {
+        "id": "inline",
+        "name": "内框线",
+        "pack": "treattrans",
+        "set": null,
+        "tags": [
+          "editorial",
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "sticker",
+        "name": "贴纸描边",
+        "pack": "treattrans",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "gradientSweep",
+        "name": "光泽扫过",
+        "pack": "treattrans",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional"
+        ]
+      },
+      {
+        "id": "kerningWide",
+        "name": "宽字距",
+        "pack": "treattrans",
+        "set": null,
+        "tags": [
+          "editorial",
+          "calm",
+          "emotional"
+        ]
+      },
+      {
+        "id": "monoGrid",
+        "name": "稿纸风",
+        "pack": "treattrans",
+        "set": null,
+        "tags": [
+          "editorial",
+          "calm",
+          "emotional"
+        ]
+      },
+      {
+        "id": "outlineOffset",
+        "name": "错位空心字",
+        "pack": "treattrans",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "editorial"
+        ]
+      },
+      {
+        "id": "toneShadow",
+        "name": "网点阴影",
+        "pack": "treattrans",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "editorial"
+        ]
+      },
+      {
+        "id": "fadeChars",
+        "name": "余韵",
+        "pack": "treattrans",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm"
+        ]
+      },
+      {
+        "id": "cutShift",
+        "name": "切割错位",
+        "pack": "treattrans",
+        "set": null,
+        "tags": [
+          "graphic",
+          "glitch",
+          "pop"
+        ]
+      },
+      {
+        "id": "focusPull",
+        "name": "模糊移焦",
+        "pack": "treattrans",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm",
+          "editorial"
+        ]
+      },
+      {
+        "id": "spotChar",
+        "name": "单字标记",
+        "pack": "treattrans",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "editorial",
+          "emotional"
+        ]
+      },
+      {
+        "id": "ransom",
+        "name": "剪贴字",
+        "pack": "treattrans",
+        "set": null,
+        "tags": [
+          "pop",
+          "glitch",
+          "graphic"
+        ]
+      },
+      {
+        "id": "tyHollowKey",
+        "name": "单字镂空",
+        "pack": "typo",
+        "set": "typo",
+        "tags": [
+          "graphic",
+          "editorial",
+          "pop"
+        ]
+      },
+      {
+        "id": "tyHeadRules",
+        "name": "天地线",
+        "pack": "typo",
+        "set": "typo",
+        "tags": [
+          "editorial",
+          "graphic",
+          "calm"
+        ]
+      },
+      {
+        "id": "tyHeadBig",
+        "name": "首字放大",
+        "pack": "typo",
+        "set": "typo",
+        "tags": [
+          "editorial",
+          "pop",
+          "emotional"
+        ]
+      },
+      {
+        "id": "tyIndexSup",
+        "name": "字序号",
+        "pack": "typo",
+        "set": "typo",
+        "tags": [
+          "editorial",
+          "graphic"
+        ]
+      }
+    ],
+    "bg": [
+      {
+        "id": "none",
+        "name": "素色",
+        "pack": "core",
+        "set": null,
+        "tags": []
+      },
+      {
+        "id": "auroraRibbons",
+        "name": "极光",
+        "pack": "bgcamB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm"
+        ]
+      },
+      {
+        "id": "meshBlobs",
+        "name": "网格渐变",
+        "pack": "bgcamB",
+        "set": null,
+        "tags": [
+          "calm",
+          "emotional",
+          "pop"
+        ]
+      },
+      {
+        "id": "duotoneSweep",
+        "name": "双色扫动",
+        "pack": "bgcamB",
+        "set": null,
+        "tags": [
+          "calm",
+          "pop",
+          "graphic",
+          "emotional"
+        ]
+      },
+      {
+        "id": "horizonGlow",
+        "name": "行星边缘",
+        "pack": "bgcamB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm",
+          "editorial"
+        ]
+      },
+      {
+        "id": "seigaiha",
+        "name": "青海波",
+        "pack": "bgcamB",
+        "set": null,
+        "tags": [
+          "calm",
+          "editorial",
+          "graphic"
+        ]
+      },
+      {
+        "id": "asanoha",
+        "name": "麻叶纹",
+        "pack": "bgcamB",
+        "set": null,
+        "tags": [
+          "calm",
+          "editorial",
+          "graphic",
+          "emotional"
+        ]
+      },
+      {
+        "id": "houndstooth",
+        "name": "千鸟格",
+        "pack": "bgcamB",
+        "set": null,
+        "tags": [
+          "graphic",
+          "editorial",
+          "pop"
+        ]
+      },
+      {
+        "id": "herringbone",
+        "name": "人字纹",
+        "pack": "bgcamB",
+        "set": null,
+        "tags": [
+          "editorial",
+          "calm",
+          "graphic"
+        ]
+      },
+      {
+        "id": "argyle",
+        "name": "菱格纹",
+        "pack": "bgcamB",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "editorial"
+        ]
+      },
+      {
+        "id": "tartan",
+        "name": "苏格兰格纹",
+        "pack": "bgcamB",
+        "set": null,
+        "tags": [
+          "pop",
+          "calm",
+          "editorial"
+        ]
+      },
+      {
+        "id": "chevron",
+        "name": "V 形纹",
+        "pack": "bgcamB",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "isoCubes",
+        "name": "立方体",
+        "pack": "bgcamB",
+        "set": null,
+        "tags": [
+          "graphic",
+          "pop",
+          "calm"
+        ]
+      },
+      {
+        "id": "hexGrid",
+        "name": "六角网格",
+        "pack": "bgcamB",
+        "set": null,
+        "tags": [
+          "graphic",
+          "glitch",
+          "calm"
+        ]
+      },
+      {
+        "id": "triTess",
+        "name": "三角马赛克",
+        "pack": "bgcamB",
+        "set": null,
+        "tags": [
+          "graphic",
+          "calm",
+          "emotional"
+        ]
+      },
+      {
+        "id": "moire",
+        "name": "摩尔纹",
+        "pack": "bgcamB",
+        "set": null,
+        "tags": [
+          "glitch",
+          "graphic",
+          "calm"
+        ]
+      },
+      {
+        "id": "squareTunnel",
+        "name": "方形隧道",
+        "pack": "bgcamB",
+        "set": null,
+        "tags": [
+          "glitch",
+          "graphic",
+          "pop"
+        ]
+      },
+      {
+        "id": "spiralArms",
+        "name": "漩涡",
+        "pack": "bgcamB",
+        "set": null,
+        "tags": [
+          "glitch",
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "topoLines",
+        "name": "等高线",
+        "pack": "bgcamB",
+        "set": null,
+        "tags": [
+          "calm",
+          "editorial",
+          "graphic"
+        ]
+      },
+      {
+        "id": "ridgePlot",
+        "name": "山脊线图",
+        "pack": "bgcamB",
+        "set": null,
+        "tags": [
+          "editorial",
+          "emotional",
+          "calm"
+        ]
+      },
+      {
+        "id": "starfield",
+        "name": "星空",
+        "pack": "bgcamB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm"
+        ]
+      },
+      {
+        "id": "nightMoon",
+        "name": "月夜",
+        "pack": "bgcamB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm",
+          "editorial"
+        ]
+      },
+      {
+        "id": "skyline",
+        "name": "街景",
+        "pack": "bgcamB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "editorial",
+          "pop"
+        ]
+      },
+      {
+        "id": "sunsetSun",
+        "name": "夕阳",
+        "pack": "bgcamB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm",
+          "pop"
+        ]
+      },
+      {
+        "id": "oceanWaves",
+        "name": "海浪",
+        "pack": "bgcamB",
+        "set": null,
+        "tags": [
+          "calm",
+          "emotional",
+          "editorial"
+        ]
+      },
+      {
+        "id": "rainWindow",
+        "name": "雨窗",
+        "pack": "bgcamB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm",
+          "editorial"
+        ]
+      },
+      {
+        "id": "snowLayers",
+        "name": "雪",
+        "pack": "bgcamB",
+        "set": null,
+        "tags": [
+          "calm",
+          "emotional"
+        ]
+      },
+      {
+        "id": "fireworks",
+        "name": "烟火",
+        "pack": "bgcamB",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional"
+        ]
+      },
+      {
+        "id": "cloudLayers",
+        "name": "云",
+        "pack": "bgcamB",
+        "set": null,
+        "tags": [
+          "calm",
+          "emotional",
+          "pop"
+        ]
+      },
+      {
+        "id": "mountains",
+        "name": "山峦",
+        "pack": "bgcamB",
+        "set": null,
+        "tags": [
+          "calm",
+          "emotional",
+          "editorial"
+        ]
+      },
+      {
+        "id": "filmStrip",
+        "name": "胶片",
+        "pack": "bgcamB",
+        "set": null,
+        "tags": [
+          "editorial",
+          "emotional",
+          "glitch"
+        ]
+      },
+      {
+        "id": "vhsBand",
+        "name": "VHS 噪点",
+        "pack": "bgcamB",
+        "set": null,
+        "tags": [
+          "glitch",
+          "emotional"
+        ]
+      },
+      {
+        "id": "tornPaper",
+        "name": "撕纸",
+        "pack": "bgcamB",
+        "set": null,
+        "tags": [
+          "editorial",
+          "emotional",
+          "pop"
+        ]
+      },
+      {
+        "id": "godRays",
+        "name": "光芒",
+        "pack": "bgcamB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm",
+          "editorial"
+        ]
+      },
+      {
+        "id": "vignettePulse",
+        "name": "彩色暗角",
+        "pack": "bgcamB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm",
+          "pop"
+        ]
+      },
+      {
+        "id": "kaleidoscope",
+        "name": "万花筒",
+        "pack": "bgcamB",
+        "set": null,
+        "tags": [
+          "pop",
+          "glitch",
+          "emotional"
+        ]
+      },
+      {
+        "id": "marble",
+        "name": "大理石",
+        "pack": "bgcamB",
+        "set": null,
+        "tags": [
+          "calm",
+          "editorial",
+          "emotional"
+        ]
+      },
+      {
+        "id": "paperCut",
+        "name": "剪纸",
+        "pack": "bgcamB",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional",
+          "calm"
+        ]
+      },
+      {
+        "id": "hrFailingLamp",
+        "name": "将熄的灯",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "emotional"
+        ]
+      },
+      {
+        "id": "hrCorridor",
+        "name": "昏暗走廊",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "graphic"
+        ]
+      },
+      {
+        "id": "hrMold",
+        "name": "蔓延的污渍",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "emotional"
+        ]
+      },
+      {
+        "id": "hrDeadTrees",
+        "name": "枯树林",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "calm",
+          "emotional"
+        ]
+      },
+      {
+        "id": "sunburst",
+        "name": "放射",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "concentric",
+        "name": "同心圆",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "calm",
+          "graphic",
+          "emotional"
+        ]
+      },
+      {
+        "id": "halftoneFade",
+        "name": "网点渐变",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "editorial"
+        ]
+      },
+      {
+        "id": "bigStripes",
+        "name": "大斜纹",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "graphic",
+          "pop"
+        ]
+      },
+      {
+        "id": "splitV",
+        "name": "左右双色",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "graphic",
+          "editorial",
+          "pop"
+        ]
+      },
+      {
+        "id": "splitH",
+        "name": "上下双色",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "graphic",
+          "editorial",
+          "calm"
+        ]
+      },
+      {
+        "id": "splitDiag",
+        "name": "斜向双色",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "graphic",
+          "pop"
+        ]
+      },
+      {
+        "id": "gradientSweep",
+        "name": "渐变",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "calm",
+          "emotional",
+          "pop"
+        ]
+      },
+      {
+        "id": "spotlight",
+        "name": "聚光灯",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm",
+          "editorial"
+        ]
+      },
+      {
+        "id": "tvBars",
+        "name": "电视彩条",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "glitch",
+          "graphic",
+          "emotional"
+        ]
+      },
+      {
+        "id": "checker",
+        "name": "棋盘格",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "graphic",
+          "pop"
+        ]
+      },
+      {
+        "id": "bigChar",
+        "name": "巨大文字",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "editorial",
+          "emotional",
+          "graphic",
+          "calm"
+        ]
+      },
+      {
+        "id": "speedLines",
+        "name": "集中线",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional",
+          "graphic"
+        ]
+      },
+      {
+        "id": "scanBars",
+        "name": "扫描线带",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "calm",
+          "glitch",
+          "editorial"
+        ]
+      },
+      {
+        "id": "dotGrid",
+        "name": "点状网格",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "calm",
+          "editorial",
+          "graphic"
+        ]
+      },
+      {
+        "id": "retroGrid",
+        "name": "复古网格",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "pop",
+          "glitch",
+          "graphic"
+        ]
+      },
+      {
+        "id": "bokehBg",
+        "name": "散景光点",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm",
+          "pop"
+        ]
+      },
+      {
+        "id": "particlesBg",
+        "name": "飞舞粒子",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm",
+          "pop"
+        ]
+      },
+      {
+        "id": "ripples",
+        "name": "涟漪",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "calm",
+          "emotional",
+          "graphic"
+        ]
+      },
+      {
+        "id": "polka",
+        "name": "圆点",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "eqBars",
+        "name": "背景等化器",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "pop",
+          "glitch",
+          "graphic"
+        ]
+      },
+      {
+        "id": "borderFrame",
+        "name": "粗框",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "graphic",
+          "pop",
+          "editorial"
+        ]
+      },
+      {
+        "id": "letterbox",
+        "name": "电影黑边",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "emotional",
+          "editorial",
+          "calm"
+        ]
+      },
+      {
+        "id": "noiseField",
+        "name": "噪点扰动",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "glitch",
+          "emotional"
+        ]
+      }
+    ],
+    "cam": [
+      {
+        "id": "push",
+        "name": "缓慢推近",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "calm",
+          "editorial",
+          "emotional",
+          "graphic",
+          "pop",
+          "glitch"
+        ]
+      },
+      {
+        "id": "orbitDrift",
+        "name": "环绕",
+        "pack": "bgcamB",
+        "set": null,
+        "tags": [
+          "calm",
+          "emotional",
+          "graphic"
+        ]
+      },
+      {
+        "id": "barrelRoll",
+        "name": "桶滚",
+        "pack": "bgcamB",
+        "set": null,
+        "tags": [
+          "pop",
+          "glitch",
+          "graphic"
+        ]
+      },
+      {
+        "id": "pendulumSway",
+        "name": "钟摆",
+        "pack": "bgcamB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "pop",
+          "calm"
+        ]
+      },
+      {
+        "id": "focusIn",
+        "name": "对焦",
+        "pack": "bgcamB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm",
+          "editorial"
+        ]
+      },
+      {
+        "id": "rackFocus",
+        "name": "失焦",
+        "pack": "bgcamB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm",
+          "editorial"
+        ]
+      },
+      {
+        "id": "earthquake",
+        "name": "地震",
+        "pack": "bgcamB",
+        "set": null,
+        "tags": [
+          "glitch",
+          "pop",
+          "emotional"
+        ]
+      },
+      {
+        "id": "floatNoise",
+        "name": "漂浮",
+        "pack": "bgcamB",
+        "set": null,
+        "tags": [
+          "calm",
+          "emotional"
+        ]
+      },
+      {
+        "id": "vertigo",
+        "name": "晕眩变焦",
+        "pack": "bgcamB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "glitch"
+        ]
+      },
+      {
+        "id": "tiltDown",
+        "name": "镜头下摇",
+        "pack": "bgcamB",
+        "set": null,
+        "tags": [
+          "calm",
+          "editorial",
+          "emotional"
+        ]
+      },
+      {
+        "id": "spiralIn",
+        "name": "漩涡变焦",
+        "pack": "bgcamB",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "emotional"
+        ]
+      },
+      {
+        "id": "snapPan",
+        "name": "快速横摇",
+        "pack": "bgcamB",
+        "set": null,
+        "tags": [
+          "pop",
+          "glitch",
+          "graphic"
+        ]
+      },
+      {
+        "id": "jelly",
+        "name": "果冻晃动",
+        "pack": "bgcamB",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "hrNervous",
+        "name": "惊恐手持",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "glitch",
+          "emotional"
+        ]
+      },
+      {
+        "id": "hrDutchSnap",
+        "name": "突然倾斜",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "emotional",
+          "graphic"
+        ]
+      },
+      {
+        "id": "knReadPan",
+        "name": "随读平移",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "pop",
+          "graphic",
+          "editorial"
+        ]
+      },
+      {
+        "id": "knTiltKick",
+        "name": "逐词倾斜",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "pop",
+          "graphic",
+          "emotional"
+        ]
+      },
+      {
+        "id": "knCardFlip",
+        "name": "翻牌",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "knShearKick",
+        "name": "斜切弹动",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "pop",
+          "glitch",
+          "graphic"
+        ]
+      },
+      {
+        "id": "knJumpCut",
+        "name": "跳切",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "pop",
+          "glitch",
+          "editorial"
+        ]
+      },
+      {
+        "id": "knRushIn",
+        "name": "从远处冲来",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "pop",
+          "graphic",
+          "emotional"
+        ]
+      },
+      {
+        "id": "pullOut",
+        "name": "拉远",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "calm",
+          "emotional",
+          "editorial"
+        ]
+      },
+      {
+        "id": "panL",
+        "name": "向左横摇",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "calm",
+          "editorial",
+          "emotional",
+          "graphic"
+        ]
+      },
+      {
+        "id": "panR",
+        "name": "向右横摇",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "calm",
+          "editorial",
+          "emotional",
+          "graphic"
+        ]
+      },
+      {
+        "id": "tiltUp",
+        "name": "镜头上摇",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "calm",
+          "emotional",
+          "editorial"
+        ]
+      },
+      {
+        "id": "dutch",
+        "name": "斜角镜头",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "emotional",
+          "glitch",
+          "graphic"
+        ]
+      },
+      {
+        "id": "handheld",
+        "name": "手持",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm",
+          "editorial"
+        ]
+      },
+      {
+        "id": "beatPunch",
+        "name": "随拍放大",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "pop",
+          "glitch",
+          "graphic"
+        ]
+      },
+      {
+        "id": "whipIn",
+        "name": "急甩推入",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "pop",
+          "glitch",
+          "graphic"
+        ]
+      },
+      {
+        "id": "crashZoom",
+        "name": "急速变焦",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "pop",
+          "glitch",
+          "emotional"
+        ]
+      },
+      {
+        "id": "bounce",
+        "name": "弹跳",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "roll",
+        "name": "滚转",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm",
+          "glitch"
+        ]
+      },
+      {
+        "id": "driftDiag",
+        "name": "斜向漂移",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "calm",
+          "emotional",
+          "editorial",
+          "graphic"
+        ]
+      },
+      {
+        "id": "shakeHard",
+        "name": "剧烈摇晃",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "glitch",
+          "pop",
+          "emotional"
+        ]
+      },
+      {
+        "id": "dollyIn",
+        "name": "推轨",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm",
+          "editorial"
+        ]
+      },
+      {
+        "id": "stepZoom",
+        "name": "分段变焦",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "glitch"
+        ]
+      }
+    ],
+    "fx": [
+      {
+        "id": "chroma",
+        "name": "色彩错位跳动",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "glitch",
+          "emotional",
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "shake",
+        "name": "摇晃",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "pop",
+          "glitch",
+          "emotional"
+        ]
+      },
+      {
+        "id": "slice",
+        "name": "切片故障",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "glitch"
+        ]
+      },
+      {
+        "id": "block",
+        "name": "区块故障",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "glitch"
+        ]
+      },
+      {
+        "id": "invert",
+        "name": "反转",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "glitch",
+          "graphic"
+        ]
+      },
+      {
+        "id": "flash",
+        "name": "闪光",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional",
+          "glitch"
+        ]
+      },
+      {
+        "id": "zoom",
+        "name": "缩放模糊",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional"
+        ]
+      },
+      {
+        "id": "mosaic",
+        "name": "马赛克",
+        "pack": "core",
+        "set": null,
+        "tags": [
+          "glitch"
+        ]
+      },
+      {
+        "id": "radialChroma",
+        "name": "放射色差",
+        "pack": "fxB",
+        "set": null,
+        "tags": [
+          "glitch",
+          "emotional",
+          "pop"
+        ]
+      },
+      {
+        "id": "bloomFlash",
+        "name": "光晕",
+        "pack": "fxB",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional",
+          "calm"
+        ]
+      },
+      {
+        "id": "bulge",
+        "name": "鱼眼",
+        "pack": "fxB",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "glitch"
+        ]
+      },
+      {
+        "id": "pixelSort",
+        "name": "像素排序",
+        "pack": "fxB",
+        "set": null,
+        "tags": [
+          "glitch"
+        ]
+      },
+      {
+        "id": "interlace",
+        "name": "交错扫描",
+        "pack": "fxB",
+        "set": null,
+        "tags": [
+          "glitch",
+          "emotional"
+        ]
+      },
+      {
+        "id": "macroBlock",
+        "name": "区块噪点",
+        "pack": "fxB",
+        "set": null,
+        "tags": [
+          "glitch"
+        ]
+      },
+      {
+        "id": "halftone",
+        "name": "网点",
+        "pack": "fxB",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "editorial"
+        ]
+      },
+      {
+        "id": "duotone",
+        "name": "双色调",
+        "pack": "fxB",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional",
+          "graphic"
+        ]
+      },
+      {
+        "id": "ditherBit",
+        "name": "1 位抖动",
+        "pack": "fxB",
+        "set": null,
+        "tags": [
+          "glitch",
+          "graphic",
+          "pop"
+        ]
+      },
+      {
+        "id": "rotateSnap",
+        "name": "角度急转",
+        "pack": "fxB",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "glitch"
+        ]
+      },
+      {
+        "id": "echoFrames",
+        "name": "残影回声",
+        "pack": "fxB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "pop",
+          "glitch"
+        ]
+      },
+      {
+        "id": "kaleido",
+        "name": "万花筒",
+        "pack": "fxB",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "emotional"
+        ]
+      },
+      {
+        "id": "bandInvert",
+        "name": "带状反转",
+        "pack": "fxB",
+        "set": null,
+        "tags": [
+          "glitch",
+          "graphic"
+        ]
+      },
+      {
+        "id": "lightRays",
+        "name": "光芒",
+        "pack": "fxB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "pop",
+          "calm"
+        ]
+      },
+      {
+        "id": "anamorphic",
+        "name": "横向光斑",
+        "pack": "fxB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "pop",
+          "calm"
+        ]
+      },
+      {
+        "id": "heartbeat",
+        "name": "心跳",
+        "pack": "fxB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm"
+        ]
+      },
+      {
+        "id": "tvStatic",
+        "name": "雪花噪点",
+        "pack": "fxB",
+        "set": null,
+        "tags": [
+          "glitch",
+          "emotional"
+        ]
+      },
+      {
+        "id": "dustScratches",
+        "name": "胶片划痕",
+        "pack": "fxB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm",
+          "editorial"
+        ]
+      },
+      {
+        "id": "filmAdvance",
+        "name": "胶片滚动",
+        "pack": "fxB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "editorial",
+          "calm"
+        ]
+      },
+      {
+        "id": "perspectiveTilt",
+        "name": "透视摇晃",
+        "pack": "fxB",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "emotional"
+        ]
+      },
+      {
+        "id": "ripple",
+        "name": "涟漪",
+        "pack": "fxB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm",
+          "pop"
+        ]
+      },
+      {
+        "id": "focusLines",
+        "name": "集中线",
+        "pack": "fxB",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "emotional"
+        ]
+      },
+      {
+        "id": "speedLines",
+        "name": "速度线",
+        "pack": "fxB",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "starGlint",
+        "name": "星芒闪光",
+        "pack": "fxB",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional"
+        ]
+      },
+      {
+        "id": "colorBars",
+        "name": "彩条",
+        "pack": "fxB",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "glitch"
+        ]
+      },
+      {
+        "id": "zoomStutter",
+        "name": "连续缩放",
+        "pack": "fxB",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "glitch"
+        ]
+      },
+      {
+        "id": "negativeRing",
+        "name": "反转圆环",
+        "pack": "fxB",
+        "set": null,
+        "tags": [
+          "graphic",
+          "pop",
+          "glitch"
+        ]
+      },
+      {
+        "id": "edgeDetect",
+        "name": "边缘侦测",
+        "pack": "fxB",
+        "set": null,
+        "tags": [
+          "graphic",
+          "glitch",
+          "editorial"
+        ]
+      },
+      {
+        "id": "shatter",
+        "name": "玻璃碎裂",
+        "pack": "fxB",
+        "set": null,
+        "tags": [
+          "glitch",
+          "pop",
+          "emotional"
+        ]
+      },
+      {
+        "id": "defocus",
+        "name": "失焦",
+        "pack": "fxB",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm",
+          "editorial"
+        ]
+      },
+      {
+        "id": "snapshot",
+        "name": "快门",
+        "pack": "fxB",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional",
+          "editorial"
+        ]
+      },
+      {
+        "id": "squash",
+        "name": "伸缩",
+        "pack": "fxB",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "scanBar",
+        "name": "扫描",
+        "pack": "fxB",
+        "set": null,
+        "tags": [
+          "graphic",
+          "editorial",
+          "glitch"
+        ]
+      },
+      {
+        "id": "loopScroll",
+        "name": "横向循环",
+        "pack": "fxB",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "glitch"
+        ]
+      },
+      {
+        "id": "hrSubliminal",
+        "name": "潜意识闪现",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "glitch"
+        ]
+      },
+      {
+        "id": "hrSignalLoss",
+        "name": "信号中断",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "glitch",
+          "editorial"
+        ]
+      },
+      {
+        "id": "hrPassingShadow",
+        "name": "掠过的影子",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "emotional"
+        ]
+      },
+      {
+        "id": "panelWipe",
+        "name": "面板擦除",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "irisTrans",
+        "name": "光圈",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "pop",
+          "editorial"
+        ]
+      },
+      {
+        "id": "doors",
+        "name": "门",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "graphic",
+          "pop"
+        ]
+      },
+      {
+        "id": "blindsTrans",
+        "name": "百叶窗",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "graphic",
+          "editorial"
+        ]
+      },
+      {
+        "id": "rgbSplit",
+        "name": "RGB 分离",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "glitch",
+          "emotional"
+        ]
+      },
+      {
+        "id": "smear",
+        "name": "横向拖影",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "glitch"
+        ]
+      },
+      {
+        "id": "vhsRoll",
+        "name": "VHS 滚动",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "glitch",
+          "emotional"
+        ]
+      },
+      {
+        "id": "trackingNoise",
+        "name": "磁道噪点",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "glitch",
+          "emotional"
+        ]
+      },
+      {
+        "id": "mirrorFlash",
+        "name": "镜像",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "glitch",
+          "graphic"
+        ]
+      },
+      {
+        "id": "strobe",
+        "name": "频闪",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "glitch",
+          "pop"
+        ]
+      },
+      {
+        "id": "posterize",
+        "name": "色调分离",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "glitch",
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "hueShift",
+        "name": "色相偏移",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "glitch",
+          "pop",
+          "emotional"
+        ]
+      },
+      {
+        "id": "tileShift",
+        "name": "磁砖错位",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "glitch",
+          "graphic"
+        ]
+      },
+      {
+        "id": "filmBurn",
+        "name": "胶片烧灼",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm",
+          "editorial"
+        ]
+      },
+      {
+        "id": "whipBlur",
+        "name": "急甩模糊",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "emotional"
+        ]
+      },
+      {
+        "id": "blackFrame",
+        "name": "黑画格",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "editorial",
+          "emotional",
+          "glitch"
+        ]
+      },
+      {
+        "id": "whiteFrame",
+        "name": "白画格",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "emotional",
+          "pop"
+        ]
+      },
+      {
+        "id": "gridRepeat",
+        "name": "分割画面",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "glitch"
+        ]
+      },
+      {
+        "id": "waveWarp",
+        "name": "波浪扭曲",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "emotional",
+          "glitch"
+        ]
+      },
+      {
+        "id": "pixelDrift",
+        "name": "像素偏移",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "glitch"
+        ]
+      },
+      {
+        "id": "zoomPunch",
+        "name": "缩放重击",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic",
+          "glitch"
+        ]
+      },
+      {
+        "id": "lightSweep",
+        "name": "光束扫过",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional",
+          "calm"
+        ]
+      },
+      {
+        "id": "crtOff",
+        "name": "映像管关机",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "glitch",
+          "emotional"
+        ]
+      },
+      {
+        "id": "splitSlide",
+        "name": "上下滑移",
+        "pack": "looks",
+        "set": null,
+        "tags": [
+          "graphic",
+          "pop",
+          "glitch"
+        ]
+      }
+    ],
+    "trans": [
+      {
+        "id": "hrStaticCut",
+        "name": "杂讯转场",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "glitch"
+        ]
+      },
+      {
+        "id": "hrBlink",
+        "name": "眨眼",
+        "pack": "horror",
+        "set": "horror",
+        "tags": [
+          "horror",
+          "emotional"
+        ]
+      },
+      {
+        "id": "knCornerSwing",
+        "name": "转角回旋",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "knStutterCut",
+        "name": "节奏跳切",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "pop",
+          "glitch",
+          "graphic"
+        ]
+      },
+      {
+        "id": "knStripSlam",
+        "name": "条幅落下",
+        "pack": "kinetic",
+        "set": "kinetic",
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "wipe",
+        "name": "边缘擦除",
+        "pack": "treattrans",
+        "set": null,
+        "tags": [
+          "graphic",
+          "editorial",
+          "pop"
+        ]
+      },
+      {
+        "id": "diagonalWipe",
+        "name": "斜带擦除",
+        "pack": "treattrans",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "clockWipe",
+        "name": "时钟擦除",
+        "pack": "treattrans",
+        "set": null,
+        "tags": [
+          "graphic",
+          "pop",
+          "editorial"
+        ]
+      },
+      {
+        "id": "irisOpen",
+        "name": "光圈开启",
+        "pack": "treattrans",
+        "set": null,
+        "tags": [
+          "emotional",
+          "pop",
+          "editorial"
+        ]
+      },
+      {
+        "id": "pushSlide",
+        "name": "推移",
+        "pack": "treattrans",
+        "set": null,
+        "tags": [
+          "graphic",
+          "pop",
+          "editorial"
+        ]
+      },
+      {
+        "id": "cover",
+        "name": "覆盖",
+        "pack": "treattrans",
+        "set": null,
+        "tags": [
+          "editorial",
+          "graphic",
+          "calm"
+        ]
+      },
+      {
+        "id": "uncover",
+        "name": "揭开",
+        "pack": "treattrans",
+        "set": null,
+        "tags": [
+          "editorial",
+          "calm",
+          "emotional"
+        ]
+      },
+      {
+        "id": "zoomThrough",
+        "name": "穿越缩放",
+        "pack": "treattrans",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional",
+          "glitch"
+        ]
+      },
+      {
+        "id": "doorsOpen",
+        "name": "对开门",
+        "pack": "treattrans",
+        "set": null,
+        "tags": [
+          "graphic",
+          "pop",
+          "emotional"
+        ]
+      },
+      {
+        "id": "blinds",
+        "name": "百叶窗转场",
+        "pack": "treattrans",
+        "set": null,
+        "tags": [
+          "graphic",
+          "editorial",
+          "calm"
+        ]
+      },
+      {
+        "id": "checker",
+        "name": "棋盘格转场",
+        "pack": "treattrans",
+        "set": null,
+        "tags": [
+          "pop",
+          "graphic"
+        ]
+      },
+      {
+        "id": "blockDissolve",
+        "name": "方块崩解",
+        "pack": "treattrans",
+        "set": null,
+        "tags": [
+          "glitch",
+          "graphic"
+        ]
+      },
+      {
+        "id": "whipPan",
+        "name": "急甩横摇",
+        "pack": "treattrans",
+        "set": null,
+        "tags": [
+          "pop",
+          "emotional",
+          "glitch"
+        ]
+      },
+      {
+        "id": "spinOut",
+        "name": "旋转转出",
+        "pack": "treattrans",
+        "set": null,
+        "tags": [
+          "pop",
+          "glitch"
+        ]
+      },
+      {
+        "id": "inkBlob",
+        "name": "墨渍",
+        "pack": "treattrans",
+        "set": null,
+        "tags": [
+          "emotional",
+          "calm",
+          "pop"
+        ]
+      },
+      {
+        "id": "shatterTiles",
+        "name": "磁砖崩落",
+        "pack": "treattrans",
+        "set": null,
+        "tags": [
+          "glitch",
+          "pop",
+          "emotional"
+        ]
+      },
+      {
+        "id": "sliceShift",
+        "name": "长条错位",
+        "pack": "treattrans",
+        "set": null,
+        "tags": [
+          "glitch",
+          "graphic",
+          "pop"
+        ]
+      },
+      {
+        "id": "cubeTurn",
+        "name": "立方体",
+        "pack": "treattrans",
+        "set": null,
+        "tags": [
+          "graphic",
+          "pop"
+        ]
+      },
+      {
+        "id": "flashCross",
+        "name": "闪光转场",
+        "pack": "treattrans",
+        "set": null,
+        "tags": [
+          "emotional",
+          "pop",
+          "calm"
+        ]
+      },
+      {
+        "id": "pixelate",
+        "name": "马赛克转场",
+        "pack": "treattrans",
+        "set": null,
+        "tags": [
+          "glitch",
+          "pop"
+        ]
+      },
+      {
+        "id": "tyRuleWipe",
+        "name": "格线擦换",
+        "pack": "typo",
+        "set": "typo",
+        "tags": [
+          "editorial",
+          "graphic",
+          "calm"
+        ]
+      },
+      {
+        "id": "tyGridCells",
+        "name": "稿纸格填入",
+        "pack": "typo",
+        "set": "typo",
+        "tags": [
+          "editorial",
+          "graphic"
+        ]
+      }
+    ]
+  },
+  "styles": [
+    {
+      "id": "noir",
+      "name": "黑白色差",
+      "description": "黑白基调，加上青色与琥珀色的色彩错位",
+      "set": null
+    },
+    {
+      "id": "crimson",
+      "name": "深红信号",
+      "description": "深红色、单色文字与损坏的数据",
+      "set": null
+    },
+    {
+      "id": "caution",
+      "name": "警示",
+      "description": "黄、红、蓝三色配仪表图形",
+      "set": null
+    },
+    {
+      "id": "magenta",
+      "name": "波普洋红",
+      "description": "亮粉色、圆润粗体与引线标注",
+      "set": null
+    },
+    {
+      "id": "paper",
+      "name": "纸与墨",
+      "description": "纸张质感、靛蓝与洋红，衬线体重影",
+      "set": null
+    },
+    {
+      "id": "hud",
+      "name": "暗色 HUD",
+      "description": "炭灰色、细线框、橙色点缀与日食图形",
+      "set": null
+    },
+    {
+      "id": "mint",
+      "name": "薄荷终端",
+      "description": "黑、青绿与青柠色，带扫描效果",
+      "set": null
+    },
+    {
+      "id": "specimen",
+      "name": "字体样本",
+      "description": "墨色背景配衬线体注释",
+      "set": null
+    },
+    {
+      "id": "transit",
+      "name": "交通标识",
+      "description": "橄榄绿与黄色，标识牌与网点",
+      "set": null
+    },
+    {
+      "id": "blueprint",
+      "name": "蓝图",
+      "description": "蓝、白、黑的图形拼贴",
+      "set": null
+    },
+    {
+      "id": "rouge",
+      "name": "胭脂渐变",
+      "description": "浅灰与红色渐变，配胶囊图形",
+      "set": null
+    },
+    {
+      "id": "mono",
+      "name": "单色 RGB",
+      "description": "灰色空间、白色衬线体与强烈的 RGB 分离",
+      "set": null
+    },
+    {
+      "id": "hrRuin",
+      "name": "废墟",
+      "description": "褪色灰绿、锈红与回响的宋体",
+      "set": "horror"
+    },
+    {
+      "id": "hrNightRec",
+      "name": "深夜录像",
+      "description": "漆黑画面、监控影像的白与红、雪花噪点",
+      "set": "horror"
+    },
+    {
+      "id": "hrCurse",
+      "name": "诅咒之信",
+      "description": "泛黄信纸、褪色墨迹与暗红笔迹",
+      "set": "horror"
+    },
+    {
+      "id": "sakura",
+      "name": "樱花",
+      "description": "柔和的樱粉与梅紫，圆体与衬线体",
+      "set": null
+    },
+    {
+      "id": "ocean",
+      "name": "深海",
+      "description": "藏青、发光的青色、气泡与细黑体",
+      "set": null
+    },
+    {
+      "id": "sunset",
+      "name": "日落渐变",
+      "description": "橙到紫的渐变、粗衬线体与逆光",
+      "set": null
+    },
+    {
+      "id": "forest",
+      "name": "森林笔记",
+      "description": "苔绿、自然纸张与铅笔手写字",
+      "set": null
+    },
+    {
+      "id": "vapor",
+      "name": "蒸汽波",
+      "description": "粉彩粉与蓝，带 VHS 光晕",
+      "set": null
+    },
+    {
+      "id": "newsprint",
+      "name": "新闻纸",
+      "description": "灰色纸张、黑与红，网点套印",
+      "set": null
+    },
+    {
+      "id": "synth80",
+      "name": "80 年代合成器",
+      "description": "黑底配霓虹洋红、青色与扫描线",
+      "set": null
+    },
+    {
+      "id": "kraft",
+      "name": "牛皮纸",
+      "description": "暖色纸张、红与靛蓝印章、纸胶带",
+      "set": null
+    },
+    {
+      "id": "candy",
+      "name": "糖果",
+      "description": "薄荷与水果粉彩，文字弹跳",
+      "set": null
+    },
+    {
+      "id": "acid",
+      "name": "酸性",
+      "description": "黑、酸性绿与洋红，做旧文字",
+      "set": null
+    },
+    {
+      "id": "sumi",
+      "name": "墨与朱",
+      "description": "和纸、毛笔字与朱红印章",
+      "set": null
+    },
+    {
+      "id": "gold",
+      "name": "金色之夜",
+      "description": "深黑、烫金、象牙色衬线体与闪光",
+      "set": null
+    }
+  ]
+}

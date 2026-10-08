@@ -36,6 +36,9 @@ export type EditGraphEffect = {
   type: string
   strength: number
   enabled?: boolean
+  /** 片段内秒；盖章粉尘用它对准进场 */
+  start?: number
+  end?: number
 }
 
 export type EditGraphMask = {
@@ -49,6 +52,9 @@ export type EditGraphMask = {
 export type EditGraphClip = {
   id?: string
   mediaPath: string
+  /** 盖章粉尘按素材像素尺寸换算元素大小；没有粉笔灰时不写 */
+  mediaWidth?: number
+  mediaHeight?: number
   start: number
   duration: number
   inPoint: number
@@ -144,7 +150,7 @@ type ClipIn = {
     content: string; fontFamily: string; fontSize: number; color: string
     align: string; bilingual?: string; strokeWidth: number; strokeColor: string
   }
-  effects?: Array<{ type: string; strength: number; enabled: boolean }>
+  effects?: Array<{ type: string; strength: number; enabled: boolean; start?: number; end?: number }>
   mask?: EditGraphMask
   chromaKey?: { color: string; tolerance: number; enabled: boolean }
   transitionIn?: { type: string; duration: number }
@@ -162,7 +168,7 @@ type ClipIn = {
 export function buildEditGraph(input: {
   clips: ClipIn[]
   tracks: Array<{ id: string; kind: string; muted?: boolean }>
-  media: Array<{ id: string; path?: string; kind?: string }>
+  media: Array<{ id: string; path?: string; kind?: string; width?: number; height?: number }>
   settings: { width: number; height: number; fps: number }
   workIn: number
   workOut: number
@@ -199,9 +205,11 @@ export function buildEditGraph(input: {
       const rawKind = c.text ? 'text' : c.solid ? 'solid' : (m?.kind || undefined)
       // 导出与预览对齐：sticker（水印/贴图）按静图叠层
       const kind = rawKind === 'sticker' ? 'image' : rawKind
+      const dust = (c.effects ?? []).some((e) => e.type === 'chalkDust' && e.enabled !== false && e.strength > 0)
       return {
         ...(c.id ? { id: c.id } : {}),
         mediaPath: m?.path || '',
+        ...(dust && m?.width && m?.height ? { mediaWidth: m.width, mediaHeight: m.height } : {}),
         start: c.start,
         duration: c.duration,
         inPoint: c.inPoint,
@@ -244,7 +252,10 @@ export function buildEditGraph(input: {
           : undefined,
         effects: (c.effects ?? [])
           .filter((e) => e.enabled && e.strength > 0)
-          .map((e) => ({ type: e.type, strength: e.strength, enabled: true })),
+          .map((e) => ({
+            type: e.type, strength: e.strength, enabled: true as const,
+            ...(e.type === 'chalkDust' ? { start: e.start, end: e.end } : {}),
+          })),
         mask: c.mask
           ? {
               type: c.mask.type,

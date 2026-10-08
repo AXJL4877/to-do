@@ -25,7 +25,11 @@ app.whenReady().then(async () => {
     const result = await win.webContents.executeJavaScript(readFileSync(${JSON.stringify(resolve(out, 'bundle.js'))}, 'utf8') + '\\nwindow.dynamicTests');
     if (result.gallery) writeFileSync(${JSON.stringify(resolve(out, 'gallery.png'))}, Buffer.from(result.gallery.split(',')[1], 'base64'));
     if (result.exportFixtures) writeFileSync(${JSON.stringify(resolve(out, 'export-fixtures.json'))}, JSON.stringify(result.exportFixtures));
+    writeFileSync(${JSON.stringify(resolve(out, 'full-export-fixtures.json'))}, JSON.stringify(result.fullExportFixtures));
+    delete result.fullExportFixtures;
     delete result.exportFixtures;
+    if (result.fullGallery) writeFileSync(${JSON.stringify(resolve(out, 'full-gallery.png'))}, Buffer.from(result.fullGallery.split(',')[1], 'base64'));
+    delete result.fullGallery;
     delete result.gallery;
     writeFileSync(${JSON.stringify(resolve(out, 'results.json'))}, JSON.stringify(result, null, 2));
     console.log(JSON.stringify(result, null, 2));

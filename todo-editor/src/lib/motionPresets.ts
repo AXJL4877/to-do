@@ -1,8 +1,8 @@
-import type { Clip, Ease, Keyframe } from '../types'
+import type { Clip, Ease, EffectInstance, Keyframe } from '../types'
 import { uid } from '../types'
 import { sampleKeyframes, snapToFrame } from './keyframeEval'
 
-export type MotionProp = 'x' | 'y' | 'scale' | 'rotation' | 'opacity'
+export type MotionProp = 'x' | 'y' | 'scale' | 'scaleY' | 'rotation' | 'opacity'
 export type PresetGroup = 'loop' | 'in' | 'out' | 'emph'
 export type ParamValue = number | string
 export type ParamValues = Record<string, ParamValue>
@@ -131,6 +131,25 @@ function piecewise(u: number, pts: [number, number][]) {
     }
   }
   return pts[pts.length - 1][1]
+}
+
+/** 盖章进度：y 为行程比例（负值在上方），sx/sy 为缩放倍率，结束时回到 0 / 1 / 1 */
+export function stampPose(u: number): { y: number; sx: number; sy: number; op: number } {
+  const impact = 0.36
+  if (u >= 0.999) return { y: 0, sx: 1, sy: 1, op: 1 }
+  if (u <= 0) return { y: -1, sx: 1.08, sy: 1.14, op: 0 }
+  if (u < impact) {
+    const p = (u / impact) ** 2.2
+    return { y: -(1 - p), sx: 1.08 - 0.08 * p, sy: 1.14 - 0.14 * p, op: p ** 0.72 }
+  }
+  const q = (u - impact) / (1 - impact)
+  if (q < 0.24) {
+    const k = q / 0.24
+    return { y: 0.04 * (1 - k), sx: 1.12 - 0.12 * k, sy: 0.78 + 0.22 * k, op: 1 }
+  }
+  const k = (q - 0.24) / 0.76
+  const bounce = Math.sin(k * Math.PI) * (1 - k)
+  return { y: 0, sx: 1 - 0.03 * bounce, sy: 1 + 0.06 * bounce, op: 1 }
 }
 
 const fadeInCh = (on: ParamValue, portion = 0.4): Channel[] =>
@@ -292,6 +311,19 @@ export const MOTION_PRESETS: MotionPreset[] = [
         { kind: 'fn', prop: 'rotation', f: (u) => a * (1 - e(u)) },
         { kind: 'fn', prop: dx ? 'x' : 'y', f: (u) => (dx || dy) * 0.3 * (1 - Math.min(1, e(u))) },
         ...fadeInCh('on', 0.25),
+      ]
+    },
+  },
+  {
+    id: 'stampIn', name: '盖章', desc: '从上方砸到原位，压扁一下，并扬起粉笔灰', group: 'in',
+    params: [P.dist(16, 40, '高度'), P.dur(0.75), { key: 'dust', label: '粉尘', type: 'range', min: 0, max: 100, step: 1, default: 70, unit: '%' }],
+    build: (v) => {
+      const travel = pct(v, 'dist')
+      return [
+        { kind: 'fn', prop: 'y', f: (u) => stampPose(u).y * travel },
+        { kind: 'fn', prop: 'scale', mode: 'mul', f: (u) => stampPose(u).sx },
+        { kind: 'fn', prop: 'scaleY', mode: 'mul', f: (u) => stampPose(u).sy },
+        { kind: 'fn', prop: 'opacity', mode: 'mul', f: (u) => stampPose(u).op },
       ]
     },
   },
@@ -532,6 +564,7 @@ function staticValue(c: Clip, prop: MotionProp): number {
     case 'x': return tr.x
     case 'y': return tr.y
     case 'scale': return tr.scaleX
+    case 'scaleY': return tr.scaleY
     case 'rotation': return tr.rotation
     case 'opacity': return tr.opacity
   }
@@ -587,12 +620,17 @@ export function applyPresetKeyframes(clip: Clip, preset: MotionPreset, values: P
         val = ch.mode === 'mul' ? val * o : val + o
       })
       if (prop === 'opacity') val = clamp01(val)
-      if (prop === 'scale') val = Math.max(0, val)
+      if (prop === 'scale' || prop === 'scaleY') val = Math.max(0, val)
       return { id: uid('kf'), t, value: val, ease }
     })
 
     const kept = (existing ?? []).filter((k) => k.t < a - eps || k.t > b + eps)
     keyframes[prop] = [...kept, ...gen].sort((p, q) => p.t - q.t)
   }
-  return { ...clip, keyframes }
+  const dust = preset.id === 'stampIn' ? Math.max(0, Math.min(1, num(v, 'dust') / 100)) : 0
+  const effects: EffectInstance[] = clip.effects.filter((e) => e.type !== 'chalkDust')
+  if (dust > 0) {
+    effects.push({ id: uid('fx'), type: 'chalkDust', name: '粉笔灰', strength: dust, enabled: true, start: a, end: b })
+  }
+  return { ...clip, keyframes, effects }
 }

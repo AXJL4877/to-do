@@ -86,7 +86,6 @@ export function Timeline({
   const setModal = useApp((s) => s.setModal)
   const exportQueue = useApp((s) => s.exportQueue)
   const timelineH = useApp((s) => s.layout.timelineH)
-  const setLayout = useApp((s) => s.setLayout)
   const popout = isTimelinePopout()
 
   const [ctx, setCtx] = useState<{ x: number; y: number; clipId: string } | null>(null)
@@ -163,8 +162,7 @@ export function Timeline({
     [seq],
   )
 
-  // 轨区高度 = 真实轨道总和，不留空白假轨道
-  // 弹出窗：不吃主窗 timelineH 上限；主窗：轨道变多时自动抬高面板（有屏幕上限），超出才内滚
+  // 主窗遵循用户面板高度，轨道超出时内滚；弹出窗沿用自然高度。
   const RULER_H = 28
   const CHROME_H = 58 // 工具条 + 底栏时间码
   const tracksSum = useMemo(() => seq.tracks.reduce((a, t) => a + t.height, 0), [seq.tracks])
@@ -173,16 +171,7 @@ export function Timeline({
     ? Math.max(280, Math.floor(window.innerHeight * 0.72))
     : 720
   const lanesCap = Math.max(80, Math.min(dockMaxH, timelineH) - CHROME_H)
-  const lanesH = popout ? lanesNatural : Math.min(lanesNatural, lanesCap)
-
-  // 主窗：轨道变多时抬高时间轴面板，避免被旧的 timelineH 卡死
-  useEffect(() => {
-    if (popout || fill) return
-    const need = lanesNatural + CHROME_H
-    if (need <= timelineH) return
-    const next = Math.min(dockMaxH, need)
-    if (next > timelineH) setLayout({ timelineH: next })
-  }, [popout, fill, lanesNatural, timelineH, dockMaxH, setLayout])
+  const lanesH = popout ? lanesNatural : fill ? Math.min(lanesNatural, lanesCap) : lanesCap
 
   // 内容至少铺满可视区；用整数像素避免略超 clientWidth 冒出多余横向滚动条
   const [bodyW, setBodyW] = useState(0)
@@ -956,7 +945,7 @@ export function Timeline({
         'panel nle-timeline flex flex-col min-h-0 min-w-0 w-full overflow-hidden rounded-none border-x-0 border-b-0 select-none',
         fill ? 'flex-1 h-full' : 'shrink-0',
       )}
-      style={popout || fill ? undefined : { height: 'auto', maxHeight: Math.min(dockMaxH, timelineH) }}
+      style={popout || fill ? undefined : { height: Math.min(dockMaxH, timelineH) }}
       data-testid="timeline"
       data-tool={tool}
       onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy' }}
@@ -1050,8 +1039,8 @@ export function Timeline({
       </div>
 
       <div
-        className="flex shrink-0 min-h-0"
-        style={{ height: lanesH, maxHeight: fill ? '100%' : undefined }}
+        className={clsx('flex min-h-0', popout || fill ? 'shrink-0' : 'flex-1')}
+        style={{ height: popout || fill ? lanesH : undefined, maxHeight: fill ? '100%' : undefined }}
       >
         {/* 左侧轨头：顶部留出与标尺同高的占位，否则轨名会整体上移一行对不齐 */}
         <div

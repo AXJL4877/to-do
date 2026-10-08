@@ -400,8 +400,8 @@ async function executeNarratedJob(job, entry, ctx) {
     if (!existsSync(f)) return null
     try {
       const r = JSON.parse(readFileSync(f, 'utf8'))
-      // 老格式（整幅、带黑板底、没有笔尖轨迹）和旧书写效果（上色时手来回扫）的缓存不复用
-      if (!(r.rev >= 2) || !r.scene.elements.every((e) => Array.isArray(e.tip) && e.crop)) return null
+      // 老格式（整幅、带黑板底、没有笔尖轨迹）、上色时手来回扫、以及还没有盖章/渐显进场的缓存不复用
+      if (!(r.rev >= 3) || !r.scene.elements.every((e) => Array.isArray(e.tip) && e.crop && e.enter)) return null
       const files = [r.hand?.file, ...r.scene.elements.flatMap((e) => [e.video, e.hold])].filter(Boolean)
       return files.every((name) => existsSync(path.join(outDir, name))) ? r : null
     } catch { return null }
@@ -537,6 +537,7 @@ async function executeSubtitleJob(job, entry, ctx) {
     audio,
     timing,
     outputs: { prefix: job.id, video: `${job.id}.webm`, still: `${job.id}_still.png`, subtitles: names.subtitles, ass: names.ass },
+    ...(req.chapters ? { chapters: req.chapters } : {}),
   }
   const requestFile = path.join(outDir, `${job.id}_request.json`)
   writeFileSync(requestFile, JSON.stringify(request, null, 2))
@@ -572,6 +573,16 @@ async function executeSubtitleJob(job, entry, ctx) {
       ass: url(result.ass),
       cues: cues.map(({ text, start, end }) => ({ text, start, end })),
     },
+    ...(result.chapterBar ? {
+      chapterBar: {
+        video: url(result.chapterBar.video),
+        width: result.chapterBar.width,
+        height: result.chapterBar.height,
+        barH: result.chapterBar.barH,
+        duration: result.chapterBar.duration,
+        placeAt: result.chapterBar.placeAt,
+      },
+    } : {}),
     manifest: url(`${job.id}.json`),
   }
   writeFileSync(path.join(outDir, `${job.id}.json`), JSON.stringify(output, null, 2))

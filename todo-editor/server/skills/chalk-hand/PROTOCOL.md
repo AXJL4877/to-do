@@ -84,8 +84,9 @@ npm run skill -- fetch  <jobId> --out ./out --wait
 | 节奏 | `drawSpeed` | number | 0.5~3×，步长 0.25 | 1 | 书写速度（§5.3）；总时长跟随配音 |
 | 节奏 | `tail` | number | 0~3 秒，步长 0.5 | 0 | 配音结束后停在最后一块黑板；0 = 画面和配音同时结束 |
 | 节奏 | `fps` | select | `24` `30` | 30 | 帧率 |
-| 笔触 | `hand` | select | `chalk` `none` | chalk | 入轨时是否自动给每个元素套「粉笔手书写」入场动画（元素素材本身不带手） |
+| 笔触 | `hand` | select | `chalk` `none` | chalk | 入轨时是否给手写元素套「粉笔手书写」（盖章和渐显不加手；元素素材本身不带手） |
 | 笔触 | `handSize` | number | 0.6~1.4，步长 0.1 | 1 | 粉笔手图的大小，相对画面短边 |
+| 笔触 | `enter` | select | `mix` `draw` `stamp` `fade` | mix | 进场：混合（主视觉手写、配角渐显、标题盖章扬尘）/ 全部手写 / 全部盖章 / 全部显现 |
 | 笔触 | `stroke` | select | `skeleton` `grid` | skeleton | 沿线条骨架书写 / 块状扫写 |
 | 笔触 | `fill` | select | `wipe` `none` | wipe | 写完淡入颜色 / 只描线。淡入占元素书写时长的 1/10，这段不落笔尖、不出手 |
 | 输出 | `quality` | select | `high` `standard` `draft` | standard | VP9 CRF 24 / 31 / 38 |
@@ -200,7 +201,7 @@ elements 夹具没有配音 / `scenes` / `drawSpeed` / `tail`，换成 `elements
 - `pipeline`：`elements`（默认）、`narrated`（§5）、`production`（本包，见成片框架协议）、`tts`、`subtitle`。`elements` 必须有 `planner` + `assets`，`input.maxLength` ≤1000；`narrated` / `production` 同样要 `planner` + `assets`，不许带 `countParam`，`input.maxLength` 分别 ≤3000 / ≤20000；`tts` / `subtitle` 不许带这两项，`input.maxLength` ≤5000。`/api/ai-skill-plan` 只支持 `elements`。
 - `group` 另可用 `story`（分段与分镜，`production` 管线用）。
 - `id` 形如 `author.skill-name`；`version` 为 `x.y.z`。
-- `params[]`：`select`（1~16 个选项，值 `[a-zA-Z0-9_.:-]{1,32}`，可带 `prompt` 片段）或 `number`（`min max step default`，可带 `unit`）；`group` ∈ `scene voice text timing stroke output`；`when` 只能依赖其它 select。
+- `params[]`：`select`（1~256 个选项，值 `[a-zA-Z0-9_.:-]{1,32}`，可带 `prompt` 片段）或 `number`（`min max step default`，可带 `unit`）；`group` ∈ `scene voice text timing stroke output`；`when` 只能依赖其它 select。
 - `planner.countParam`：须是 `min=0 step=1 max≤maxElements` 的 number 参数。
 - `assets.template`：必须含 `{{draw}}`；占位符只能是 `draw label role` 或「每个选项都有 prompt」的 select 参数 id。
 - `runtime`：v1 只支持 `python`，`entry` 须为包内 `.py` 相对路径，`timeoutSec` 30~7200。
@@ -276,10 +277,11 @@ elements 夹具没有配音 / `scenes` / `drawSpeed` / `tail`，换成 `elements
 }
 ```
 
-- 本块抠图后按 `layout` 排出默认位置，每个元素在整幅画布上单独书写，但写帧时**裁到元素自己的框**（`box` 外扩 8px、宽高取偶数，记为 `crop`）：一条透明 WebM（VP9 + alpha，只有笔画、不带手），时长 = 书写时长 + 200ms；写完存一张同尺寸的透明定格 PNG。
-- 逐帧记下笔尖位置，按每秒最多 15 个点输出 `tip: [[素材秒, u, v], …]`（u/v 为 `crop` 内 0~1 坐标，只覆盖落笔区间）。
+- 本块抠图后按 `layout` 排出默认位置。每个元素一条透明 WebM（VP9 + alpha，不带手）+ 同尺寸定格 PNG。`enter=mix`（默认）时：`hero` 手写，`support` 渐渐显现，`accent` 下压盖章并扬起粉笔灰；一整板算出来都是同一种时，从第二个元素起改用另外两种。元素自己带了 `enter`（`draw` / `stamp` / `fade`）就照它。`params.enter` 为 `draw` / `stamp` / `fade` 时整板统一。
+- 手写仍裁到元素框外扩 8px。盖章额外留出约短边 34% 的空给下压和粉尘，渐显留出约 5% 给虚化边；宽高取偶数，记为 `crop`。时长 = 进场时长 + 200ms。
+- 手写才逐帧记笔尖，按每秒最多 15 个点输出 `tip: [[素材秒, u, v], …]`（u/v 为 `crop` 内 0~1 坐标，只覆盖落笔区间）。盖章和渐显的 `tip` 为 `[]`，编辑器不加粉笔手。
 - 粉笔手单独写一张透明 PNG `<prefix>_hand.png`（尺寸按画幅短边 × `handSize`，已存在不重写），`@result.hand` 带 `width height tipX tipY`（笔尖在图里的 0~1 位置）。
-- **书写速度**：元素书写时长 = 角色基准（hero 3.2s / support 2.4s / accent 1.5s）× 墨量系数（本板面积比的平方根，夹在 0.7~1.5）÷ `drawSpeed`，再夹进书写窗口（最短 0.6s）。速度越大画得越快，画完停在画面上；无论多慢都不会拖到下一个元素。
+- **书写速度**：手写时长 = 角色基准（hero 3.2s / support 2.4s / accent 1.5s）× 墨量系数（本板面积比的平方根，夹在 0.7~1.5）÷ `drawSpeed`，再夹进书写窗口（最短 0.6s）。盖章约 0.76s、渐显约 1.08s，同样除以速度并夹进窗口（最短约 0.4s / 0.48s）。速度越大进场越快，画完停在画面上；无论多慢都不会拖到下一个元素。
 
 `@result`：
 
@@ -287,7 +289,7 @@ elements 夹具没有配音 / `scenes` / `drawSpeed` / `tail`，换成 `elements
 { "alpha": true, "width": 1280, "height": 720, "fps": 30,
   "hand": { "file": "s_…_hand.png", "width": 480, "height": 720, "tipX": 0.0104, "tipY": 0.0501 },
   "scene": { "id": "s1", "startMs": 0, "endMs": 7705, "layout": "…", "elements": [
-    { "id": "s1e1", "label": "…", "role": "hero", "box": [x, y, w, h], "crop": [x, y, w, h], "startMs": 305, "durationMs": 3200, "frames": 102,
+    { "id": "s1e1", "label": "…", "role": "hero", "enter": "draw", "box": [x, y, w, h], "crop": [x, y, w, h], "startMs": 305, "durationMs": 3200, "frames": 102,
       "video": "s_…_s1_s1e1.webm", "hold": "s_…_s1_s1e1_hold.png", "tip": [[0.1, 0.21, 0.3], "…"], "mask": "…", "cut": "…" }
   ] } }
 ```

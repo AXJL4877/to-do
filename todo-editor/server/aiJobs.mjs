@@ -162,12 +162,13 @@ export function enqueueAiJob(body) {
     autoTimeline: !!body.autoTimeline,
     width: body.width || null,
     height: body.height || null,
-    /** texture = 花字纹理，由花字面板取用，不入媒体库 */
-    purpose: body.purpose === 'texture' ? 'texture' : undefined,
+    /** texture / douyin-cover：专用面板取用，不进媒体库自动入库 */
+    purpose: body.purpose === 'texture' || body.purpose === 'douyin-cover' ? body.purpose : undefined,
   }
 
   let refPath = null
-  if (body.imageDataUrl) {
+  // 抖音封面强制纯文生图：即使误传 imageDataUrl 也不落参考图
+  if (params.purpose !== 'douyin-cover' && body.imageDataUrl) {
     const b64 = String(body.imageDataUrl).replace(/^data:image\/\w+;base64,/, '')
     refPath = path.join(AI_OUT, `${id}_ref.png`)
     writeFileSync(refPath, Buffer.from(b64, 'base64'))
@@ -292,6 +293,34 @@ function subtitleSource(body) {
   return source
 }
 
+/** 顶部进度条：1～6 个章名，时间相对 placeAt。没有就关。 */
+function chapterRequest(body) {
+  const raw = body.chapters
+  if (raw == null) return null
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('章节进度条格式不对')
+  const titles = Array.isArray(raw.titles) ? raw.titles.map((t) => String(t).trim()) : []
+  if (titles.length < 1 || titles.length > 6) throw new Error('进度条需要 1～6 个章名')
+  if (titles.some((t) => [...t].length < 1 || [...t].length > 8)) throw new Error('章名请控制在 8 个字以内')
+  const duration = Number(raw.duration)
+  const placeAt = Number(raw.placeAt)
+  if (!(duration > 0.05) || duration > 6 * 3600) throw new Error('进度条时长不对')
+  if (!Number.isFinite(placeAt) || placeAt < 0 || placeAt > 6 * 3600) throw new Error('进度条起点不对')
+  if (!Array.isArray(raw.ranges) || raw.ranges.length !== titles.length) throw new Error('进度条分段和章名数量不一致')
+  const ranges = raw.ranges.map((r, i) => {
+    const a = Number(r?.[0])
+    const b = Number(r?.[1])
+    if (!Number.isFinite(a) || !Number.isFinite(b) || b <= a + 0.01) throw new Error(`进度条第 ${i + 1} 段时间不对`)
+    if (a < -0.05 || b > duration + 0.05) throw new Error(`进度条第 ${i + 1} 段超出整段时长`)
+    return [Math.round(a * 1000) / 1000, Math.round(Math.min(duration, b) * 1000) / 1000]
+  })
+  return {
+    titles,
+    duration: Math.round(duration * 1000) / 1000,
+    placeAt: Math.round(placeAt * 1000) / 1000,
+    ranges,
+  }
+}
+
 /**
  * 成片运行入队：同一成片已有排队中的运行就合并范围（不重复排两次），否则新开一条。
  * body: { scope?, stopAfter?, autoTimeline?, placement?, placeAt? }
@@ -352,6 +381,7 @@ function enqueueSkillJob(body) {
     return enqueueProductionRun(doc.id, body)
   }
   const source = entry.pack.pipeline === 'subtitle' ? subtitleSource(body) : null
+  const chapters = entry.pack.pipeline === 'subtitle' ? chapterRequest(body) : null
   // 语音识别没有文案，任务标题用素材名；渲染端不读它
   const prompt = !source ? body.prompt : source.mode === 'asr' ? `语音识别 · ${source.name}` : source.text
   const compiled = compileSkillJob(entry, { prompt, params: body.params, plan: body.plan })
@@ -382,7 +412,7 @@ function enqueueSkillJob(body) {
     width: w || null,
     height: h || null,
     skill: compiled.meta,
-    request: { skillId: compiled.meta.id, prompt: compiled.prompt, params: compiled.params, plan: compiled.plan, ...(source ? { source } : {}) },
+    request: { skillId: compiled.meta.id, prompt: compiled.prompt, params: compiled.params, plan: compiled.plan, ...(source ? { source } : {}), ...(chapters ? { chapters } : {}) },
     output: null,
   }
   insertJob.run(id, 'skill', compiled.prompt, JSON.stringify(params), null, now, now)
@@ -537,8 +567,9 @@ async function runImageJob(job) {
 
   const config = readAiConfig({ revealKey: true })
   const row = getJob.get(job.id)
+  // 抖音封面等文生图任务禁止带参考图，否则第一次会按残留/示例图改图
   let imageDataUrl = ''
-  if (row?.ref_path && existsSync(row.ref_path)) {
+  if (params.purpose !== 'douyin-cover' && row?.ref_path && existsSync(row.ref_path)) {
     const buf = readFileSync(row.ref_path)
     const ext = path.extname(row.ref_path).slice(1).toLowerCase()
     const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'webp' ? 'image/webp' : 'image/png'
@@ -550,7 +581,7 @@ async function runImageJob(job) {
     model: params.model || 'gpt-image-2',
     size: params.size || '',
     quality: params.quality || '',
-    imageDataUrl,
+    imageDataUrl: imageDataUrl || undefined,
   })
 
   setPhase.run('下载图片…', Date.now(), job.id)

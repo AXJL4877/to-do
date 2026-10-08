@@ -66,6 +66,7 @@ app.on('web-contents-created', (_e, wc) => {
 })
 
 function appUrl(search = '') {
+  // electron:dev 会写入实际端口；5173 只留给单独先起的 npm run dev
   const base = (process.env.VITE_DEV_SERVER_URL || 'http://127.0.0.1:5173').replace(/\/$/, '')
   return search ? `${base}${search.startsWith('?') ? search : `?${search}`}` : base
 }

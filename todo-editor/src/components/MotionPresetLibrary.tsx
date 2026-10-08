@@ -9,6 +9,7 @@ import {
   applyPresetKeyframes, defaultValues, findMotionPreset, MOTION_PRESETS, PRESET_GROUPS, presetDuration,
   resolveValues, type MotionPreset, type ParamValues, type PresetGroup,
 } from '../lib/motionPresets'
+import { elementDustSpread, paintStampDust, stampDustSpecks } from '../lib/stampDust'
 
 interface CustomPreset { id: string; name: string; base: string; values: ParamValues }
 
@@ -43,30 +44,56 @@ function PresetPreview({ preset, values, active, className }: {
 }) {
   const wrapRef = useRef<HTMLDivElement>(null)
   const boxRef = useRef<HTMLDivElement>(null)
+  const dustRef = useRef<HTMLCanvasElement>(null)
   const plan = useMemo(() => previewPlan(preset, values), [preset, values])
 
   useEffect(() => {
     const el = boxRef.current
     const wrap = wrapRef.current
     if (!el || !wrap) return
-    if (!active) { el.style.transform = ''; el.style.opacity = ''; return }
+    const dustFx = plan.clip.effects.find((e) => e.enabled && e.type === 'chalkDust' && e.strength > 0)
+    if (!active) {
+      el.style.transform = ''
+      el.style.opacity = ''
+      const canvas = dustRef.current
+      canvas?.getContext('2d')?.clearRect(0, 0, canvas.width, canvas.height)
+      return
+    }
     let raf = 0
     const start = performance.now()
     const tick = (now: number) => {
       const t = Math.min(plan.T, ((now - start) / 1000) % plan.loop)
       const tr = resolveClipTransform(plan.clip, t)
       const hw = wrap.clientWidth / 2, hh = wrap.clientHeight / 2
-      el.style.transform = `translate(${tr.x * hw}px, ${tr.y * hh}px) rotate(${tr.rotation}deg) scale(${tr.scaleX})`
+      el.style.transform = `translate(${tr.x * hw}px, ${tr.y * hh}px) rotate(${tr.rotation}deg) scale(${tr.scaleX}, ${tr.scaleY})`
       el.style.opacity = String(tr.opacity)
+      const canvas = dustRef.current
+      const ctx = canvas?.getContext('2d')
+      if (canvas && ctx) {
+        const cw = wrap.clientWidth, ch = wrap.clientHeight
+        if (canvas.width !== cw || canvas.height !== ch) { canvas.width = cw; canvas.height = ch }
+        ctx.clearRect(0, 0, cw, ch)
+        if (dustFx && plan.T > 0) {
+          const bw = Math.max(8, el.offsetWidth)
+          const bh = Math.max(8, el.offsetHeight)
+          paintStampDust(ctx, stampDustSpecks(
+            preset.id, t / plan.T,
+            cw / 2 + tr.x * hw, ch / 2 + tr.y * hh,
+            elementDustSpread(bw, bh, bw, bh, 1, 1),
+            dustFx.strength,
+          ))
+        }
+      }
       raf = requestAnimationFrame(tick)
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
-  }, [active, plan])
+  }, [active, plan, preset.id])
 
   return (
-    <div ref={wrapRef} className={clsx('grid place-items-center rounded-md overflow-hidden', className)} style={{ background: 'var(--surface-2)' }}>
+    <div ref={wrapRef} className={clsx('relative grid place-items-center rounded-md overflow-hidden', className)} style={{ background: 'var(--surface-2)' }}>
       <div ref={boxRef} className="w-5 h-5 rounded-[4px]" style={{ background: 'var(--accent)' }} />
+      <canvas ref={dustRef} className="absolute inset-0 w-full h-full pointer-events-none" />
     </div>
   )
 }

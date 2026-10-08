@@ -440,12 +440,14 @@ export function DouyinPublishPanel() {
     if (headline !== title) setTitle(headline)
     setCoverBusy(true)
     try {
+      const brief = await resolvePublishBrief({ projectName, script: script || publishScript })
       const r = await generateDouyinCover({
         title: headline,
         styleHint: pickCoverStyleHint({
           formHint: styleHintRef.current,
           seedHint: seedStyleHint(useApp.getState().coverSeed),
         }),
+        script: brief.script || script || publishScript,
         quality: '1K',
         onProgress: (m) => setCoverMsg(m),
       })
@@ -454,12 +456,12 @@ export function DouyinPublishPanel() {
       if (tab === 'publish' && selected) {
         const attached = await desktop()?.douyinAttachCover?.({ slug: selected, coverPath: r.path })
         if (attached?.ok) {
-          setCoverMsg('封面已写入资产')
+          setCoverMsg('封面已按文案生成并写入资产')
           await refreshAssets()
           return
         }
       }
-      setCoverMsg('封面已生成（标题已画进画面）')
+      setCoverMsg('封面已按文案生成（标题画进画面）')
     } catch (e) {
       setCoverMsg(e instanceof Error ? e.message : String(e))
     } finally {
@@ -484,18 +486,19 @@ export function DouyinPublishPanel() {
         briefTitle: brief.title,
         projectName,
       })
+      const spoken = brief.script || script || publishScript
       const coverHint = pickCoverStyleHint({
         formHint: styleHintRef.current,
         seedHint: seedStyleHint(useApp.getState().coverSeed),
         briefHint: brief.styleHint,
       })
       setMetaMsg('文案生成中…')
-      setCoverMsg('封面生成中…')
+      setCoverMsg('按口播文案生成封面…')
       await runIndependentTasks([
         {
           run: () => fetchDouyinMeta({
             projectName: projectName || coverTitle,
-            script: brief.script || script || publishScript,
+            script: spoken,
             hint: coverTitle !== projectName ? coverTitle : undefined,
           }),
           onSuccess: (meta) => {
@@ -503,7 +506,7 @@ export function DouyinPublishPanel() {
             setCaption(meta.caption)
             setTags(meta.tags.join(','))
             if (tab === 'stage') setSlug(defaultSlug(meta.title))
-            setMetaMsg('文案已生成')
+            setMetaMsg('文案已生成（按本片口播）')
           },
           onError: e => setMetaMsg(e instanceof Error ? e.message : String(e)),
           onFinally: () => setMetaBusy(false),
@@ -512,18 +515,22 @@ export function DouyinPublishPanel() {
           run: () => generateDouyinCover({
             title: coverTitle,
             styleHint: coverHint,
+            script: spoken,
             quality: '1K',
             onProgress: setCoverMsg,
           }),
           onSuccess: async (cover) => {
             setCoverPath(cover.path)
             setCoverPreview(withBust(cover.previewUrl, cover.jobId))
-            setCoverMsg('封面已生成')
+            let note = '封面已按文案生成'
             if (tab === 'publish' && selected) {
               const attached = await desktop()?.douyinAttachCover?.({ slug: selected, coverPath: cover.path })
-              setCoverMsg(attached?.ok ? '封面已写入资产' : '封面已生成')
-              if (attached?.ok) await refreshAssets()
+              if (attached?.ok) {
+                note = `${note} · 已写入资产`
+                await refreshAssets()
+              }
             }
+            setCoverMsg(note)
           },
           onError: e => setCoverMsg(e instanceof Error ? e.message : String(e)),
           onFinally: () => setCoverBusy(false),
@@ -581,6 +588,7 @@ export function DouyinPublishPanel() {
           briefTitle: brief.title,
           projectName,
         })
+        const spoken = brief.script || script || publishScript
         const coverHint = pickCoverStyleHint({
           formHint: styleHintRef.current,
           seedHint: seedStyleHint(useApp.getState().coverSeed),
@@ -588,11 +596,11 @@ export function DouyinPublishPanel() {
         })
         setMsg('文案与封面并行生成…')
         setMetaMsg('文案生成中…')
-        setCoverMsg('封面生成中…')
+        setCoverMsg('按口播文案生成封面…')
         try {
           const { meta, cover } = await generateMetaAndCover({
             projectName: projectName || coverTitle,
-            script: brief.script || script || publishScript,
+            script: spoken,
             coverTitle,
             styleHint: coverHint,
             onProgress: (m) => setMsg(m),
@@ -608,8 +616,8 @@ export function DouyinPublishPanel() {
           setSlug(nextSlug)
           setCoverPath(cover.path)
           setCoverPreview(withBust(cover.previewUrl, cover.jobId))
-          setMetaMsg('文案已生成')
-          setCoverMsg('封面已生成')
+          setMetaMsg('文案已生成（按本片口播）')
+          setCoverMsg('封面已按文案生成')
         } finally {
           setMetaBusy(false)
           setCoverBusy(false)
@@ -977,6 +985,87 @@ export function DouyinPublishPanel() {
                 ) : null}
               </div>
 
+              <div
+                className="rounded-lg p-3 grid gap-2"
+                style={{ border: '1px solid var(--border)', background: 'var(--surface-1)' }}
+                data-testid="dy-ai-actions"
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  {tab === 'stage' ? (
+                    <button
+                      type="button"
+                      className="btn btn-primary text-[12px]"
+                      data-testid="dy-ai-all"
+                      disabled={actionBusy || metaBusy || coverBusy}
+                      title="按本片口播写文案与封面（纯文生图），再写入资产库"
+                      onClick={() => { void stage({ withAi: true }) }}
+                    >
+                      {actionBusy || (metaBusy && coverBusy) ? '处理中…' : '一键：文案+封面+投放'}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="btn btn-primary text-[12px]"
+                      data-testid="dy-ai-parallel"
+                      disabled={metaBusy || coverBusy}
+                      title="文案与封面都按口播生成，互不等待"
+                      onClick={() => { void runMetaAndCoverParallel() }}
+                    >
+                      {metaBusy && coverBusy ? '生成中…' : '一键：文案+封面'}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="btn btn-ghost text-[11px]"
+                    data-testid="dy-ai-meta"
+                    disabled={metaBusy}
+                    onClick={() => { void writeMeta() }}
+                  >
+                    {metaBusy ? '文案生成中…' : '只写文案'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost text-[11px]"
+                    data-testid="dy-ai-cover"
+                    disabled={coverBusy}
+                    title="按口播文案纯文生图，不抽帧、不用参考图"
+                    onClick={() => { void makeCover() }}
+                  >
+                    {coverBusy ? '封面生成中…' : '只生封面'}
+                  </button>
+                  {tab === 'publish' ? (
+                    <button
+                      type="button"
+                      className="btn btn-ghost text-[11px] ml-auto"
+                      data-testid="dy-save-meta"
+                      disabled={actionBusy || metaBusy}
+                      onClick={() => { void (async () => {
+                        setActionBusy(true)
+                        const ok = await savePublishMeta()
+                        if (ok) setMsg('文案已写回资产')
+                        setActionBusy(false)
+                      })() }}
+                    >
+                      保存文案
+                    </button>
+                  ) : null}
+                </div>
+                <p className="text-[11px] m-0" style={{ color: 'var(--text-muted)' }}>
+                  简介与封面都按本工程口播文案；封面纯文生图（不抽帧、不用参考图），避免第一次被示例图带偏。
+                </p>
+                {(metaBusy || coverBusy) ? (
+                  <div className="grid gap-1.5">
+                    {metaBusy ? <CreativeProgress theme="type" compact label={metaMsg || '正在写标题与简介…'} /> : null}
+                    {coverBusy ? <CreativeProgress theme="brush" compact label={coverMsg || '按文案绘制竖封面…'} /> : null}
+                  </div>
+                ) : (metaMsg || coverMsg) ? (
+                  <div className="grid gap-0.5 text-[10px]">
+                    {metaMsg ? <div style={{ color: /失败|错误|超时/.test(metaMsg) ? 'var(--accent)' : 'var(--text-muted)' }}>{metaMsg}</div> : null}
+                    {coverMsg ? <div style={{ color: /失败|错误|超时|请先/.test(coverMsg) ? 'var(--accent)' : 'var(--text-muted)' }}>{coverMsg}</div> : null}
+                  </div>
+                ) : null}
+              </div>
+
               <div className="grid gap-3" style={{ gridTemplateColumns: '140px 1fr' }}>
                 <div className="grid gap-2">
                   <div
@@ -994,83 +1083,12 @@ export function DouyinPublishPanel() {
                       <span className="text-[11px] px-2 text-center" style={{ color: 'var(--text-muted)' }}>竖封面 3:4</span>
                     )}
                   </div>
-                  <button
-                    type="button"
-                    className="btn btn-ghost text-[11px]"
-                    data-testid="dy-ai-cover"
-                    disabled={coverBusy}
-                    onClick={() => { void makeCover() }}
-                  >
-                    {coverBusy ? '封面生成中…' : 'AI 生成封面'}
-                  </button>
                   <button type="button" className="btn btn-ghost text-[11px]" disabled={coverBusy} onClick={() => { void pickCover() }}>
                     换本机图
                   </button>
-                  {coverBusy ? (
-                    <CreativeProgress theme="brush" compact label={coverMsg || '笔刷绘制竖封面…'} />
-                  ) : coverMsg ? (
-                    <div className="text-[10px] leading-snug" style={{ color: /失败|错误|超时|请先/.test(coverMsg) ? 'var(--accent)' : 'var(--text-muted)' }}>
-                      {coverMsg}
-                    </div>
-                  ) : null}
                 </div>
 
                 <div className="grid gap-2 content-start">
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      className="btn btn-ghost text-[11px]"
-                      data-testid="dy-ai-meta"
-                      disabled={metaBusy}
-                      onClick={() => { void writeMeta() }}
-                    >
-                      {metaBusy ? '文案生成中…' : 'AI 写文案'}
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-ghost text-[11px]"
-                      data-testid="dy-ai-parallel"
-                      disabled={metaBusy || coverBusy}
-                      title="文案与封面同时跑，互不等待"
-                      onClick={() => { void runMetaAndCoverParallel() }}
-                    >
-                      {metaBusy && coverBusy ? '并行中…' : '文案+封面并行'}
-                    </button>
-                    {tab === 'stage' ? (
-                      <button
-                        type="button"
-                        className="btn btn-primary text-[11px]"
-                        data-testid="dy-ai-all"
-                        disabled={actionBusy || metaBusy || coverBusy}
-                        onClick={() => { void stage({ withAi: true }) }}
-                      >
-                        {actionBusy || (metaBusy && coverBusy) ? '处理中…' : '一键：文案+封面+投放'}
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        className="btn btn-ghost text-[11px]"
-                        data-testid="dy-save-meta"
-                        disabled={actionBusy || metaBusy}
-                        onClick={() => { void (async () => {
-                          setActionBusy(true)
-                          const ok = await savePublishMeta()
-                          if (ok) setMsg('文案已写回资产')
-                          setActionBusy(false)
-                        })() }}
-                      >
-                        保存文案
-                      </button>
-                    )}
-                  </div>
-                  {metaBusy ? (
-                    <CreativeProgress theme="type" compact label={metaMsg || '正在写标题与简介…'} />
-                  ) : metaMsg ? (
-                    <div className="text-[10px]" style={{ color: /失败|错误|超时/.test(metaMsg) ? 'var(--accent)' : 'var(--text-muted)' }}>
-                      {metaMsg}
-                    </div>
-                  ) : null}
-
                   <div className="field">
                     <label>标题</label>
                     <input data-testid="dy-title" value={title} onChange={(e) => setTitle(e.target.value)} />
@@ -1083,29 +1101,32 @@ export function DouyinPublishPanel() {
                     <label>标签（逗号分隔）</label>
                     <input data-testid="dy-tags" value={tags} onChange={(e) => setTags(e.target.value)} />
                   </div>
-                  <div className="field">
-                    <label>封面风格（生图）</label>
-                    <input data-testid="dy-style" value={styleHint} onChange={(e) => setStyleHint(e.target.value)} />
-                  </div>
+                  <details className="text-[11px]" data-testid="dy-style-details">
+                    <summary className="cursor-pointer" style={{ color: 'var(--text-muted)' }}>封面高级选项</summary>
+                    <div className="field mt-2">
+                      <label>风格补充（题材仍跟口播文案）</label>
+                      <input data-testid="dy-style" value={styleHint} onChange={(e) => setStyleHint(e.target.value)} />
+                    </div>
+                    {tab === 'stage' ? (
+                      <div className="field mt-2">
+                        <label>文件夹名</label>
+                        <input data-testid="dy-slug" value={slug} onChange={(e) => setSlug(e.target.value)} />
+                      </div>
+                    ) : null}
+                  </details>
                 </div>
               </div>
 
               {tab === 'stage' ? (
-                <>
-                  <div className="field">
-                    <label>文件夹名</label>
-                    <input data-testid="dy-slug" value={slug} onChange={(e) => setSlug(e.target.value)} />
-                  </div>
-                  <button
-                    type="button"
-                    className="btn btn-ghost"
-                    data-testid="dy-stage"
-                    disabled={actionBusy || anyBusy}
-                    onClick={() => { void stage() }}
-                  >
-                    仅投放（用当前文案/封面）· {activeVideoName || '无视频'}
-                  </button>
-                </>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  data-testid="dy-stage"
+                  disabled={actionBusy || anyBusy}
+                  onClick={() => { void stage() }}
+                >
+                  仅投放当前文案/封面 · {activeVideoName || '无视频'}
+                </button>
               ) : (
                 <div
                   className="rounded-lg p-3 grid gap-2"
