@@ -21,6 +21,7 @@ import { startNarratedTimelineSync } from './lib/narratedTimeline'
 import { startChalkHandFollow } from './lib/chalkHand'
 import { stepZoom } from './lib/timelineZoom'
 import { PanelBottomClose } from 'lucide-react'
+import { bindExtensionDropImport } from './lib/extensionImport'
 
 const TIMELINE_POPOUT = isTimelinePopout()
 const AI_POPOUT = isAiPopout()
@@ -39,6 +40,15 @@ export default function App() {
   const setTimelineFloat = useApp((s) => s.setTimelineFloat)
   const setAiFloat = useApp((s) => s.setAiFloat)
   const fileRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => bindExtensionDropImport({
+    onMessage: message => useApp.getState().setToast(message),
+    onInstalled: extension => useApp.getState().setLibraryTab(extension.kind === 'skill' ? 'skill' : 'ai'),
+    onMedia: async files => {
+      const { parseMediaFiles } = await import('./lib/importFiles')
+      useApp.getState().importMedia(await parseMediaFiles(files))
+    },
+  }), [])
 
   useEffect(() => {
     return initStoreSync()
@@ -197,6 +207,9 @@ export default function App() {
     }
 
     const onKey = (e: KeyboardEvent) => {
+      // Separators own arrow keys, including modified arrows. This listener
+      // runs in capture phase, before their local keyboard handlers.
+      if (e.target instanceof HTMLElement && e.target.closest('[role="separator"]') && e.key.startsWith('Arrow')) return
       const s = useApp.getState()
       const mod = e.ctrlKey || e.metaKey
       if (s.transformGesture) return
@@ -418,7 +431,7 @@ export default function App() {
     )
   }
 
-  if (!started) return <StartScreen />
+  if (!started) return <><StartScreen />{toast && <div className="toast" data-testid="toast">{toast}</div>}</>
 
   if (fullscreen) {
     return (

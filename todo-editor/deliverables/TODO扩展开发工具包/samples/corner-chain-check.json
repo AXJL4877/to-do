@@ -1,0 +1,176 @@
+{
+  "spec": "todo-extension-check-report/1",
+  "source": "D:\\desktop\\to_do\\todo-editor\\examples\\extensions\\corner-chain",
+  "startedAt": "2026-10-09T07:17:46.500Z",
+  "ok": true,
+  "checks": [
+    {
+      "id": "format",
+      "ok": true,
+      "bytes": 7700,
+      "sourceDigest": "1247f5b93acd380caa7898efdf41f9f0fb756b4f547d94a9d0f68dc07076d5d9"
+    },
+    {
+      "id": "isolated-install",
+      "ok": true,
+      "action": "installed",
+      "reinstall": "unchanged"
+    },
+    {
+      "id": "acceptance-plan",
+      "ok": true,
+      "required": [
+        "runtime",
+        "timeline",
+        "editing",
+        "cache",
+        "export"
+      ],
+      "checks": 6
+    },
+    {
+      "id": "host-build",
+      "ok": true,
+      "covers": [
+        "host"
+      ],
+      "mode": "offline",
+      "argv": [
+        "node",
+        "node_modules/typescript/bin/tsc",
+        "--noEmit"
+      ],
+      "durationMs": 10680,
+      "artifacts": [],
+      "log": ""
+    },
+    {
+      "id": "production-cache",
+      "ok": true,
+      "covers": [
+        "runtime",
+        "cache"
+      ],
+      "mode": "mock",
+      "argv": [
+        "node",
+        "scripts/test-corner-production.mjs"
+      ],
+      "durationMs": 368,
+      "artifacts": [
+        {
+          "path": "D:\\desktop\\to_do\\todo-editor\\native\\test-output\\corner-chain\\production.json",
+          "bytes": 10461,
+          "sha256": "f6b0842e89afeab1e099b5650edeae4ca4d70e270e01852aa2448c9ce6d61431"
+        }
+      ],
+      "log": "PASS manual-install pack: timed editable chain text, offline TTS pipeline, font/easing updates, neighbor cache invalidation, no images\n"
+    },
+    {
+      "id": "timeline-editing",
+      "ok": true,
+      "covers": [
+        "timeline",
+        "editing"
+      ],
+      "mode": "mock",
+      "argv": [
+        "node",
+        "scripts/test-production-timeline.mjs",
+        "--corner"
+      ],
+      "durationMs": 3704,
+      "artifacts": [],
+      "log": "PASS manual-install pack: timed editable chain text, offline TTS pipeline, font/easing updates, neighbor cache invalidation, no images\n\r\n{\n  \"failed\": 0,\n  \"results\": [\n    {\n      \"name\": \"首次入轨：配音首尾相接、元素书写 + 定格、字幕链接配音、底板铺满整片\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"幂等：再对账一次什么都不动\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"镜头重渲：原位换成新片段，用户挪过的元素保留位置，别的镜头不动\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"用户删掉的产物不放回；版本变了才再放\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"配音变长：本段原位换配音，后面的段整体顺移\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"中间插一段：后面的段让出位置；删掉后再收回来\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"字幕重切：整组替换；关掉字幕就删掉\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"底板跟着整片长度走\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"关掉自动入轨后不再改时间轴\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"真实动态文字成片文档自动入轨，包含配音和可编辑文字且重复同步不会重复添加\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"生成文字的位置和透明度动效可编辑，重渲保留用户变换与关键帧\",\n      \"ok\": true\n    }\n  ]\n}\n"
+    },
+    {
+      "id": "motion-layout",
+      "ok": true,
+      "covers": [
+        "runtime"
+      ],
+      "mode": "offline",
+      "argv": [
+        "node",
+        "scripts/test-corner-chain.mjs"
+      ],
+      "durationMs": 4002,
+      "artifacts": [
+        {
+          "path": "D:\\desktop\\to_do\\todo-editor\\native\\test-output\\corner-chain\\fixtures.json",
+          "bytes": 31975,
+          "sha256": "11fd47653653666b202029dae0e1bf7ad3e5982c33d5e37c1047f9b743474fc6"
+        },
+        {
+          "path": "D:\\desktop\\to_do\\todo-editor\\native\\test-output\\corner-chain\\gallery.png",
+          "bytes": 267512,
+          "sha256": "018f7443fb88bb5b725b59dc4f7678750ab2bdcdcf508c8842328e9a2d3f2e74"
+        }
+      ],
+      "log": "\r\n{\"ok\":true,\"checks\":7}\n"
+    },
+    {
+      "id": "build-renderer",
+      "ok": true,
+      "covers": [
+        "host"
+      ],
+      "mode": "offline",
+      "argv": [
+        "node",
+        "node_modules/vite/bin/vite.js",
+        "build"
+      ],
+      "durationMs": 15479,
+      "artifacts": [],
+      "log": "vite v6.4.3 building for production...\n(node:34152) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n(Use `node --trace-warnings ...` to show where the warning was created)\ntransforming...\n✓ 1765 modules transformed.\nrendering chunks...\n[plugin vite:reporter] \n(!) D:/desktop/to_do/todo-editor/src/store.ts is dynamically imported by D:/desktop/to_do/todo-editor/src/lib/aiPopout.ts, D:/desktop/to_do/todo-editor/src/lib/timelinePopout.ts but also statically imported by D:/desktop/to_do/todo-editor/src/App.tsx, D:/desktop/to_do/todo-editor/src/components/AiFloat.tsx, D:/desktop/to_do/todo-editor/src/components/AiPanel.tsx, D:/desktop/to_do/todo-editor/src/components/BgmPanel.tsx, D:/desktop/to_do/todo-editor/src/components/DouyinPublishPanel.tsx, D:/desktop/to_do/todo-editor/src/components/Inspector.tsx, D:/desktop/to_do/todo-editor/src/components/KeyframeEditor.tsx, D:/desktop/to_do/todo-editor/src/components/MediaLibrary.tsx, D:/desktop/to_do/todo-editor/src/components/Modals.tsx, D:/desktop/to_do/todo-editor/src/components/Monitor.tsx, D:/desktop/to_do/todo-editor/src/components/Monitor3dViewport.tsx, D:/desktop/to_do/todo-editor/src/components/MotionPresetLibrary.tsx, D:/desktop/to_do/todo-editor/src/components/PrKeyframeRow.tsx, D:/desktop/to_do/todo-editor/src/components/ProductionStudio.tsx, D:/desktop/to_do/todo-editor/src/components/ProjectStart.tsx, D:/desktop/to_do/todo-editor/src/components/PropWheel.tsx, D:/desktop/to_do/todo-editor/src/components/ScriptMemo.tsx, D:/desktop/to_do/todo-editor/src/components/SkillsPanel.tsx, D:/desktop/to_do/todo-editor/src/components/TextPresetEditor.tsx, D:/desktop/to_do/todo-editor/src/components/Timeline.tsx, D:/desktop/to_do/todo-editor/src/components/TimelineClip.tsx, D:/desktop/to_do/todo-editor/src/components/TimelineFloat.tsx, D:/desktop/to_do/todo-editor/src/components/TransformGesture.tsx, D:/desktop/to_do/todo-editor/src/components/VoicePanel.tsx, D:/desktop/to_do/todo-editor/src/components/WatermarkDesigner.tsx, D:/desktop/to_do/todo-editor/src/components/Workspace.tsx, D:/desktop/to_do/todo-editor/src/lib/aiJobImport.ts, D:/desktop/to_do/todo-editor/src/lib/chalkHand.ts, D:/desktop/to_do/todo-editor/src/lib/douyinPublishAi.ts, D:/desktop/to_do/todo-editor/src/lib/narratedTimeline.ts, D:/desktop/to_do/todo-editor/src/lib/nativePreviewBridge.ts, D:/desktop/to_do/todo-editor/src/lib/productionTimeline.ts, D:/desktop/to_do/todo-editor/src/lib/storeSync.ts, D:/desktop/to_do/todo-editor/src/lib/subtitleBurn.ts, D:/desktop/to_do/todo-editor/src/main.tsx, dynamic import will not move module into another chunk.\n\n[plugin vite:reporter] \n(!) D:/desktop/to_do/todo-editor/src/lib/storeSync.ts is dynamically imported by D:/desktop/to_do/todo-editor/src/store.ts but also statically imported by D:/desktop/to_do/todo-editor/src/App.tsx, D:/desktop/to_do/todo-editor/src/components/AiPanel.tsx, D:/desktop/to_do/todo-editor/src/components/KeyframeEditor.tsx, D:/desktop/to_do/todo-editor/src/components/Monitor.tsx, D:/desktop/to_do/todo-editor/src/components/PrKeyframeRow.tsx, D:/desktop/to_do/todo-editor/src/components/Timeline.tsx, D:/desktop/to_do/todo-editor/src/components/TimelineFloat.tsx, D:/desktop/to_do/todo-editor/src/lib/aiJobImport.ts, D:/desktop/to_do/todo-editor/src/lib/aiPopout.ts, D:/desktop/to_do/todo-editor/src/lib/narratedTimeline.ts, D:/desktop/to_do/todo-editor/src/lib/productionTimeline.ts, D:/desktop/to_do/todo-editor/src/lib/timelinePopout.ts, dynamic import will not move module into another chunk.\n\n[plugin vite:reporter] \n(!) D:/desktop/to_do/todo-editor/src/lib/aiPopout.ts is dynamically imported by D:/desktop/to_do/todo-editor/src/store.ts but also statically imported by D:/desktop/to_do/todo-editor/src/components/AiFloat.tsx, dynamic import will not move module into another chunk.\n\n[plugin vite:reporter] \n(!) D:/desktop/to_do/todo-editor/src/lib/textFonts.ts is dynamically imported by D:/desktop/to_do/todo-editor/src/App.tsx, D:/desktop/to_do/todo-editor/src/store.ts but also statically imported by D:/desktop/to_do/todo-editor/src/components/SubtitleBurnDialog.tsx, D:/desktop/to_do/todo-editor/src/components/WatermarkDesigner.tsx, D:/desktop/to_do/todo-editor/src/lib/watermarkDesign.ts, dynamic import will not move module into another chunk.\n\n[plugin vite:reporter] \n(!) D:/desktop/to_do/todo-editor/src/lib/timelinePopout.ts is dynamically imported by D:/desktop/to_do/todo-editor/src/store.ts but also statically imported by D:/desktop/to_do/todo-editor/src/components/TimelineFloat.tsx, dynamic import will not move module into another chunk.\n\n[plugin vite:reporter] \n(!) D:/desktop/to_do/todo-editor/src/lib/watermarkDesign.ts is dynamically imported by D:/desktop/to_do/todo-editor/src/store.ts but also statically imported by D:/desktop/to_do/todo-editor/src/components/WatermarkDesigner.tsx, dynamic import will not move module into another chunk.\n\ncomputing gzip size...\ndist/chalk-render.html                        0.27 kB │ gzip:   0.21 kB\ndist/index.html                               0.97 kB │ gzip:   0.51 kB\ndist/assets/main--o0-oOwe.css               100.44 kB │ gzip:  19.60 kB\ndist/assets/chalk-CeRXoF7f.js                 1.19 kB │ gzip:   0.71 kB\ndist/assets/watermarkCompose-DuhJNpwI.js      1.81 kB │ gzip:   1.08 kB\ndist/assets/monitorDraw-D4u7VpUE.js       1,412.27 kB │ gzip: 505.48 kB\ndist/assets/main-DQ7bmFgV.js              1,456.98 kB │ gzip: 426.95 kB\n\n(!) Some chunks are larger than 500 kB after minification. Consider:\n- Using dynamic import() to code-split the application\n- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks\n- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.\n✓ built in 14.12s\n"
+    },
+    {
+      "id": "preview-export",
+      "ok": true,
+      "covers": [
+        "export"
+      ],
+      "mode": "offline",
+      "argv": [
+        "node",
+        "scripts/test-corner-export.mjs"
+      ],
+      "durationMs": 10238,
+      "artifacts": [
+        {
+          "path": "D:\\desktop\\to_do\\todo-editor\\deliverables\\corner-chain-preview.mp4",
+          "bytes": 451344,
+          "sha256": "e4c090b48ecf0271ebaa650eb0ebee4f2dbfc2c5464325f23dc2beca613ed77c"
+        }
+      ],
+      "log": "\r\n{\"ok\":true,\"exactPreviewPixels\":true,\"exportedSentences\":8,\"file\":\"D:\\\\desktop\\\\to_do\\\\todo-editor\\\\deliverables\\\\corner-chain-preview.mp4\"}\n"
+    },
+    {
+      "id": "source-stability",
+      "ok": true,
+      "sourceDigest": "1247f5b93acd380caa7898efdf41f9f0fb756b4f547d94a9d0f68dc07076d5d9"
+    },
+    {
+      "id": "host-stability",
+      "ok": true,
+      "hostDigest": "932e90d8fbe2efa0eeba5b65bfb404e04cffa8261438e5793af86b0616ccc02c"
+    }
+  ],
+  "limitations": [
+    "production-cache 使用 mock，不能证明真实服务输出质量",
+    "timeline-editing 使用 mock，不能证明真实服务输出质量"
+  ],
+  "output": {
+    "path": "D:\\desktop\\to_do\\todo-editor\\deliverables\\corner-chain.todoext",
+    "bytes": 7700,
+    "sha256": "d187c2c7ca0d8c4705ea322a57792ea7ac681846310293aabfdebb8214b3579a"
+  },
+  "extension": {
+    "id": "studio.corner-chain",
+    "version": "1.2.1",
+    "kind": "skill"
+  },
+  "hostDigest": "932e90d8fbe2efa0eeba5b65bfb404e04cffa8261438e5793af86b0616ccc02c",
+  "finishedAt": "2026-10-09T07:18:33.114Z"
+}

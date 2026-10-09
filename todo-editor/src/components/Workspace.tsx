@@ -1,5 +1,5 @@
 import { Inspector } from './Inspector'
-import { useCallback, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { useCallback, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { MediaLibrary } from './MediaLibrary'
 import { Monitor } from './Monitor'
 import { AiPanel } from './AiPanel'
@@ -16,16 +16,28 @@ import {
 } from '../lib/panelDock'
 import clsx from 'clsx'
 
-function ResizeHandle({ axis, onDelta, testId }: {
+function ResizeHandle({ axis, onDelta, preview, testId }: {
   axis: 'x' | 'y'
   onDelta: (dx: number, dy: number) => void
   testId?: string
+  preview?: { onStart: () => void; onDelta: (dx: number, dy: number) => void; onEnd: () => void }
 }) {
-  const onPointerDown = useResize(onDelta)
+  const onPointerDown = useResize(preview?.onDelta ?? onDelta, preview)
   return (
     <div
       className={clsx('resize-handle', axis === 'x' ? 'resize-handle-x' : 'resize-handle-y')}
       data-testid={testId ?? `resize-${axis}`}
+      role="separator"
+      tabIndex={0}
+      aria-label={axis === 'x' ? '调整面板宽度' : '调整面板高度'}
+      aria-orientation={axis === 'x' ? 'vertical' : 'horizontal'}
+      title="拖动调整大小，或使用方向键；Shift 加速"
+      onKeyDown={(e) => {
+        const step = e.shiftKey ? 32 : 8
+        const delta = axis === 'x' ? { ArrowLeft: -step, ArrowRight: step } : { ArrowUp: -step, ArrowDown: step }
+        const value = delta[e.key as keyof typeof delta]
+        if (value !== undefined) { e.preventDefault(); e.stopPropagation(); onDelta(axis === 'x' ? value : 0, axis === 'y' ? value : 0) }
+      }}
       onPointerDown={onPointerDown}
     />
   )
@@ -208,9 +220,69 @@ function DockDropOverlay() {
 }
 
 /** 常用属性常驻，保留片段轮盘快捷操作。 */
+const compactQuery = () => window.matchMedia('(max-width: 900px)')
+const subscribeCompact = (notify: () => void) => {
+  const query = compactQuery()
+  query.addEventListener('change', notify)
+  return () => query.removeEventListener('change', notify)
+}
+const getCompact = () => compactQuery().matches
+
+function resizePanelWidth(panel: HTMLElement | null, fallback: number, delta: number) {
+  const actual = panel?.getBoundingClientRect().width ?? fallback
+  const cssMax = panel ? parseFloat(getComputedStyle(panel).maxWidth) : NaN
+  const max = Number.isFinite(cssMax) ? Math.min(420, cssMax) : 420
+  return Math.min(max, Math.max(180, actual + delta))
+}
+
+/** Resize the element on the animation frame; publish/persist its final size once.
+ * Reading bounds at pointerdown keeps layout reads out of the drag's write path. */
+function usePanelResize(key: 'sidebarW' | 'rightW' | 'dockH' | 'timelineH', dimension: 'width' | 'height',
+  element: () => HTMLElement | null, direction: number, min: number, maximum: () => number) {
+  const config = useRef({ key, dimension, element, direction, min, maximum })
+  config.current = { key, dimension, element, direction, min, maximum }
+  const gesture = useRef<{ element: HTMLElement; dimension: 'width' | 'height'; value: number; initialValue: number; initialStyle: string; min: number; max: number; direction: number } | null>(null)
+  const onStart = useCallback(() => {
+    const c = config.current, el = c.element()
+    if (!el) return
+    const cssMax = parseFloat(getComputedStyle(el)[c.dimension === 'width' ? 'maxWidth' : 'maxHeight'])
+    const max = Math.max(c.min, Math.min(c.maximum(), Number.isFinite(cssMax) ? cssMax : Infinity))
+    const value = el.getBoundingClientRect()[c.dimension]
+    gesture.current = { element: el, dimension: c.dimension, value, initialValue: value, initialStyle: el.style[c.dimension], min: c.min, max, direction: c.direction }
+  }, [])
+  const onDelta = useCallback((dx: number, dy: number) => {
+    const g = gesture.current
+    if (!g) return
+    const delta = (g.dimension === 'width' ? dx : dy) * g.direction
+    g.value = Math.min(g.max, Math.max(g.min, g.value + delta))
+    g.element.style[g.dimension] = `${g.value}px`
+  }, [])
+  const onEnd = useCallback(() => {
+    const g = gesture.current
+    gesture.current = null
+    if (!g) return
+    if (g.value === g.initialValue) {
+      g.element.style[g.dimension] = g.initialStyle
+      return
+    }
+    const c = config.current
+    if (useApp.getState().layout[c.key] !== g.value) useApp.getState().setLayout({ [c.key]: g.value })
+  }, [])
+  return { onStart, onDelta, onEnd }
+}
+
 export function Workspace() {
   const [focused, setFocused] = useState(false)
   const [inspector, setInspector] = useState(true)
+  const [compactInspector, setCompactInspector] = useState(false)
+  const compact = useSyncExternalStore(subscribeCompact, getCompact, () => false)
+  const showInspector = !focused && (compact ? compactInspector : inspector)
+  const leftPanel = useRef<HTMLElement>(null)
+  const rightPanel = useRef<HTMLElement>(null)
+  const bottomPanel = useRef<HTMLDivElement>(null)
+  const sidebarResize = usePanelResize('sidebarW', 'width', () => leftPanel.current, 1, 180, () => 420)
+  const rightResize = usePanelResize('rightW', 'width', () => rightPanel.current, -1, 180, () => 420)
+  const dockResize = usePanelResize('dockH', 'height', () => bottomPanel.current, -1, 140, () => 360)
   const layout = useApp((s) => s.layout)
   const setLayout = useApp((s) => s.setLayout)
   const dock = layout.panelDock ?? { media: 'left' as const, ai: 'tab' as const }
@@ -219,43 +291,43 @@ export function Workspace() {
   const bottom = panelsIn('bottom', dock)
 
   const resizeSidebar = useCallback((dx: number) => {
-    setLayout({ sidebarW: Math.min(420, Math.max(180, layout.sidebarW + dx)) })
-  }, [layout.sidebarW, setLayout])
+    setLayout({ sidebarW: resizePanelWidth(leftPanel.current, useApp.getState().layout.sidebarW, dx) })
+  }, [setLayout])
   const resizeRight = useCallback((dx: number) => {
-    setLayout({ rightW: Math.min(420, Math.max(180, (layout.rightW ?? 280) - dx)) })
-  }, [layout.rightW, setLayout])
+    setLayout({ rightW: resizePanelWidth(rightPanel.current, useApp.getState().layout.rightW ?? 280, -dx) })
+  }, [setLayout])
   const resizeDock = useCallback((_dx: number, dy: number) => {
-    setLayout({ dockH: Math.min(360, Math.max(140, (layout.dockH ?? 220) - dy)) })
-  }, [layout.dockH, setLayout])
+    setLayout({ dockH: Math.min(360, Math.max(140, (useApp.getState().layout.dockH ?? 220) - dy)) })
+  }, [setLayout])
 
   return (
-    <div className="nle-upper flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-hidden relative" data-testid="workspace" data-preview-focused={focused}>
+    <div className="nle-upper flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-hidden relative" data-testid="workspace" data-preview-focused={focused} data-compact={compact}>
       <div className="workspace-row flex min-h-0 min-w-0 flex-1 overflow-hidden">
         {left.length > 0 && (
           <>
-            <aside className="nle-panel-col shrink-0" style={{ width: layout.sidebarW }}>
+            <aside ref={leftPanel} className="nle-panel-col shrink-0" style={{ width: layout.sidebarW }}>
               <DockStack ids={left} testId="dock-left" />
             </aside>
-            <ResizeHandle axis="x" testId="resize-sidebar" onDelta={resizeSidebar} />
+            <ResizeHandle axis="x" testId="resize-sidebar" onDelta={resizeSidebar} preview={sidebarResize} />
           </>
         )}
         <main className="nle-center flex-1 min-w-0 min-h-0 flex flex-col p-1 overflow-hidden">
-          <MonitorArea focused={focused} onFocus={() => setFocused(v => !v)} inspector={inspector && !focused} onInspector={() => { if (focused) { setFocused(false); setInspector(true) } else setInspector(v => !v) }} />
+          <MonitorArea focused={focused} onFocus={() => setFocused(v => !v)} inspector={showInspector} onInspector={() => { setFocused(false); if (compact) setCompactInspector(true); else setInspector(true) }} />
         </main>
         {right.length > 0 && (
           <>
-            <ResizeHandle axis="x" testId="resize-right" onDelta={resizeRight} />
-            <aside className="nle-panel-col shrink-0" style={{ width: layout.rightW ?? 280 }}>
+            <ResizeHandle axis="x" testId="resize-right" onDelta={resizeRight} preview={rightResize} />
+            <aside ref={rightPanel} className="nle-panel-col shrink-0" style={{ width: layout.rightW ?? 280 }}>
               <DockStack ids={right} testId="dock-right" />
             </aside>
           </>
         )}
-        {inspector && <Inspector onClose={() => setInspector(false)} />}
+        {showInspector && <Inspector onClose={() => { if (compact) setCompactInspector(false); else setInspector(false) }} />}
       </div>
       {bottom.length > 0 && (
         <>
-          <ResizeHandle axis="y" testId="resize-dock-bottom" onDelta={resizeDock} />
-          <div className="shrink-0 min-h-0 px-1 pb-1" style={{ height: layout.dockH ?? 220 }} data-testid="dock-bottom">
+          <ResizeHandle axis="y" testId="resize-dock-bottom" onDelta={resizeDock} preview={dockResize} />
+          <div ref={bottomPanel} className="shrink-0 min-h-0 px-1 pb-1" style={{ height: layout.dockH ?? 220 }} data-testid="dock-bottom">
             <DockStack ids={bottom} testId="dock-bottom-stack" />
           </div>
         </>
@@ -266,14 +338,13 @@ export function Workspace() {
 }
 
 export function TimelineResizeHandle() {
-  const layout = useApp((s) => s.layout)
+  const preview = usePanelResize('timelineH', 'height',
+    () => document.querySelector<HTMLElement>('[data-testid="timeline"]'), -1, 160,
+    () => Math.max(280, Math.floor(window.innerHeight * 0.72)))
   const setLayout = useApp((s) => s.setLayout)
   const onDelta = useCallback((_dx: number, dy: number) => {
     const maxH = Math.max(280, Math.floor(window.innerHeight * 0.72))
-    setLayout({ timelineH: Math.min(maxH, Math.max(160, layout.timelineH - dy)) })
-  }, [layout.timelineH, setLayout])
-  const onPointerDown = useResize(onDelta)
-  return (
-    <div className="resize-handle resize-handle-y shrink-0 min-w-0 w-full" data-testid="resize-timeline" onPointerDown={onPointerDown} />
-  )
+    setLayout({ timelineH: Math.min(maxH, Math.max(160, useApp.getState().layout.timelineH - dy)) })
+  }, [setLayout])
+  return <ResizeHandle axis="y" testId="resize-timeline" onDelta={onDelta} preview={preview} />
 }

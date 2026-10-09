@@ -7,6 +7,7 @@ import { syncProduction } from '../src/lib/productionTimeline'
 import type { Production, ProductionBoard, ProductionSegment } from '../src/lib/production'
 import { defaultScene3d, type Clip, type Track } from '../src/types'
 import { buildEditGraph } from '../src/lib/editGraph'
+import { sampleKeyframes } from '../src/lib/keyframeEval'
 
 const results: { name: string; ok: boolean; error?: string }[] = []
 function check(ok: unknown, message: string) { if (!ok) throw new Error(message) }
@@ -203,11 +204,28 @@ test('真实动态文字成片文档自动入轨，包含配音和可编辑文�
   check(text.length === p.segments.flatMap(s => s.boards).length, '文字镜头缺失')
   check(clips.some(c => c.meta?.source?.key?.endsWith('/voice')), '配音缺失')
   check(text.every(c => !!c.linkedId && c.duration > 0 && !c.mediaId), '镜头须为链接配音的可编辑文字')
-  check(text.map(c => c.text!.content).join('') === p.script, '口播文字被丢弃或改写')
+  check(text.map(c => c.text!.content).join('') === p.segments.map(s=>s.text).join(''), '口播文字被丢弃或改写')
+  if(p.skillId==='studio.corner-chain')check(text.every(c=>!!c.text!.fancy!.dynamic!.composition?.corner),'转角参数在入轨时丢失')
   check(!syncProduction(p), '重复同步不应重复添加')
   const state = useApp.getState(); const sq = state.seq()
   const media = state.media.map(m => ({ ...m, path: m.kind === 'audio' ? m.url : m.path }))
   exportSequence = buildEditGraph({ clips: sq.clips, tracks: sq.tracks, media,
     settings: state.settings, workIn: 0, workOut: p.segments.reduce((n, s) => n + (s.voice?.duration || 0), 0) })
+})
+test('生成文字的位置和透明度动效可编辑，重渲保留用户变换与关键帧',()=>{
+  const p=structuredClone((window as any).dynamicProductionFixture) as Production
+  const c=useApp.getState().seq().clips.find(c=>c.text?.fancy?.dynamic)!
+  const keyframes={...c.keyframes,opacity:[{id:'test-opacity-0',t:0,value:.2,ease:'linear' as const},{id:'test-opacity-1',t:Math.min(.5,c.duration),value:1,ease:'linear' as const}]}
+  useApp.getState().patchClipsQuiet({[c.id]:{transform:{...c.transform,x:.3,y:-.2,rotation:12},keyframes}})
+  const edited=useApp.getState().seq().clips.find(x=>x.id===c.id)!
+  check(edited.transform.x===.3&&edited.transform.rotation===12&&JSON.stringify(edited.keyframes)===JSON.stringify(keyframes),'元素变换或关键帧编辑失败')
+  near(sampleKeyframes(edited.keyframes.opacity,0,1),.2,'透明度动效起始值')
+  near(sampleKeyframes(edited.keyframes.opacity,Math.min(.5,c.duration)/2,1),.6,'透明度动效插值')
+  const b=p.segments[0].boards[0];b.render!.hash+='-rerender'
+  check(syncProduction(p),'重渲没有同步')
+  const next=useApp.getState().seq().clips.find(x=>x.meta?.source?.key===c.meta?.source?.key&&x.meta?.source?.jobId===p.id)!
+  check(next.transform.x===.3&&next.transform.y===-.2&&next.transform.rotation===12,'重渲丢失位置旋转')
+  check(JSON.stringify(next.keyframes)===JSON.stringify(keyframes),'重渲丢失透明度动效')
+  near(sampleKeyframes(next.keyframes.opacity,Math.min(.5,c.duration)/2,1),.6,'重渲后透明度动效仍可采样')
 })
 ;(window as unknown as { productionTests: unknown }).productionTests = { failed: results.filter((r) => !r.ok).length, results, exportSequence }

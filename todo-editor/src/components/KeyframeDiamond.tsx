@@ -16,7 +16,7 @@ export function KeyframeDiamond({ active, testId, title, onClick }: Props) {
       className={clsx(
         'w-7 h-7 shrink-0 mt-0.5 grid place-items-center rounded-md border transition-colors',
         active
-          ? 'border-[hsl(18_76%_46%/0.35)] bg-[var(--accent-dim)] text-[var(--accent)]'
+          ? 'border-[hsl(0_0%_46%/0.35)] bg-[var(--accent-dim)] text-[var(--accent)]'
           : 'border-[var(--border)] bg-[var(--surface-1)] text-[var(--text-muted)] hover:text-[var(--accent)] hover:bg-[var(--surface-2)]',
       )}
       data-testid={testId}

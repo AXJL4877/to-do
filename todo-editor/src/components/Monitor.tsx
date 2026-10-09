@@ -129,12 +129,18 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program' 
   useEffect(() => {
     const el = viewportRef.current
     if (!el) return
-    const measure = () => setDisplay({ w: el.clientWidth, h: el.clientHeight })
+    // 2D canvas scales with CSS; only the 3D viewport needs React dimensions.
+    if (!use3d) return
+    const measure = (entries?: ResizeObserverEntry[]) => {
+      const rect = entries?.[0]?.contentRect
+      const w = Math.round(rect?.width ?? el.clientWidth), h = Math.round(rect?.height ?? el.clientHeight)
+      setDisplay(prev => prev.w === w && prev.h === h ? prev : { w, h })
+    }
     measure()
     const ro = new ResizeObserver(measure)
     ro.observe(el)
     return () => ro.disconnect()
-  }, [])
+  }, [use3d])
 
   /** B2：节目窗上报 CSS 矩形；nativePreview 时隐藏 canvas 绘制 */
   const nativePreview = settings.nativePreview
@@ -166,7 +172,7 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program' 
       ro.disconnect()
       window.removeEventListener('scroll', report, true)
     }
-  }, [isProgram, nativeOn, display.w, display.h])
+  }, [isProgram, nativeOn])
 
   useEffect(() => {
     if (!isProgram || !nativeOn) return
@@ -841,7 +847,7 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program' 
               transformOrigin: 'center center',
               cursor: isEdit ? 'move' : 'default',
               touchAction: 'none',
-              background: '#000',
+              background: '#000000',
               visibility: isProgram && nativeOn ? 'hidden' : 'visible',
             }}
             onPointerDown={onCanvasPointerDown}
@@ -853,7 +859,7 @@ export function Monitor({ mode, compact = false }: { mode: 'source' | 'program' 
             data-testid="native-preview-badge"
             aria-hidden
           >
-            <span className="text-[9px] px-1 rounded" style={{ background: 'rgba(0,0,0,0.45)', color: '#9f9' }}>NATIVE</span>
+            <span className="text-[9px] px-1 rounded" style={{ background: 'rgba(0,0,0,0.45)', color: '#e2e2e2' }}>NATIVE</span>
           </div>
         )}
       </div>

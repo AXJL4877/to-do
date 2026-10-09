@@ -69,6 +69,7 @@ export function runRenderer(entry, requestFile, { timeoutSec, onProgress }) {
       windowsHide: true,
       env: {
         ...process.env,
+        ...(entry.pack.id==='builtin.chalk-hand'?{OMP_NUM_THREADS:'1',OPENBLAS_NUM_THREADS:'1',MKL_NUM_THREADS:'1'}:{}),
         PYTHONIOENCODING: 'utf-8',
         PYTHONUNBUFFERED: '1',
         // 技能渲染端统一走内嵌 vendor，避免依赖本机桌面/Cursor skills 路径

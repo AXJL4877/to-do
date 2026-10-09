@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { EXTENSIONS_CHANGED } from '../lib/extensionImport'
 import { AudioLines, Camera, Captions, ChevronRight, Clapperboard, Film, ImageIcon, ImagePlus, LayoutGrid, Loader2, Mic, Music, Plus, Blocks, RotateCcw, Settings, Sparkles, Trash2, Video, X } from 'lucide-react'
 import { useApp } from '../store'
 import { AiFloatLaunch } from './AiFloat'
@@ -209,6 +210,8 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
   const [cold, setCold] = useState<ColdAsset[]>([])
   const [jobs, setJobs] = useState<AiJob[]>([])
   const [styles, setStyles] = useState<StylePack[]>([])
+  const styleRefresh = useRef(0)
+  const animRefresh = useRef(0)
   const [styleId, setStyleId] = useState('')
   const [styleValues, setStyleValues] = useState<StyleValues | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -229,13 +232,14 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
   const activeStyle = mode === 'image' ? styles.find((s) => s.id === styleId) ?? null : null
 
   async function refreshStyles() {
+    const revision = ++styleRefresh.current
     try {
       const r = await aiFetch('/api/ai-styles')
       const data = await r.json()
-      if (data.ok) {
+      if (data.ok && revision === styleRefresh.current) {
         setStyles((data.styles as StylePack[])
           .filter((s) => s.outputs.includes('image'))
-          .map((s) => ({ ...s, previews: s.previews.map((p) => aiUrl(p)) })))
+          .map((s) => ({ ...s, previews: s.previews.map((p) => aiUrl(`${p}?v=${encodeURIComponent(s.version)}`)) })))
       }
     } catch { /* */ }
   }
@@ -265,11 +269,12 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
   }
 
   async function refreshAnims() {
+    const revision = ++animRefresh.current
     try {
       const r = await aiFetch('/api/ai-anims')
       const data = await r.json()
-      if (data.ok) {
-        setAnims((data.anims as AnimPack[]).map((a) => ({ ...a, previews: a.previews.map((p) => aiUrl(p)) })))
+      if (data.ok && revision === animRefresh.current) {
+        setAnims((data.anims as AnimPack[]).map((a) => ({ ...a, previews: a.previews.map((p) => aiUrl(`${p}?v=${encodeURIComponent(a.version)}`)) })))
       }
     } catch { /* */ }
   }
@@ -493,10 +498,12 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
     void refreshStyles()
     void refreshAnims()
     void refreshConfig().then(refreshModels)
+    const refreshExtensions = () => { void refreshStyles(); void refreshAnims() }
+    window.addEventListener(EXTENSIONS_CHANGED, refreshExtensions)
     const t = window.setInterval(() => {
       void refreshJobs()
     }, 2000)
-    return () => window.clearInterval(t)
+    return () => { window.clearInterval(t); window.removeEventListener(EXTENSIONS_CHANGED, refreshExtensions) }
   }, [])
 
   useEffect(() => {
@@ -681,7 +688,7 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
             <LayoutGrid size={14} className="shrink-0 mr-1" style={{ color: 'var(--text-muted)' }} />
           </button>
           <button type="button" className="ai-style-trigger" data-testid="ai-open-skill" onClick={() => useApp.getState().setLibraryTab('skill')}>
-            <span className="shrink-0 w-10 h-10 rounded-md grid place-items-center" style={{ background: '#1f2a26', color: '#f3efe2' }}>
+            <span className="shrink-0 w-10 h-10 rounded-md grid place-items-center" style={{ background: '#272727', color: '#efefef' }}>
               <Blocks size={16} />
             </span>
             <span className="min-w-0 flex-1 text-[12px] font-semibold truncate">Skill 技能</span>
@@ -824,7 +831,7 @@ export function AiPanel({ hideTitle = false }: { hideTitle?: boolean } = {}) {
             <div className="flex items-center gap-1.5 px-0.5 text-[10px]" style={{ color: 'var(--text-muted)' }} data-testid="ai-h3-status">
               <span
                 className="inline-block w-1.5 h-1.5 rounded-full shrink-0"
-                style={{ background: h3Status?.comfy && h3Status.studio ? 'var(--success, #22c55e)' : 'var(--error)' }}
+                style={{ background: h3Status?.comfy && h3Status.studio ? 'var(--success, #9b9b9b)' : 'var(--error)' }}
               />
               <span className="truncate flex-1">
                 {!h3Status ? '检测中…' : h3Status.comfy && h3Status.studio ? '就绪' : '未运行'}

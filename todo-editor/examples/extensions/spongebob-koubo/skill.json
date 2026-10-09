@@ -1,0 +1,159 @@
+{
+  "spec": "todo-skill-pack/1",
+  "id": "studio.spongebob-koubo",
+  "name": "海绵宝宝口播",
+  "version": "1.0.1",
+  "author": "studio",
+  "description": "海绵宝宝手绘口播：宿主负责配音与生图，本包按镜头把透明贴纸做成可单独入轨的入场层。",
+  "tags": ["口播", "成片", "海绵宝宝"],
+  "pipeline": "production",
+  "input": {
+    "label": "口播文案",
+    "maxLength": 12000,
+    "placeholder": "粘贴口播。空行或 --- 分段。画面为海滩贴纸，元素可单独移动。"
+  },
+  "output": {
+    "mime": "video/webm",
+    "codec": "vp9",
+    "alphaWhen": {}
+  },
+  "params": [
+    {
+      "id": "voice",
+      "type": "select",
+      "group": "voice",
+      "label": "音色",
+      "default": "clone",
+      "options": [
+        {"value": "mizai", "label": "咪仔"},
+        {"value": "clone", "label": "克隆音"}
+      ]
+    },
+    {
+      "id": "cloneId",
+      "type": "text",
+      "group": "voice",
+      "label": "克隆音 ID",
+      "when": {"voice": ["clone"]},
+      "default": "S_RksT6Z6g2",
+      "maxLength": 64,
+      "pattern": "^$|^S_[A-Za-z0-9_-]{2,60}$",
+      "placeholder": "S_xxxxxxxx"
+    },
+    {
+      "id": "split",
+      "type": "select",
+      "group": "story",
+      "label": "分段",
+      "default": "paragraph",
+      "options": [
+        {"value": "semantic", "label": "按意思"},
+        {"value": "paragraph", "label": "按段落"},
+        {"value": "length", "label": "按字数"}
+      ]
+    },
+    {
+      "id": "size",
+      "type": "select",
+      "group": "scene",
+      "label": "画幅",
+      "default": "1920x1080",
+      "options": [
+        {"value": "1280x720", "label": "720p"},
+        {"value": "1920x1080", "label": "1080p"},
+        {"value": "1080x1920", "label": "竖屏"},
+        {"value": "1080x1080", "label": "方形"}
+      ]
+    },
+    {
+      "id": "layout",
+      "type": "select",
+      "group": "scene",
+      "label": "排版",
+      "default": "auto",
+      "options": [
+        {"value": "auto", "label": "自动"},
+        {"value": "hero_left", "label": "主角居左"},
+        {"value": "grid", "label": "网格"}
+      ]
+    },
+    {
+      "id": "tone",
+      "type": "select",
+      "group": "scene",
+      "label": "色调",
+      "default": "ink",
+      "options": [
+        {"value": "ink", "label": "手绘", "prompt": "thick black outline, flat color, sticker"},
+        {"value": "chalk", "label": "粉笔", "prompt": "chalk texture, rough stroke"}
+      ]
+    },
+    {
+      "id": "enter",
+      "type": "select",
+      "group": "stroke",
+      "label": "入场",
+      "default": "fade",
+      "options": [
+        {"value": "mix", "label": "混合"},
+        {"value": "fade", "label": "淡入"},
+        {"value": "stamp", "label": "盖章"},
+        {"value": "draw", "label": "升起"}
+      ]
+    },
+    {
+      "id": "fps",
+      "type": "select",
+      "group": "timing",
+      "label": "帧率",
+      "default": "30",
+      "options": [
+        {"value": "24", "label": "24"},
+        {"value": "30", "label": "30"}
+      ]
+    },
+    {
+      "id": "drawSpeed",
+      "type": "number",
+      "group": "timing",
+      "label": "入场速度",
+      "default": 1,
+      "min": 0.5,
+      "max": 3,
+      "step": 0.25
+    },
+    {
+      "id": "quality",
+      "type": "select",
+      "group": "output",
+      "label": "质量",
+      "default": "standard",
+      "options": [
+        {"value": "high", "label": "高"},
+        {"value": "standard", "label": "标准"},
+        {"value": "draft", "label": "草稿"}
+      ]
+    }
+  ],
+  "quick": ["size", "enter", "drawSpeed"],
+  "planner": {
+    "maxElements": 4,
+    "system": "你是海绵宝宝财经口播的分镜。每句最多四个贴纸元素：一个角色加道具。label 用中文短名。draw 写单件透明贴纸：厚黑描边、平涂、全身或完整道具、四周留白、不要场景、不要文字。角色用原创海绵厨师/海星形象，不要商标名。role：主角 hero，道具 support，强调 accent。"
+  },
+  "assets": {
+    "models": ["gpt-image-2"],
+    "resolution": "1K",
+    "template": "Isolated sticker, transparent background, thick black outline, flat colors, full object, large empty margin, no scenery, no text, no watermark. {{tone}} {{role}} Must depict: {{draw}}",
+    "roles": {
+      "hero": "one original sponge-chef character, full body",
+      "support": "one simple prop, no character",
+      "accent": "one small icon prop"
+    },
+    "avoid": ["logo", "watermark", "scenery", "caption"]
+  },
+  "runtime": {
+    "type": "python",
+    "entry": "render.py",
+    "timeoutSec": 600
+  }
+}

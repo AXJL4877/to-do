@@ -1,0 +1,60 @@
+{
+  "spec": "todo-extension-check/1",
+  "origin": "migration",
+  "checks": [
+    {
+      "id": "original-baseline",
+      "cwd": "installed",
+      "argv": ["node", "checks/baseline.mjs"],
+      "mode": "offline",
+      "covers": ["baseline"],
+      "timeoutMs": 180000,
+      "artifacts": ["check-output/baseline.json"]
+    },
+    {
+      "id": "runtime-and-cache",
+      "cwd": "installed",
+      "argv": ["node", "checks/runtime.mjs"],
+      "mode": "offline",
+      "covers": ["runtime", "cache"],
+      "timeoutMs": 180000,
+      "artifacts": ["check-output/result.json"]
+    },
+    {
+      "id": "timeline-and-editing",
+      "cwd": "repo",
+      "argv": ["node", "scripts/test-spongebob-timeline.mjs"],
+      "mode": "offline",
+      "covers": ["timeline", "editing"],
+      "timeoutMs": 120000,
+      "artifacts": ["native/test-output/spongebob-koubo/timeline.json"]
+    },
+    {
+      "id": "preview-and-export",
+      "cwd": "repo",
+      "argv": ["node", "scripts/test-spongebob-export.mjs"],
+      "mode": "offline",
+      "covers": ["export"],
+      "timeoutMs": 180000,
+      "artifacts": ["native/test-output/spongebob-koubo/export.mp4"]
+    },
+    {
+      "id": "render-benchmark",
+      "cwd": "installed",
+      "argv": ["node", "checks/performance.mjs"],
+      "mode": "offline",
+      "covers": ["performance"],
+      "timeoutMs": 600000,
+      "artifacts": ["check-output/PERFORMANCE.json"]
+    },
+    {
+      "id": "performance-budget",
+      "cwd": "repo",
+      "argv": ["node", "scripts/check-render-performance.mjs"],
+      "mode": "offline",
+      "covers": [],
+      "timeoutMs": 30000,
+      "artifacts": []
+    }
+  ]
+}

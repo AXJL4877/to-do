@@ -1,0 +1,10 @@
+{
+  "ok": true,
+  "fps": 30,
+  "ids": [
+    "hero",
+    "prop"
+  ],
+  "frames1": 24,
+  "frames2": 12
+}

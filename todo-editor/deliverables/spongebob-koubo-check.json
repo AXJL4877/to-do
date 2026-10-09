@@ -1,0 +1,177 @@
+{
+  "spec": "todo-extension-check-report/1",
+  "source": "D:\\desktop\\to_do\\todo-editor\\examples\\extensions\\spongebob-koubo",
+  "startedAt": "2026-10-09T10:22:38.958Z",
+  "ok": true,
+  "checks": [
+    {
+      "id": "format",
+      "ok": true,
+      "bytes": 12820,
+      "sourceDigest": "fc09f9f67d5fe4ac95699d2858f8d1e022ae15fa58fee5951590ecea1f7f983d"
+    },
+    {
+      "id": "isolated-install",
+      "ok": true,
+      "action": "installed",
+      "reinstall": "unchanged"
+    },
+    {
+      "id": "acceptance-plan",
+      "ok": true,
+      "required": [
+        "runtime",
+        "timeline",
+        "editing",
+        "cache",
+        "export",
+        "baseline",
+        "performance"
+      ],
+      "checks": 6
+    },
+    {
+      "id": "original-baseline",
+      "ok": true,
+      "covers": [
+        "baseline"
+      ],
+      "mode": "offline",
+      "argv": [
+        "node",
+        "checks/baseline.mjs"
+      ],
+      "durationMs": 2342,
+      "artifacts": [
+        {
+          "path": "D:\\desktop\\to_do\\todo-editor\\deliverables\\spongebob-koubo-check-artifacts\\original-baseline\\check-output\\baseline.json",
+          "bytes": 131,
+          "sha256": "5c382948fb966d895afd967458af53c3d44040227f6f3f72a6082a22cadf60b9"
+        }
+      ],
+      "log": "baseline ok\n"
+    },
+    {
+      "id": "runtime-and-cache",
+      "ok": true,
+      "covers": [
+        "runtime",
+        "cache"
+      ],
+      "mode": "offline",
+      "argv": [
+        "node",
+        "checks/runtime.mjs"
+      ],
+      "durationMs": 1600,
+      "artifacts": [
+        {
+          "path": "D:\\desktop\\to_do\\todo-editor\\deliverables\\spongebob-koubo-check-artifacts\\runtime-and-cache\\check-output\\result.json",
+          "bytes": 102,
+          "sha256": "4203ec24e2fbcf6750961f4f43b2a3c566bd9454a44351b2dd455b41c66e77cb"
+        }
+      ],
+      "log": "runtime ok\n"
+    },
+    {
+      "id": "timeline-and-editing",
+      "ok": true,
+      "covers": [
+        "timeline",
+        "editing"
+      ],
+      "mode": "offline",
+      "argv": [
+        "node",
+        "scripts/test-spongebob-timeline.mjs"
+      ],
+      "durationMs": 454,
+      "artifacts": [
+        {
+          "path": "D:\\desktop\\to_do\\todo-editor\\native\\test-output\\spongebob-koubo\\timeline.json",
+          "bytes": 361,
+          "sha256": "6a6c137b6a1cee2563ad594c2f3a5a63bd271ac2e6006c3fffa47647d89dea4b"
+        }
+      ],
+      "log": "timeline ok -0.609 0.778\n"
+    },
+    {
+      "id": "preview-and-export",
+      "ok": true,
+      "covers": [
+        "export"
+      ],
+      "mode": "offline",
+      "argv": [
+        "node",
+        "scripts/test-spongebob-export.mjs"
+      ],
+      "durationMs": 1315,
+      "artifacts": [
+        {
+          "path": "D:\\desktop\\to_do\\todo-editor\\native\\test-output\\spongebob-koubo\\export.mp4",
+          "bytes": 2844,
+          "sha256": "2ef4c02c8cd238c75c6d54d392ff4c1ac890e20a90263cd461130f8460a66200"
+        }
+      ],
+      "log": "export ok 0.8\n"
+    },
+    {
+      "id": "render-benchmark",
+      "ok": true,
+      "covers": [
+        "performance"
+      ],
+      "mode": "offline",
+      "argv": [
+        "node",
+        "checks/performance.mjs"
+      ],
+      "durationMs": 10179,
+      "artifacts": [
+        {
+          "path": "D:\\desktop\\to_do\\todo-editor\\deliverables\\spongebob-koubo-check-artifacts\\render-benchmark\\check-output\\PERFORMANCE.json",
+          "bytes": 2072,
+          "sha256": "9420fc3ad73473a9dc2c2da27993c35f7bb530dd09eb8ddf57eea2db2061215e"
+        }
+      ],
+      "log": "{\"coldBase\":[757.3139000014635,749.438500002725,741.800299998431],\"coldFast\":[523.4352999978,520.1587000046857,522.1229000017047],\"warmBase\":[694.7021000014502,716.932800001814,690.6950999982655],\"warmFast\":[574.1612999991048,563.5735000032582,605.3279000043403]}\n"
+    },
+    {
+      "id": "performance-budget",
+      "ok": true,
+      "covers": [],
+      "mode": "offline",
+      "argv": [
+        "node",
+        "scripts/check-render-performance.mjs"
+      ],
+      "durationMs": 179,
+      "artifacts": [],
+      "log": "{\"ok\":true,\"results\":[{\"id\":\"stickers-cold\",\"cacheState\":\"cold\",\"baselineMs\":749.438500002725,\"candidateMs\":522.1229000017047,\"speedup\":1.4353679947772415,\"peakMiB\":180,\"workers\":2},{\"id\":\"stickers-warm\",\"cacheState\":\"warm\",\"baselineMs\":694.7021000014502,\"candidateMs\":574.1612999991048,\"speedup\":1.209942397724356,\"peakMiB\":180,\"workers\":2}]}\n"
+    },
+    {
+      "id": "source-stability",
+      "ok": true,
+      "sourceDigest": "fc09f9f67d5fe4ac95699d2858f8d1e022ae15fa58fee5951590ecea1f7f983d"
+    },
+    {
+      "id": "host-stability",
+      "ok": true,
+      "hostDigest": "27857551548bca550e7a466e2013b5d8c086926e10ede2295b2ecded393bcdf4"
+    }
+  ],
+  "limitations": [],
+  "output": {
+    "path": "D:\\desktop\\to_do\\todo-editor\\deliverables\\spongebob-koubo.todoext",
+    "bytes": 12820,
+    "sha256": "496a8fe06d4b49e712155f9bad67d2c32152ea514578b3edf14c2f0b6726abe5"
+  },
+  "extension": {
+    "id": "studio.spongebob-koubo",
+    "version": "1.0.1",
+    "kind": "skill"
+  },
+  "hostDigest": "27857551548bca550e7a466e2013b5d8c086926e10ede2295b2ecded393bcdf4",
+  "finishedAt": "2026-10-09T10:22:57.007Z"
+}

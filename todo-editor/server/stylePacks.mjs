@@ -211,7 +211,7 @@ export function scanStylePacks() {
 }
 
 /** 给前端的公开描述（不含模板与路径） */
-export function publicStyle({ pack }) {
+export function publicStyle({ pack, dir }) {
   return {
     id: pack.id,
     name: pack.name,
@@ -227,6 +227,7 @@ export function publicStyle({ pack }) {
     image: { ...pack.image },
     cutout: pack.cutout ? { default: pack.cutout.default, lockInputs: pack.cutout.lockInputs || {} } : null,
     hasReference: !!pack.references,
+    installed: path.resolve(dir).startsWith(path.resolve(USER_STYLE_DIR) + path.sep),
   }
 }
 

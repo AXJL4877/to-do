@@ -68,6 +68,7 @@ export interface DynamicText {
   motion: number
   accent: string
   composition?: {
+    corner?: { sceneBase?: number; direction: 'clockwise' | 'alternate' | 'mixed'; easing: 'spring' | 'back' | 'expo'; variant: 'mix' | 'type' | 'pop' | 'mask' | 'slam' | 'ribbon' | 'echo' | 'focus'; zoom: number; transition: number; stagger: number; trail: number; backgroundColor: string }
     style: string; mood: string; background: 'style' | 'transparent'; unify: boolean
     parts: Partial<Record<'layout' | 'enter' | 'hold' | 'exit' | 'decor' | 'treat' | 'bg' | 'cam' | 'fx' | 'trans', string>>
     fx: { decor: number; chroma: number; glitch: number; texture: number; bgSwitch: number }
@@ -260,6 +261,8 @@ export interface Sequence {
 }
 
 export interface ProjectSettings {
+  /** Explicitly removed generated files are not silently restored by polling. New hashed outputs can still import. */
+  removedGeneratedMedia?: string[]
   width: number; height: number; fps: number; aspect: string; pixelAspect: number
   stillDuration: number; cachePath: string; useProxy: boolean; hwAccel: boolean
   /** B2：节目监视器原生 popup 预览（默认关） */

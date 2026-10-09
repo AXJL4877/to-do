@@ -59,7 +59,7 @@ function AudioWaveform({
     if (!ctx) return
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     ctx.clearRect(0, 0, w, h)
-    const col = getComputedStyle(c).color || 'hsl(158 45% 30%)'
+    const col = getComputedStyle(c).color || 'hsl(0 0% 30%)'
     ctx.fillStyle = col
     if (set === undefined) return
     if (!heights) {
@@ -191,13 +191,8 @@ export const TimelineClip = memo(function TimelineClip({
     () => false,
   )
   const drag = useRef<{ edge: 'in' | 'out'; startX: number; originSec: number } | null>(null)
-  const bg = clip.solid
-    ? `color-mix(in oklab, ${clip.solid.color} 70%, transparent)`
-    : clip.text
-    ? 'hsl(32 70% 48% / 0.25)'
-    : track.kind === 'audio'
-      ? 'hsl(158 45% 40% / 0.25)'
-      : 'hsl(200 55% 48% / 0.25)'
+  const tone = clip.text ? 'text' : clip.solid ? 'solid' : track.kind === 'audio' ? 'audio' : 'video'
+  const bg = `var(--timeline-clip-${tone}-bg)`
 
   const rate = tool === 'rate'
   const hints = useMemo(() => edgeHints(clip), [clip])
@@ -231,22 +226,26 @@ export const TimelineClip = memo(function TimelineClip({
 
   return (
     <div
-      className={clsx('absolute top-1 bottom-1 rounded-none overflow-hidden border group', selected && 'ring-2', burning && 'is-subburn')}
+      className={clsx('timeline-clip absolute top-1 bottom-1 rounded-none overflow-hidden border group', burning && 'is-subburn')}
       style={{
         // 像素对齐：起止分别取整，避免中间缝/重叠与缩放后「中间对不齐」
         left: Math.round(clip.start * geometryZoom),
         width: Math.max(1, Math.round((clip.start + clip.duration) * geometryZoom) - Math.round(clip.start * geometryZoom)),
         background: bg,
-        borderColor: burning ? 'hsl(75 55% 48%)' : selected ? 'var(--accent)' : 'var(--border)',
+        borderColor: selected ? '#171717' : 'var(--timeline-clip-border)',
         opacity: clip.enabled ? 1 : 0.4,
         cursor: tool === 'razor' ? 'inherit' : tool === 'hand' ? 'grab' : 'grab',
-        color: track.kind === 'audio' ? 'hsl(158 45% 30%)' : undefined,
+        color: `var(--timeline-clip-${tone}-text)`,
         userSelect: 'none',
         WebkitUserSelect: 'none',
-        boxShadow: burning ? '0 0 0 1px hsl(75 60% 50% / 0.55), inset 0 0 18px hsl(75 70% 55% / 0.18)' : undefined,
+        boxShadow: selected
+          ? 'inset 0 0 0 2px #ffffff, 0 0 0 1px #171717'
+          : 'inset 0 1px 0 rgb(255 255 255 / 0.3), 0 1px 2px rgb(0 0 0 / 0.12)',
       }}
       data-testid={`clip-${clip.id}`}
       aria-label={burning ? `${clip.name}（正在烧录字幕）` : clip.name}
+      data-selected={selected}
+      data-clip-tone={tone}
       data-clip-start={clip.start}
       data-clip-duration={clip.duration}
       data-subburn={burning ? '1' : undefined}
@@ -265,7 +264,7 @@ export const TimelineClip = memo(function TimelineClip({
       {trimmable && (
         <div
           className={clsx('absolute left-0 top-0 bottom-0 cursor-ew-resize z-20', rate ? 'w-2.5 opacity-70 hover:opacity-100' : 'w-1.5 opacity-0 group-hover:opacity-100')}
-          style={{ background: rate ? 'var(--warning, #f59e0b)' : 'var(--accent)' }}
+          style={{ background: rate ? 'var(--warning, #a6a6a6)' : 'var(--accent)' }}
           data-testid={`clip-trim-in-${clip.id}`}
           onPointerDown={onTrimIn}
         />
@@ -273,7 +272,7 @@ export const TimelineClip = memo(function TimelineClip({
       {trimmable && (
         <div
           className={clsx('absolute right-0 top-0 bottom-0 cursor-ew-resize z-20', rate ? 'w-2.5 opacity-70 hover:opacity-100' : 'w-1.5 opacity-0 group-hover:opacity-100')}
-          style={{ background: rate ? 'var(--warning, #f59e0b)' : 'var(--accent)' }}
+          style={{ background: rate ? 'var(--warning, #a6a6a6)' : 'var(--accent)' }}
           data-testid={`clip-trim-out-${clip.id}`}
           onPointerDown={onTrimOut}
         />
@@ -284,14 +283,14 @@ export const TimelineClip = memo(function TimelineClip({
           className="absolute left-0 top-0 bottom-0 z-[1]"
           style={{
             width: hints.inW,
-            background: 'linear-gradient(90deg, hsl(24 85% 52% / 0.55), hsl(24 85% 52% / 0.12), transparent)',
+            background: 'linear-gradient(90deg, hsl(0 0% 52% / 0.55), hsl(0 0% 52% / 0.12), transparent)',
           }}
           title={hints.inLabel}
           data-testid={`clip-anim-in-${clip.id}`}
         >
           <div
             className="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize z-[3] opacity-70 group-hover:opacity-100"
-            style={{ background: 'linear-gradient(90deg, transparent, hsl(24 85% 45% / 0.85))' }}
+            style={{ background: 'linear-gradient(90deg, transparent, hsl(0 0% 45% / 0.85))' }}
             data-testid={`clip-anim-in-handle-${clip.id}`}
             title={hints.inLabel}
             onPointerDown={(e) => onAnimHandleDown(e, 'in')}
@@ -303,14 +302,14 @@ export const TimelineClip = memo(function TimelineClip({
           className="absolute right-0 top-0 bottom-0 z-[1]"
           style={{
             width: hints.outW,
-            background: 'linear-gradient(90deg, transparent, hsl(24 85% 52% / 0.12), hsl(24 85% 52% / 0.55))',
+            background: 'linear-gradient(90deg, transparent, hsl(0 0% 52% / 0.12), hsl(0 0% 52% / 0.55))',
           }}
           title={hints.outLabel}
           data-testid={`clip-anim-out-${clip.id}`}
         >
           <div
             className="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize z-[3] opacity-70 group-hover:opacity-100"
-            style={{ background: 'linear-gradient(90deg, hsl(24 85% 45% / 0.85), transparent)' }}
+            style={{ background: 'linear-gradient(90deg, hsl(0 0% 45% / 0.85), transparent)' }}
             data-testid={`clip-anim-out-handle-${clip.id}`}
             title={hints.outLabel}
             onPointerDown={(e) => onAnimHandleDown(e, 'out')}
@@ -351,7 +350,7 @@ export const TimelineClip = memo(function TimelineClip({
         draggable={false}
       >
         {Math.abs((clip.speed || 1) - 1) > 1e-3 && (
-          <span className="mr-1 px-1 rounded-sm font-semibold" style={{ background: 'hsl(38 92% 50% / 0.9)', color: '#1b1f1d' }} data-testid={`clip-speed-${clip.id}`}>
+          <span className="mr-1 px-1 rounded-sm font-semibold" style={{ background: '#ffffff', color: '#171717' }} data-testid={`clip-speed-${clip.id}`}>
             {(clip.speed || 1).toFixed(2)}×
           </span>
         )}

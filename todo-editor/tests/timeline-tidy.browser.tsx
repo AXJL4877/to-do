@@ -62,7 +62,8 @@ test('docked timeline respects both larger and smaller user heights', async () =
     handle.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 1, clientY: 100 }))
     flushSync(() => window.dispatchEvent(new PointerEvent('pointermove', { pointerId: 1, clientY: 180 })))
     await frames()
-    check(useApp.getState().layout.timelineH === 320, 'first drag step must decrease height')
+    check(Math.abs(panel.getBoundingClientRect().height - Math.max(160, expandedHeight - 80)) <= 1, 'first drag step must decrease visible height')
+    check(useApp.getState().layout.timelineH === 400, 'dragging must defer global layout persistence until release')
     flushSync(() => window.dispatchEvent(new PointerEvent('pointermove', { pointerId: 1, clientY: 340 })))
     window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1 }))
     await frames()
@@ -119,6 +120,7 @@ test('Alt wheel keeps the timeline time under the mouse fixed', async () => {
   const container = document.createElement('div')
   document.body.append(container)
   const root = createRoot(container)
+  try {
   flushSync(() => root.render(<Timeline />))
   const body = container.querySelector<HTMLDivElement>('[data-testid="timeline-body"]')!
   Object.assign(body.style, { width: '600px', overflow: 'auto', maxWidth: '600px' })
@@ -131,12 +133,16 @@ test('Alt wheel keeps the timeline time under the mouse fixed', async () => {
     const pps = useApp.getState().timelineZoom
     const layer = container.querySelector<HTMLElement>('[data-testid="timeline-geometry"]')
     const scale = layer ? new DOMMatrix(layer.style.transform).a : 1
+    const geometryZoom = pps / scale
     check(container.querySelector('[data-testid="clip-later"]'), 'selected offscreen clip was unmounted')
     for (const c of sequence.clips) {
       const el = container.querySelector<HTMLElement>(`[data-testid="clip-${c.id}"]`)
       if (!el) continue
-      check(Math.abs(parseFloat(el.style.left) * scale - c.start * pps) < 0.001, 'clip position lost zoom')
-      check(Math.abs(parseFloat(el.style.width) * scale - Math.max(1, c.duration * pps)) < 0.001, 'clip width lost zoom')
+      // Clip geometry is pixel-rounded before the containing layer scales.
+      const left = Math.round(c.start * geometryZoom)
+      const width = Math.max(1, Math.round((c.start + c.duration) * geometryZoom) - left)
+      check(Math.abs(parseFloat(el.style.left) * scale - left * scale) < 0.001, 'clip position lost zoom')
+      check(Math.abs(parseFloat(el.style.width) * scale - width * scale) < 0.001, 'clip width lost zoom')
     }
   }
   await zoom(-100)
@@ -147,7 +153,7 @@ test('Alt wheel keeps the timeline time under the mouse fixed', async () => {
   body.dispatchEvent(new WheelEvent('wheel', { clientX: x, deltaY: -100, altKey: true, bubbles: true, cancelable: true }))
   await frames()
   check(Math.abs((body.scrollLeft + 200) / useApp.getState().timelineZoom - before) < 0.02, 'batched wheel events lost anchor')
-  root.unmount()
+  } finally { root.unmount(); container.remove() }
 })
 test('Ctrl wheel keeps the preview image point under the mouse fixed', () => {
   useApp.setState({ sequences: [sequence], activeSeqId: sequence.id, playing: false, playhead: 0, settings, monitorCompose: '2d' })
@@ -172,8 +178,10 @@ test('Ctrl wheel keeps the preview image point under the mouse fixed', () => {
 })
 
 test('continuous zoom reuses clip geometry and settles before editing', async () => {
+  const previousLayout = useApp.getState().layout
   useApp.setState({ sequences: [{ ...sequence, workOut: 100 }], activeSeqId: sequence.id,
-    timelineZoom: 50, selectedClipIds: [], settings: { ...settings, snap: false }, playing: false, history: [], future: [] })
+    timelineZoom: 50, selectedClipIds: [], settings: { ...settings, snap: false }, playing: false, history: [], future: [],
+    layout: { ...previousLayout, timelineH: 400 } })
   const container = document.createElement('div')
   document.body.append(container)
   const root = createRoot(container)
@@ -189,6 +197,7 @@ test('continuous zoom reuses clip geometry and settles before editing', async ()
       const body = container.querySelector<HTMLElement>('[data-testid="timeline-body"]')!
       const x = (start * useApp.getState().timelineZoom + 6 - body.scrollLeft) * dpr
       const y = (144 + 6 - parseFloat(canvas.style.top)) * dpr
+      check(Math.round(y) + Math.round(14 * dpr) <= canvas.height, 'text sample extends outside the canvas viewport')
       return canvas.getContext('2d')!.getImageData(Math.round(x), Math.round(y), Math.round(32 * dpr), Math.round(14 * dpr)).data
     }
     const textPixels = readLabelPixels()
@@ -207,7 +216,7 @@ test('continuous zoom reuses clip geometry and settles before editing', async ()
     }
     // Raster alpha may differ at fractional device-pixel positions; glyph
     // extents must remain identical, rather than stretching with the track.
-    check(bounds(textPixels).every((v, i) => v === bounds(zoomedTextPixels)[i]), 'continuous zoom stretches glyph bounds')
+    check(bounds(textPixels).every((v, i) => v === bounds(zoomedTextPixels)[i]), `continuous zoom stretches glyph bounds: ${bounds(textPixels)} -> ${bounds(zoomedTextPixels)}, DPR=${window.devicePixelRatio}`)
     check(el.style.left === left && el.style.width === width, 'zoom relaid out each clip instead of reusing geometry')
     const layer = container.querySelector<HTMLElement>('[data-testid="timeline-geometry"]')!
     check(Math.abs(new DOMMatrix(layer.style.transform).a - 1.2) < 0.001, 'preview transform does not match current zoom')
@@ -236,7 +245,7 @@ test('continuous zoom reuses clip geometry and settles before editing', async ()
     flushSync(() => {})
     check(parseFloat(el.style.left) === 180 && parseFloat(el.style.width) === 90, 'idle zoom did not materialize exact geometry')
     check(new DOMMatrix(layer.style.transform).a === 1, 'idle transform was not cleared')
-  } finally { root.unmount(); container.remove() }
+  } finally { root.unmount(); container.remove(); useApp.setState({ layout: previousLayout }) }
 })
 
 test('sequence switch cancels pending zoom geometry from the previous sequence', async () => {
@@ -401,6 +410,52 @@ test('Ctrl+arrow nudges clips after the playhead by 5 frames, leaving spanning b
   useApp.getState().nudgeAfterPlayhead(-1)
   check(Math.abs(at('el') - 1.9) < 1e-9, `left nudge overlapped the earlier clip: ${at('el')}`)
   check(at('bg') === 0, 'background moved on left nudge')
+})
+
+test('scrubbing follows subframe pointer movement while release preserves frame snapping', async () => {
+  const previousLayout = useApp.getState().layout
+  useApp.setState({ sequences: [{ ...sequence, clips: [...sequence.clips, clip('fractional-cut', 'v1', 1.011, .4, '#abcdef')] }], activeSeqId: sequence.id, playing: false,
+    timelineZoom: 600, tool: 'select', selectedClipIds: [],
+    settings: { ...settings, snap: true, fps: 30 }, layout: { ...previousLayout, timelineH: 400 } })
+  const container = document.createElement('div')
+  document.body.append(container)
+  const root = createRoot(container)
+  try {
+    flushSync(() => root.render(<Timeline />))
+    await frames()
+    const ruler = container.querySelector<HTMLElement>('[data-testid="timeline-ruler"]')!
+    const body = container.querySelector<HTMLElement>('[data-testid="timeline-body"]')!
+    ruler.setPointerCapture = () => {}
+    const base = body.getBoundingClientRect().left + 100
+    const event = (type: string, x: number, buttons: number, shiftKey = false) => new PointerEvent(type, {
+      bubbles: true, pointerId: 101, button: 0, buttons, shiftKey, clientX: x, clientY: ruler.getBoundingClientRect().top + 10,
+    })
+    flushSync(() => ruler.dispatchEvent(event('pointerdown', base, 1)))
+    const committed = useApp.getState().playhead
+    let expected = 0
+    for (let dx = 1; dx <= 6; dx++) {
+      const x = base + dx
+      expected = (x - body.getBoundingClientRect().left + body.scrollLeft) / 600
+      window.dispatchEvent(event('pointermove', x, 1))
+      check(Math.abs(getLivePlayhead() - expected) < 1e-6, `pointer moved ${dx}px but playhead is quantized to a video frame`)
+      check(useApp.getState().playhead === committed, 'scrub wrote project state on every move')
+      const overlay = container.querySelector<HTMLElement>('[data-testid="playhead-layer"]')!
+      check(Math.abs(new DOMMatrix(overlay.style.transform).m41 - (expected * 600 - 1)) < .01, 'playhead did not follow pointer immediately')
+    }
+    flushSync(() => window.dispatchEvent(event('pointerup', base + 6, 0)))
+    check(Math.abs(useApp.getState().playhead - Math.round(expected * 30) / 30) < 1e-6, 'release lost frame alignment')
+    flushSync(() => ruler.dispatchEvent(event('pointerdown', base, 1)))
+    window.dispatchEvent(event('pointermove', base + 6, 1, true))
+    check(useApp.getState().snapGuide === null, 'fixture is unexpectedly near a cut')
+    flushSync(() => window.dispatchEvent(event('pointerup', base + 6, 0, true)))
+    check(Math.abs(useApp.getState().playhead - Math.round(expected * 30) / 30) < 1e-6, 'Shift without a cut lost frame alignment')
+    const cutX = body.getBoundingClientRect().left + 1.011 * 600 - body.scrollLeft + 1
+    flushSync(() => ruler.dispatchEvent(event('pointerdown', base, 1)))
+    window.dispatchEvent(event('pointermove', cutX, 1, true))
+    check(Math.abs(getLivePlayhead() - 1.011) < 1e-6, 'Shift did not snap to the exact fractional cut')
+    flushSync(() => window.dispatchEvent(event('pointerup', cutX, 0, true)))
+    check(Math.abs(useApp.getState().playhead - 1.011) < 1e-6, 'release overwrote the explicit cut snap')
+  } finally { root.unmount(); container.remove(); useApp.setState({ layout: previousLayout }) }
 })
 
 test('live playhead moves immediately without waiting for a React commit', () => {

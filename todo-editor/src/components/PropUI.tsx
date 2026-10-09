@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import { ChevronDown } from 'lucide-react'
 import { useState, type ButtonHTMLAttributes, type ReactNode } from 'react'
 
 export function PropSection({
@@ -18,8 +18,8 @@ export function PropSection({
   if (!title) {
     return (
       <section
-        className={clsx('rounded-[10px] border flex flex-col', dense ? 'p-1.5 gap-1.5' : 'p-2.5 gap-2')}
-        style={{ borderColor: 'var(--border)', background: 'var(--surface-0)' }}
+        className={clsx('prop-section rounded-[10px] border flex flex-col', dense ? 'p-1.5 gap-1.5' : 'p-2.5 gap-2')}
+        style={{ borderColor: 'var(--stroke)', background: 'var(--surface-1)' }}
       >
         {children}
       </section>
@@ -27,21 +27,22 @@ export function PropSection({
   }
   return (
     <section
-      className={clsx('rounded-[10px] border flex flex-col', dense ? 'p-1.5 gap-1.5' : 'p-2 gap-1.5')}
-      style={{ borderColor: 'var(--border)', background: 'var(--surface-0)' }}
+      className={clsx('prop-section rounded-[10px] border flex flex-col', dense ? 'p-1.5 gap-1.5' : 'p-2 gap-1.5')}
+      style={{ borderColor: 'var(--stroke)', background: 'var(--surface-1)' }}
     >
       <button
         type="button"
         className="flex items-center gap-1 w-full text-left"
         onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
         title={open ? '收起' : '展开'}
       >
-        {open ? <ChevronDown size={12} className="shrink-0 opacity-50" /> : <ChevronRight size={12} className="shrink-0 opacity-50" />}
+        <ChevronDown size={12} className="prop-section-chevron shrink-0" style={{ transform: open ? 'rotate(0deg)' : 'rotate(-90deg)' }} />
         <h3 className="text-[10px] font-semibold uppercase tracking-wider m-0" style={{ color: 'var(--text-muted)' }}>
           {title}
         </h3>
       </button>
-      {open && children}
+      {open && <div className="prop-section-body">{children}</div>}
     </section>
   )
 }
@@ -70,12 +71,12 @@ export function PropBtn({
     <button
       type="button"
       className={clsx(
-        'w-full min-w-0 px-1.5 rounded-lg border text-[11px] font-medium',
+        'paper-prop-btn w-full min-w-0 px-1.5 rounded-lg border text-[11px] font-medium',
         'inline-flex items-center justify-center gap-1 shrink-0',
         'transition-colors',
         compact ? 'h-7' : 'h-9 px-2',
         active
-          ? 'border-[hsl(18_76%_46%/0.4)] bg-[var(--accent-dim)] text-[var(--accent)]'
+          ? 'border-[var(--stroke)] bg-[var(--accent-dim)] text-[var(--accent)]'
           : 'border-[var(--border)] bg-[var(--surface-1)] text-[var(--text-secondary)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]',
         className,
       )}
@@ -89,7 +90,7 @@ export function PropBtn({
 export function PropCallout({ children, ...rest }: { children: ReactNode } & React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
-      className="rounded-[10px] border px-2.5 py-2 text-[11px] leading-relaxed"
+      className="paper-callout rounded-[10px] border px-2.5 py-2 text-[11px] leading-relaxed"
       style={{ borderColor: 'var(--border)', background: 'var(--surface-2)', color: 'var(--text-muted)' }}
       {...rest}
     >

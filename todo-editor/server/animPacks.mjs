@@ -145,7 +145,7 @@ export function scanAnimPacks() {
 }
 
 /** 给前端的公开描述（不含模板与路径） */
-export function publicAnim({ pack }) {
+export function publicAnim({ pack, dir }) {
   return {
     id: pack.id,
     name: pack.name,
@@ -158,6 +158,7 @@ export function publicAnim({ pack }) {
     inputs: pack.inputs.map((x) => (x.type === 'select'
       ? { id: x.id, type: x.type, label: x.label, default: x.default, options: x.options.map((o) => ({ value: o.value, label: o.label })) }
       : { id: x.id, type: x.type, label: x.label, required: !!x.required, maxLength: x.maxLength, placeholder: x.placeholder || '' })),
+    installed: path.resolve(dir).startsWith(path.resolve(USER_ANIM_DIR) + path.sep),
     sprite: {
       grid: pack.sprite.grid,
       align: pack.sprite.align,

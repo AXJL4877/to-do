@@ -1,0 +1,40 @@
+{
+  "ok": true,
+  "workload": "two 1280x720 scenes, two draw elements each, 12fps, fixed CPU library/VP9 threads; process initialization and rendering/encoding/hold included; decoded validation excluded from timing",
+  "coldProcesses": true,
+  "quality": "all decoded BGRA pixels, holds, crops, timestamps and tips equal",
+  "records": [
+    {
+      "name": "full-serial",
+      "workers": 1,
+      "runsMs": [
+        28903.810100000555,
+        28342.823999999382,
+        30575.17430000007
+      ],
+      "medianMs": 28903.810100000555
+    },
+    {
+      "name": "local-serial",
+      "workers": 1,
+      "runsMs": [
+        17981.860399999277,
+        17607.21900000135,
+        17633.84419999784
+      ],
+      "medianMs": 17633.84419999784
+    },
+    {
+      "name": "local-parallel",
+      "workers": 2,
+      "runsMs": [
+        9449.526799999148,
+        8862.741499997355,
+        9295.638899999176
+      ],
+      "medianMs": 9295.638899999176
+    }
+  ],
+  "localSpeedup": 1.639109984878062,
+  "parallelSpeedup": 1.8970018510507547
+}

@@ -11,6 +11,11 @@
  * （「于是 / 所以 / 因为 / 而是 / 这叫…」开头的句子紧承上一句）。各段文字按顺序拼起来就是原文。
  */
 
+import { setTimeout as delay } from 'node:timers/promises'
+
+export const SEGMENT_TIMEOUT_MS = 45_000
+const TRANSIENT_RE = /fetch failed|terminated|ECONNRESET|ETIMEDOUT|ECONNREFUSED|EAI_AGAIN|socket hang up|UND_ERR|network|timed? ?out|\b(429|502|503|504)\b/i
+
 /** 句首出现这些词：和上一句是一个意思，不能在它前面切 */
 export const GLUE_RE = /^[“"「『（(]*(于是|所以|因为|而是|但是|可是|不过|然而|因此|这叫|这就是|这便是|说白了|也就是说|换句话说|换言之|比如|例如|结果|接着|然后|同时|并且|而且|甚至|否则|那么)/
 const SENTENCE_END = /([。！？!?…；;]+[”’」』）)\]]*)/
@@ -219,10 +224,12 @@ export function segmentTexts(units, starts) {
 
 /**
  * @param {string} script 已清洗的口播
- * @param {{ mode: 'semantic'|'paragraph'|'length', target: number, max: number, chat?: (messages) => Promise<any>, title?: string }} o
+ * chat 必须响应第二个参数里的 AbortSignal；超时后先等待传输结束，再使用本地分段。
+ * @param {{ mode: 'semantic'|'paragraph'|'length', target: number, max: number, chat?: (messages, options: { signal: AbortSignal }) => Promise<any>, title?: string, signal?: AbortSignal, timeoutMs?: number, retryDelayMs?: number, progressIntervalMs?: number, onProgress?: (progress: { phase: string, elapsedMs: number, timeoutMs: number, attempt: number }) => void }} o
  * @returns {Promise<{ title: string, cast: {name: string, look: string}[], segments: { text: string, title: string }[], source: string, notes: string }>}
  */
 export async function segmentScript(script, o) {
+  o.signal?.throwIfAborted()
   const limits = { target: o.target, max: o.max }
   const units = splitUnits(script, Math.min(o.max, Math.max(60, Math.round(o.target * 0.9))))
   if (!units.length) throw new Error('口播里没有可朗读的文字')
@@ -231,12 +238,46 @@ export async function segmentScript(script, o) {
     segments: segmentTexts(units, starts).map((text, i) => ({ text, title: titles[i] ?? '' })),
   })
   if (o.mode === 'semantic' && o.chat && units.length > 1) {
+    const controller = new AbortController()
+    const budgetMs = Number.isFinite(o.timeoutMs) && o.timeoutMs > 0 ? o.timeoutMs : SEGMENT_TIMEOUT_MS
+    const started = Date.now()
+    const timeoutError = new Error(`AI 分段超时（${Math.round(budgetMs / 1000)} 秒），使用本地分段`)
+    timeoutError.name = 'TimeoutError'
+    const abort = () => controller.abort(o.signal.reason)
+    o.signal?.addEventListener('abort', abort, { once: true })
+    const deadline = setTimeout(() => controller.abort(timeoutError), budgetMs)
+    let attempt = 1
+    const progress = (phase) => o.onProgress?.({ phase, elapsedMs: Date.now() - started, timeoutMs: budgetMs, attempt })
+    const heartbeat = setInterval(() => progress('waiting'), o.progressIntervalMs ?? 1000)
     try {
-      const outline = sanitizeOutline(await o.chat(buildSegmentMessages(units, { ...limits, title: o.title })), units, limits)
-      return pack(outline.starts, outline.titles, 'ai', '', outline.title, outline.cast)
+      const messages = buildSegmentMessages(units, { ...limits, title: o.title })
+      for (;;) {
+        controller.signal.throwIfAborted()
+        progress(attempt === 1 ? 'waiting' : 'retrying')
+        try {
+          // Await the aborted transport too: do not leave a request running behind a Promise.race fallback.
+          const raw = await o.chat(messages, { signal: controller.signal })
+          controller.signal.throwIfAborted()
+          const outline = sanitizeOutline(raw, units, limits)
+          return pack(outline.starts, outline.titles, 'ai', '', outline.title, outline.cast)
+        } catch (e) {
+          if (controller.signal.aborted) throw controller.signal.reason
+          if (attempt >= 2 || !TRANSIENT_RE.test(String(e))) throw e
+          attempt++
+          progress('retrying')
+          await delay(o.retryDelayMs ?? 1000, undefined, { signal: controller.signal })
+        }
+      }
     } catch (e) {
+      o.signal?.throwIfAborted()
+      const reason = controller.signal.aborted ? controller.signal.reason : e
       const starts = heuristicStarts(units, { ...limits, paragraph: true })
-      return pack(starts, [], 'fallback', `AI 分段失败，改按段落 + 字数切：${String(e instanceof Error ? e.message : e).slice(0, 80)}`)
+      progress('fallback')
+      return pack(starts, [], 'fallback', `AI 分段失败，改按段落 + 字数切：${String(reason instanceof Error ? reason.message : reason).slice(0, 80)}`)
+    } finally {
+      clearTimeout(deadline)
+      clearInterval(heartbeat)
+      o.signal?.removeEventListener('abort', abort)
     }
   }
   const starts = heuristicStarts(units, { ...limits, paragraph: o.mode !== 'length' })

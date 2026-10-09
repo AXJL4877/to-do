@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useRef, type CSSProperties } from 'react'
 import clsx from 'clsx'
 
 type Props = {
@@ -71,6 +71,8 @@ export function NumInput({
       {hasSlider && (
         <input
           type="range"
+          className="paper-range"
+          style={{ '--range-progress': `${max! > min! && Number.isFinite(value) ? Math.max(0, Math.min(100, (value - min!) / (max! - min!) * 100)) : 0}%` } as CSSProperties}
           aria-label={`${label || testId || '数值'}滑块`}
           min={min}
           max={max}

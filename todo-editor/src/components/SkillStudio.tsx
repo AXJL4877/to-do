@@ -7,7 +7,7 @@ import {
   type SkillElement, type SkillGroup, type SkillPack, type SkillParam, type SkillParams, type SkillPlan, type SkillRole, type TimelinePlacement,
 } from '../lib/aiSkills'
 
-export const ELEMENT_COLORS = ['#f4d35e', '#7cc6fe', '#f28482', '#84dcc6', '#c3a6ff', '#ffb870', '#a3d977', '#ff9ecb']
+export const ELEMENT_COLORS = ['#d2d2d2', '#bababa', '#9b9b9b', '#c8c8c8', '#b3b3b3', '#c2c2c2', '#c6c6c6', '#b6b6b6']
 
 type Props = {
   pack: SkillPack

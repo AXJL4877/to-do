@@ -1,6 +1,7 @@
 import { createJizura } from './jizura/engine.js'
 import type { DynamicText, TextStyle } from '../types'
 import { drawFullComposition, invalidateFullCompositionFonts, normalizeComposition } from './jizura/fullComposition'
+import { drawCornerChain } from './cornerChain'
 
 export const DYNAMIC_PRESETS = [
   { id: 'dynamic-pop', name: '弹入标题', layout: 'center' },
@@ -20,7 +21,7 @@ export function normalizeDynamicText(raw: unknown): DynamicText | null {
   if (r.version === 2 && r.engine === 'jizura') {
     const composition = normalizeComposition(r.composition)
     if (!composition) return null
-    return { version: 2, engine: 'jizura', presetId: 'dynamic-full', composition,
+    return { version: 2, engine: 'jizura', presetId: composition.corner ? 'dynamic-corner-chain' : 'dynamic-full', composition,
       seed: num(r.seed, 0, 0xffffffff, 20261002) >>> 0, duration: num(r.duration, 0.05, 7200, 3),
       motion: num(r.motion, 0, 1, 0.7), accent: color(r.accent, '#ffb454') }
   }
@@ -137,7 +138,8 @@ export function drawDynamicText(ctx: CanvasRenderingContext2D, text: TextStyle, 
   if (!cfg) return false
   if (!text.content.trim()) return true
   if (cfg.version === 2) {
-    drawFullComposition(ctx, text, cfg, w, h, Math.max(0, Number.isFinite(localTime) ? localTime : 0), fontSize)
+    const draw = cfg.composition?.corner ? drawCornerChain : drawFullComposition
+    draw(ctx, text, cfg, w, h, Math.max(0, Number.isFinite(localTime) ? localTime : 0), fontSize)
     return true
   }
   const J = getEngine(text.fontFamily, text.fancy?.fontWeight ?? 700)

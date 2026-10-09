@@ -232,7 +232,7 @@ export function AiAnimStudio({ anims, hasRef, characters, onSubmit, onClose }: {
                     {directing ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
                     {directing ? 'AI 拆分中…' : 'AI 拆分 · 先看方案'}
                   </button>
-                  <span className="text-[10px]" style={{ color: directErr ? 'var(--danger, #e11d48)' : 'var(--text-muted)' }} data-testid="ai-anim-direction">
+                  <span className="text-[10px]" style={{ color: directErr ? 'var(--danger, #4a4a4a)' : 'var(--text-muted)' }} data-testid="ai-anim-direction">
                     {directErr
                       ?? (direction
                         ? `「${direction.title}」${sheets > 1 ? `分 ${sheets} 段` : '1 段'}${direction.notes ? ` · ${direction.notes}` : ''}`
@@ -261,7 +261,7 @@ export function AiAnimStudio({ anims, hasRef, characters, onSubmit, onClose }: {
                           title={c.name}
                           data-testid={`ai-anim-char-${c.jobId}`}
                           className={clsx('rounded overflow-hidden border-2', value.characterFrom === c.jobId ? 'border-[var(--accent)]' : 'border-transparent')}
-                          style={{ width: 52, height: 52, background: '#fff' }}
+                          style={{ width: 52, height: 52, background: '#ffffff' }}
                           onClick={() => set({ characterFrom: c.jobId })}
                         >
                           <img src={c.url} alt={c.name} className="w-full h-full object-contain" />

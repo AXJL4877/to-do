@@ -5,6 +5,7 @@ import type { Clip } from '../types'
 import { isNarratedJob, syncNarratedJob, type NarratedJob } from './narratedTimeline'
 import { isStoreAuthority } from './storeSync'
 import { narrationJobId } from '../../shared/ttsNarration.mjs'
+import { isRemovedGenerated } from './mediaManagement'
 
 export type ImportableAiJob = {
   id: string
@@ -47,11 +48,12 @@ export function isSameAiMedia(m: { url: string; aiUrl?: string }, url: string) {
 }
 
 function addToAiFolder(item: ImportItem) {
+  if(isRemovedGenerated(item.url,useApp.getState().settings.removedGeneratedMedia))return null
   const hit = useApp.getState().media.find((m) => isSameAiMedia(m, item.url))
   if (hit) return hit.id
-  useApp.getState().importMedia([item])
+  const [id]=useApp.getState().importMedia([item])
   const st = useApp.getState()
-  const added = st.media[st.media.length - 1]
+  const added = st.media.find(m=>m.id===id)
   if (!added) return null
   useApp.setState({ media: st.media.map((m) => (m.id === added.id ? { ...m, folderId: 'f_ai' } : m)) })
   return added.id

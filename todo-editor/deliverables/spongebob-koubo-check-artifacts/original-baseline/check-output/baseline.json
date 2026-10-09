@@ -1,0 +1,15 @@
+{
+  "ok": true,
+  "ids": [
+    "hero",
+    "prop"
+  ],
+  "slowFrames": [
+    24,
+    24
+  ],
+  "fastFrames": [
+    24,
+    24
+  ]
+}

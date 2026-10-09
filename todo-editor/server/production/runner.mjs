@@ -4,7 +4,7 @@ import { isDynamicText } from './dynamicText.mjs'
  *
  *   分段（文档还没有口播段时）→ 每段：配音 → 分镜 → 字幕 ∥ 每个镜头：元素候选图 → 渲染
  *
- * 每层一个先进先出的并发闸（配音 2、分镜 2、生图 TODO_AI_CONCURRENCY、渲染 1、字幕 1），排在前面的段先拿到名额：
+ * 每层一个先进先出的并发闸（配音 2、分镜 2、生图 TODO_AI_CONCURRENCY、黑板渲染按资源预算 1~4，其它渲染 1、字幕 1）：
  * 第 1 段在渲染时，后面的段还在配音 / 生图，产物一出来就存盘，编辑器轮询文档流式入轨。
  * 单个节点失败不牵连别的节点：错误记在节点上并汇总，最后整体报错；重试时只有失败和没做完的节点会再跑。
  *
@@ -15,17 +15,20 @@ import { cleanScript } from '../skillPacks.mjs'
 import { newSegment, pickedVariant, publicProduction, saveProduction, scopeTester } from './doc.mjs'
 import { asset, plate, render, segmentSchedule, storyboard, subtitles, voice } from './layers.mjs'
 import { segmentScript } from './segment.mjs'
+import { chalkRenderBudget } from './renderBudget.mjs'
 
 const IMAGE_CONCURRENCY = Math.max(1, Math.min(8, Number(process.env.TODO_AI_CONCURRENCY) || 4))
 const WEIGHT = { voice: 1, plan: 1, asset: 2, render: 3, subtitles: 0.5 }
 const LAYER_LABEL = { segment: '分段', voice: '配音', plan: '分镜', asset: '生图', render: '渲染', subtitles: '字幕', plate: '底板' }
 
 const cancels = new Set()
+const segmentControllers = new Map()
 export class ProductionCanceled extends Error {}
 
-/** 停止正在跑的成片：已开始的那一步做完，排队中的不再开始 */
+/** 停止正在跑的成片：立即中止分段请求，其余已开始的步骤做完，排队中的不再开始 */
 export function requestCancel(id) {
   cancels.add(id)
+  segmentControllers.get(id)?.abort(new ProductionCanceled('已停止'))
 }
 
 function gate(n, doc) {
@@ -40,6 +43,15 @@ function gate(n, doc) {
     }
   }
   return (fn) => new Promise((resolve, reject) => { waiting.push({ fn, resolve, reject }); next() })
+}
+
+// A rejected queued node must not release the document while its siblings
+// still render or save. Drain each nested group before propagating failure.
+async function allDrained(promises) {
+  const settled = await Promise.allSettled(promises)
+  const failed = settled.find((r) => r.status === 'rejected')
+  if (failed) throw failed.reason
+  return settled.map((r) => r.value)
 }
 
 function throttle(fn, ms) {
@@ -123,10 +135,21 @@ export async function runProduction(doc, env, opts = {}) {
     if (!doc.segments.length) {
       report('AI 分段')
       const params = doc.params
-      const r = await segmentScript(cleanScript(doc.script), {
-        mode: params.split ?? 'semantic', target: Number(params.segmentChars) || 120, max: Math.max(Number(params.segmentChars) || 120, Number(params.segmentMax) || 200),
-        chat: env.services.chat, title: doc.title,
-      })
+      const controller = new AbortController()
+      segmentControllers.set(doc.id, controller)
+      if (cancels.has(doc.id)) controller.abort(new ProductionCanceled('已停止'))
+      let r
+      try {
+        r = await segmentScript(cleanScript(doc.script), {
+          mode: params.split ?? 'semantic', target: Number(params.segmentChars) || 120, max: Math.max(Number(params.segmentChars) || 120, Number(params.segmentMax) || 200),
+          chat: env.services.chat, title: doc.title,
+          signal: controller.signal,
+          onProgress: ({ phase, elapsedMs, timeoutMs, attempt }) => report(phase === 'fallback'
+            ? 'AI 分段等待结束，使用本地分段'
+            : `AI 分段 · 已等待 ${Math.floor(elapsedMs / 1000)}s / 最多 ${Math.ceil(timeoutMs / 1000)}s${attempt > 1 ? ' · 重试中' : ''}`),
+        })
+      } finally { segmentControllers.delete(doc.id) }
+      if (cancels.has(doc.id)) throw new ProductionCanceled('已停止')
       if (!doc.titleLocked && r.title) doc.title = r.title
       doc.cast = r.cast
       doc.outline = { source: r.source, notes: r.notes }
@@ -137,7 +160,8 @@ export async function runProduction(doc, env, opts = {}) {
     const t = scopeTester(doc, opts.scope)
     const segs = doc.segments.filter((s) => t.segment(s))
     const planOnly = opts.stopAfter === 'plan'
-    const gates = { voice: gate(2, doc), plan: gate(2, doc), asset: gate(IMAGE_CONCURRENCY, doc), render: gate(1, doc), subtitles: gate(1, doc) }
+    ctx.renderResources=chalkRenderBudget(ctx.pack,doc.params)
+    const gates = { voice: gate(2, doc), plan: gate(2, doc), asset: gate(IMAGE_CONCURRENCY, doc), render: gate(ctx.renderResources.workers, doc), subtitles: gate(1, doc) }
 
     const planCounted = new Set()
     for (const seg of segs) {
@@ -180,10 +204,10 @@ export async function runProduction(doc, env, opts = {}) {
         if (render.dirty(ctx, seg, b, sched[seg.boards.indexOf(b)])) todo.render++
       }
       report()
-      await Promise.all(boards.map(async (b) => {
+      await allDrained([subs, allDrained(boards.map(async (b) => {
         const k = seg.boards.indexOf(b)
         const blabel = `${label} 镜头 ${k + 1}`
-        const ok = await Promise.all(b.elements.map(async (e) => {
+        const ok = await allDrained(b.elements.map(async (e) => {
           if (!wantAsset(seg, b, e)) return asset.usable(ctx, e)
           try {
             await gates.asset(async () => { report(`${blabel} 生图「${e.label}」`); await asset.run(ctx, e) })
@@ -205,8 +229,7 @@ export async function runProduction(doc, env, opts = {}) {
           done.render++
           fail('render', b, blabel, err)
         }
-      }))
-      await subs
+      }))])
     }
 
     /** 元素要不要生图：被点名或整镜头在范围内时，补齐所有待生成候选；否则只在选中的图不能用时补 */

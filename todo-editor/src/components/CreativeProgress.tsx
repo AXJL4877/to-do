@@ -12,8 +12,6 @@ type Props = {
   className?: string
 }
 
-const BARS = [0.35, 0.7, 0.45, 0.95, 0.55, 0.8, 0.4, 0.65, 0.5, 0.85, 0.6, 0.75]
-
 /** 按任务类型挑进度主题 */
 export function progressThemeForJob(j: {
   kind?: string
@@ -31,92 +29,22 @@ export function progressThemeForJob(j: {
   return 'orbit'
 }
 
-/**
- * 富有场景感的加载条：烧字幕=音频波形+扫光；文案=打字光标；封面=笔刷；导出=胶片齿孔等。
- */
+/** Monochrome pencil strokes; determinate progress never runs a fake loop. */
 export function CreativeProgress({ theme = 'orbit', percent = null, label, compact, className }: Props) {
-  const known = percent != null && Number.isFinite(percent)
-  const pct = known ? Math.max(0, Math.min(100, Math.round(percent!))) : null
-
+  const pct = percent != null && Number.isFinite(percent) ? Math.max(0, Math.min(100, Math.round(percent))) : null
   return (
-    <div
-      className={clsx('cp', `cp-theme-${theme}`, compact && 'is-compact', className)}
-      data-testid={`creative-progress-${theme}`}
-      role="progressbar"
-      aria-valuemin={0}
-      aria-valuemax={100}
-      aria-valuenow={pct ?? undefined}
-      aria-label={label || '进行中'}
-    >
-      {theme === 'wave' ? (
-        <div className="cp-wave" aria-hidden>
-          <div className="cp-wave-bars">
-            {BARS.map((h, i) => (
-              <span key={i} style={{ ['--h' as string]: h, ['--i' as string]: i }} />
-            ))}
-          </div>
-          <div className="cp-wave-beam" />
-          {pct != null ? <div className="cp-wave-fill" style={{ width: `${pct}%` }} /> : null}
-        </div>
-      ) : null}
-
-      {theme === 'type' ? (
-        <div className="cp-type" aria-hidden>
-          <div className="cp-type-track">
-            <span className="cp-type-ghost">标题 · 简介 · 标签</span>
-            <span className="cp-type-write" style={pct != null ? { width: `${pct}%` } : undefined}>
-              标题 · 简介 · 标签
-            </span>
-            <span className="cp-type-caret" />
-          </div>
-        </div>
-      ) : null}
-
-      {theme === 'brush' ? (
-        <div className="cp-brush" aria-hidden>
-          <div className="cp-brush-canvas">
-            <div className="cp-brush-stroke" style={pct != null ? { width: `${Math.max(12, pct)}%` } : undefined} />
-            <div className="cp-brush-tip" style={pct != null ? { left: `${Math.max(8, pct)}%` } : undefined} />
-          </div>
-        </div>
-      ) : null}
-
-      {theme === 'film' ? (
-        <div className="cp-film" aria-hidden>
-          <div className="cp-film-strip">
-            {Array.from({ length: 8 }, (_, i) => (
-              <span key={i} className="cp-film-frame" style={{ ['--i' as string]: i }} />
-            ))}
-          </div>
-          {pct != null ? <div className="cp-film-fill" style={{ width: `${pct}%` }} /> : null}
-        </div>
-      ) : null}
-
-      {theme === 'chalk' ? (
-        <div className="cp-chalk" aria-hidden>
-          <div className="cp-chalk-board">
-            <div className="cp-chalk-dust" />
-            <div className="cp-chalk-line" style={pct != null ? { width: `${pct}%` } : undefined} />
-            <div className="cp-chalk-hand" style={pct != null ? { left: `${pct}%` } : undefined} />
-          </div>
-        </div>
-      ) : null}
-
-      {theme === 'orbit' ? (
-        <div className="cp-orbit" aria-hidden>
-          <div className="cp-orbit-track">
-            <div className="cp-orbit-fill" style={pct != null ? { width: `${pct}%` } : undefined} />
-            <div className="cp-orbit-glow" style={pct != null ? { left: `${pct}%` } : undefined} />
-          </div>
-        </div>
-      ) : null}
-
-      {(label || pct != null) && (
-        <div className="cp-meta">
-          {label ? <span className="cp-label">{label}</span> : null}
-          {pct != null ? <span className="cp-pct tabular-nums">{pct}%</span> : null}
-        </div>
-      )}
+    <div className={clsx('cp', 'cp-handdrawn', `cp-theme-${theme}`, compact && 'is-compact', pct == null && 'is-indeterminate', className)}
+      data-testid={`creative-progress-${theme}`} role="progressbar" aria-valuemin={0} aria-valuemax={100}
+      aria-valuenow={pct ?? undefined} aria-valuetext={label} aria-label={label || '进行中'}>
+      <div className="cp-sketch-track" aria-hidden="true">
+        <div className="cp-sketch-fill" style={pct != null ? {width:`${pct}%`} : undefined} />
+        <svg className="cp-sketch-outline" viewBox="0 0 300 20" preserveAspectRatio="none" fill="none">
+          <path d="M3 3L78 2.3L146 3L222 2L297 3.1L296.2 17L226 17.8L147 17L74 18L2.5 17.3Z" />
+          <path d="M5 1.5L108 1L209 1.7L298.5 1.4M298.5 4L299 15.6M294 19L203 18.8L99 19.2L1 19M1 15L1.5 4" />
+        </svg>
+        <div className="cp-sketch-ticks" />
+      </div>
+      {(label || pct != null) && <div className="cp-meta">{label ? <span className="cp-label" title={label}>{label}</span> : null}{pct != null ? <span className="cp-pct tabular-nums">{pct}%</span> : null}</div>}
     </div>
   )
 }

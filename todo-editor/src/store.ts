@@ -13,6 +13,7 @@ import { desktop } from './lib/desktop'
 import { mayHaveAlpha } from './lib/mediaAlpha'
 import { clampZoom } from './lib/timelineZoom'
 import { aiFetch } from './lib/aiFetch'
+import { generatedNameOf, removeMediaReferences, restoreMediaSnapshot, restoreRemovedGenerated, restoreMediaClipSnapshot } from './lib/mediaManagement'
 import { setLivePlayhead } from './lib/livePlayhead'
 import { bedSpan, planBgmPieces, type BgmEntry } from './lib/bgmLibrary'
 import { reviveMediaList, parseDesktopMedia, pathToFileUrl } from './lib/importFiles'
@@ -615,7 +616,7 @@ function normalizeFolders(raw: unknown): MediaFolder[] {
   return out
 }
 
-type Snap = { sequences: Sequence[]; activeSeqId: string }
+type Snap = { sequences: Sequence[]; activeSeqId: string; media?: MediaItem[]; mediaIds?: string[]; mediaClipScope?: Record<string,string[]>; removedGeneratedMedia?: string[]; removedGeneratedScope?: string[] }
 let clipboard: Clip[] = []
 let attrClipboard: Pick<Clip, 'transform' | 'color' | 'audio'> | null = null
 
@@ -819,6 +820,7 @@ export type AppStore = {
   ensureFolder: (id: string, name: string, parentId?: string | null) => void
   toggleFavorite: (id: string) => void
   removeMedia: (id: string) => void
+  removeMediaBatch: (ids: string[]) => void
   relinkMedia: (id: string, url: string, path?: string) => void
   setMediaProxyPath: (id: string, proxyPath: string | undefined) => void
   /** 桌面：对 media.path 生成代理；成功写 proxyPath */
@@ -1575,9 +1577,10 @@ export const useApp = create<AppStore>((set, get) => {
       historyCoalesceUntil = 0
       set({
         history: history.slice(0, -1),
-        future: [...future, { sequences: JSON.parse(JSON.stringify(sequences)), activeSeqId }],
-        sequences: prev.sequences,
+        future: [...future, { sequences: JSON.parse(JSON.stringify(sequences)), activeSeqId, ...(prev.media ? {media:get().media,mediaIds:prev.mediaIds,mediaClipScope:prev.mediaClipScope,removedGeneratedMedia:get().settings.removedGeneratedMedia||[],removedGeneratedScope:prev.removedGeneratedScope} : {}) }],
+        sequences: prev.mediaClipScope ? restoreMediaClipSnapshot(sequences,prev.sequences,prev.mediaClipScope) : prev.sequences,
         activeSeqId: prev.activeSeqId,
+        ...(prev.media ? {media:restoreMediaSnapshot(get().media,prev.media,prev.mediaIds||[]),settings:{...get().settings,removedGeneratedMedia:restoreRemovedGenerated(get().settings.removedGeneratedMedia||[],prev.removedGeneratedMedia||[],prev.removedGeneratedScope||[])},selectedMediaId:null,sourceMediaId:null} : {}),
       })
     },
     redo() {
@@ -1589,11 +1592,27 @@ export const useApp = create<AppStore>((set, get) => {
       }
       const next = future[future.length - 1]
       historyCoalesceUntil = 0
+      const nextMedia = next.media ? restoreMediaSnapshot(get().media,next.media,next.mediaIds||[]) : undefined
+      let nextSequences = next.mediaClipScope ? restoreMediaClipSnapshot(sequences,next.sequences,next.mediaClipScope) : next.sequences
+      let inverseClipScope = next.mediaClipScope
+      if (nextMedia) {
+        const remainingIds = new Set(nextMedia.map(media=>media.id))
+        const removed = get().media.filter(media=>!remainingIds.has(media.id))
+        const remainingNames = new Set(nextMedia.map(generatedNameOf).filter(Boolean))
+        const removedNames = new Set(removed.map(generatedNameOf).filter((name):name is string=>!!name&&!remainingNames.has(name)))
+        nextSequences = removeMediaReferences(nextSequences,new Set(removed.map(media=>media.id)),removedNames)
+        inverseClipScope = Object.fromEntries(sequences.map(sequence=>{
+          const resultingClips = new Map(nextSequences.find(item=>item.id===sequence.id)?.clips.map(clip=>[clip.id,clip])||[])
+          const affected = sequence.clips.filter(clip=>resultingClips.get(clip.id)!==clip).map(clip=>clip.id)
+          return [sequence.id,[...new Set([...(next.mediaClipScope?.[sequence.id]||[]),...affected])]]
+        }))
+      }
       set({
         future: future.slice(0, -1),
-        history: [...history, { sequences: JSON.parse(JSON.stringify(sequences)), activeSeqId }],
-        sequences: next.sequences,
+        history: [...history, { sequences: JSON.parse(JSON.stringify(sequences)), activeSeqId, ...(next.media ? {media:get().media,mediaIds:next.mediaIds,mediaClipScope:inverseClipScope,removedGeneratedMedia:get().settings.removedGeneratedMedia||[],removedGeneratedScope:next.removedGeneratedScope} : {}) }],
+        sequences: nextSequences,
         activeSeqId: next.activeSeqId,
+        ...(nextMedia ? {media:nextMedia,settings:{...get().settings,removedGeneratedMedia:restoreRemovedGenerated(get().settings.removedGeneratedMedia||[],next.removedGeneratedMedia||[],next.removedGeneratedScope||[])},selectedMediaId:null,sourceMediaId:null} : {}),
       })
     },
 
@@ -2090,14 +2109,32 @@ export const useApp = create<AppStore>((set, get) => {
       set({ media: get().media.map((m) => (m.id === id ? { ...m, favorite: !m.favorite } : m)) })
     },
     removeMedia(id) {
-      get().pushHistory()
-      const next = get().media.filter((m) => m.id !== id)
+      get().removeMediaBatch([id])
+    },
+    removeMediaBatch(ids) {
+      const state=get(),wanted=new Set(ids)
+      const removed=state.media.filter(m=>wanted.has(m.id))
+      if(!removed.length)return
+      historyCoalesceUntil=0
+      const next=state.media.filter(m=>!wanted.has(m.id))
+      const generated=new Set(removed.map(generatedNameOf).filter((n):n is string=>!!n))
+      const sequences=removeMediaReferences(state.sequences,wanted,new Set([...generated].filter(n=>!next.some(m=>generatedNameOf(m)===n))))
+      const mediaClipScope=Object.fromEntries(state.sequences.map(before=>{
+        const after=new Map(sequences.find(s=>s.id===before.id)!.clips.map(c=>[c.id,c]))
+        return [before.id,before.clips.filter(c=>after.get(c.id)!==c).map(c=>c.id)]
+      }))
+      const liveClips=new Set(sequences.flatMap(s=>s.clips.map(c=>c.id)))
+      const suppressed=[...new Set([...(state.settings.removedGeneratedMedia||[]),...removed.map(generatedNameOf).filter((n):n is string=>!!n&&!next.some(m=>generatedNameOf(m)===n))])]
       set({
         media: next,
-        selectedMediaId: get().selectedMediaId === id ? (next[0]?.id ?? null) : get().selectedMediaId,
-        sourceMediaId: get().sourceMediaId === id ? (next[0]?.id ?? null) : get().sourceMediaId,
+        sequences,settings:{...state.settings,removedGeneratedMedia:suppressed},
+        history:[...state.history.slice(-40),{sequences:JSON.parse(JSON.stringify(state.sequences)),activeSeqId:state.activeSeqId,media:state.media,mediaIds:removed.map(m=>m.id),mediaClipScope,removedGeneratedMedia:state.settings.removedGeneratedMedia||[],removedGeneratedScope:[...generated]}],future:[],
+        selectedMediaId: wanted.has(state.selectedMediaId||'') ? null : state.selectedMediaId,
+        sourceMediaId: wanted.has(state.sourceMediaId||'') ? null : state.sourceMediaId,
+        selectedClipIds:state.selectedClipIds.filter(id=>liveClips.has(id)),playing:false,
       })
-      notify('已从媒体库移除')
+      clearAllPreviewCaches()
+      notify(`已移除 ${removed.length} 个素材及其时间轴引用；磁盘文件保留`)
       queueMicrotask(() => get().saveProject({ silent: true }))
     },
     relinkMedia(id, url, path) {

@@ -21,6 +21,14 @@ export function normalizeComposition(raw: unknown): Composition | null {
     if (typeof id === 'string' && (id === 'none' || JIZURA_CATALOG.groups[group].some(x => x.id === id))) parts[group] = id
   }
   return { scenes, offset: clamp(r.offset, 0, scenes.at(-1)!.end, 0),
+    ...(r.corner ? {corner: {
+      direction: ['clockwise','alternate','mixed'].includes(r.corner.direction) ? r.corner.direction : 'alternate',
+      easing: ['spring','back','expo'].includes(r.corner.easing) ? r.corner.easing : 'spring',
+      variant: ['mix','type','pop','mask','slam','ribbon','echo','focus'].includes(r.corner.variant) ? r.corner.variant : 'mix',
+      sceneBase: Math.round(clamp(r.corner.sceneBase,0,1000000,0)),
+      zoom: clamp(r.corner.zoom,.6,1.4,1), transition: clamp(r.corner.transition,.15,1.8,1.05), stagger: clamp(r.corner.stagger,0,.08,.018), trail: Math.round(clamp(r.corner.trail,1,4,3)),
+      backgroundColor: /^#[0-9a-f]{6}$/i.test(r.corner.backgroundColor) ? r.corner.backgroundColor : '#101010',
+    }} : {}),
     style: JIZURA_CATALOG.styles.some(s => s.id === r.style) ? r.style! : 'noir',
     mood: moods.includes(r.mood!) ? r.mood! : 'graphic', background: r.background === 'transparent' ? 'transparent' : 'style',
     unify: r.unify !== false, parts,

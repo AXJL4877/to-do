@@ -20,6 +20,8 @@ import { BgmPanel } from './BgmPanel'
 import { beginDockDrag, defaultPanelDock, shouldIgnoreDockClick } from '../lib/panelDock'
 import { beginMediaDrag, finishMediaDrag } from '../lib/mediaDrag'
 import { desktop } from '../lib/desktop'
+import { generatedNameOf, mediaUsage } from '../lib/mediaManagement'
+import { MediaCleanupDialog } from './MediaCleanupDialog'
 import clsx from 'clsx'
 import type { LucideIcon } from 'lucide-react'
 import type { MediaFolder, MediaItem } from '../types'
@@ -421,7 +423,7 @@ export function MediaLibrary() {
   const setSelectedMedia = useApp((s) => s.setSelectedMedia)
   const importMedia = useApp((s) => s.importMedia)
   const addClipFromMedia = useApp((s) => s.addClipFromMedia)
-  const removeMedia = useApp((s) => s.removeMedia)
+  const sequences = useApp((s) => s.sequences)
   const moveMedia = useApp((s) => s.moveMedia)
   const ensureFolder = useApp((s) => s.ensureFolder)
   const addTransition = useApp((s) => s.addTransition)
@@ -439,6 +441,12 @@ export function MediaLibrary() {
   const [moreOpen, setMoreOpen] = useState(false)
   const [folderId, setFolderId] = useState(FOLDER_ALL)
   const [folderDrop, setFolderDrop] = useState<string | null>(null)
+  const [chosen,setChosen]=useState<string[]>([])
+  const [sourceFilter,setSourceFilter]=useState<'all'|'local'|'generated'|'unused'>('all')
+  const [cleanup,setCleanup]=useState<{ids?:string[]}|null>(null)
+  const selectionAnchor=useRef<string|null>(null)
+  const usage=useMemo(()=>mediaUsage(media,sequences),[media,sequences])
+  useEffect(()=>{setChosen(ids=>ids.filter(id=>media.some(m=>m.id===id)))},[media])
 
   // 网页截图 → 自动进「网页截图」文件夹
   useEffect(() => {
@@ -476,8 +484,11 @@ export function MediaLibrary() {
     if (folderScope && (libraryTab === 'media' || libraryTab === 'audio')) {
       base = base.filter((m) => folderScope.has(m.folderId))
     }
+    if(sourceFilter==='local')base=base.filter(m=>!generatedNameOf(m))
+    if(sourceFilter==='generated')base=base.filter(m=>!!generatedNameOf(m))
+    if(sourceFilter==='unused')base=base.filter(m=>!(usage.get(m.id)||0))
     return base
-  }, [media, libraryTab, folderScope])
+  }, [media, libraryTab, folderScope, sourceFilter, usage])
 
   const inSecondary = (SECONDARY as readonly string[]).includes(libraryTab)
   const MoreIcon = inSecondary ? ICONS[libraryTab] : MoreHorizontal
@@ -553,10 +564,11 @@ export function MediaLibrary() {
               <button
                 key={t}
                 type="button"
-                className={clsx('tab tab-icon', libraryTab === t && t !== 'ai' && 'active', t === 'ai' && panelDock.ai === 'tab' && libraryTab === 'ai' && 'active')}
+                className={clsx('tab library-tab', libraryTab === t && t !== 'ai' && 'active', t === 'ai' && panelDock.ai === 'tab' && libraryTab === 'ai' && 'active')}
                 data-testid={`lib-tab-${t}`}
                 title={t === 'ai' ? 'AI+（拖到边缘可停靠左/右/下）' : LABELS[t]}
                 aria-label={LABELS[t]}
+                aria-pressed={libraryTab === t && (t !== 'ai' || panelDock.ai === 'tab')}
                 onPointerDown={t === 'ai' ? (e) => {
                   beginDockDrag('ai', e, (slot) => {
                     const dock = useApp.getState().layout.panelDock
@@ -579,11 +591,12 @@ export function MediaLibrary() {
           })}
           <button
             type="button"
-            className={clsx('tab tab-icon', (moreOpen || inSecondary) && 'active')}
+            className={clsx('tab library-tab', (moreOpen || inSecondary) && 'active')}
             data-testid="lib-tab-more"
             onClick={() => setMoreOpen((v) => !v)}
             title={moreLabel}
             aria-label={moreLabel}
+            aria-expanded={moreOpen}
           >
             <MoreIcon size={13} strokeWidth={2} />
           </button>
@@ -617,7 +630,7 @@ export function MediaLibrary() {
         )}
       </div>
 
-      <div className="flex-1 overflow-hidden p-2 min-h-0 flex flex-col" onClick={() => moreOpen && setMoreOpen(false)}>
+      <div className="library-content flex-1 overflow-y-auto p-2 min-h-0 flex flex-col" onClick={() => moreOpen && setMoreOpen(false)}>
         {libraryTab === 'ai' && panelDock.ai === 'tab' && (
           aiFloat && aiFloatKind === 'window' ? (
             <div className="grid place-items-center gap-2 py-8 px-2 text-center" data-testid="ai-popped-placeholder">
@@ -678,7 +691,16 @@ export function MediaLibrary() {
                 onDropMedia={(fid, mid) => { moveMedia([mid], fid); setFolderDrop(null) }}
               />
             )}
-            <div className="media-grid-pane overflow-y-auto min-h-0">
+            <div className="media-grid-pane overflow-y-auto min-h-0" tabIndex={0}
+              onKeyDown={e=>{
+                if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='a'&&!(e.target instanceof HTMLInputElement)){e.preventDefault();setChosen(list.map(m=>m.id))}
+                if((e.key==='Delete'||e.key==='Backspace')&&chosen.length&&e.target===e.currentTarget){e.preventDefault();setCleanup({ids:chosen})}
+              }}>
+              <div className="media-manage-toolbar">
+                <div className="media-manage-heading"><span data-testid="media-selection-count">{chosen.length?`已选 ${chosen.length} 个`:`${list.length} 个素材`}</span><button className="btn btn-ghost" data-testid="media-select-all" disabled={!list.length} onClick={()=>setChosen(list.map(m=>m.id))}>全选</button>{chosen.length>0&&<button className="btn btn-ghost" onClick={()=>setChosen([])}>取消选择</button>}</div>
+                <div className="media-source-filters" aria-label="素材来源筛选">{([['all','全部'],['local','本地导入'],['generated','生成素材'],['unused','未使用']] as const).map(([key,label])=><button key={key} type="button" className={clsx('media-source-filter',sourceFilter===key&&'active')} aria-pressed={sourceFilter===key} data-testid={`media-filter-${key}`} onClick={()=>setSourceFilter(key)}>{label}</button>)}</div>
+                <div className="media-manage-actions"><button className="btn btn-ghost" data-testid="media-batch-remove" disabled={!chosen.length} onClick={()=>setCleanup({ids:chosen})}><Trash2 size={12}/>移除所选</button><button className="btn btn-ghost" data-testid="media-scan-generated" onClick={()=>setCleanup({})}>清理历史生成</button></div>
+              </div>
               {list.length === 0 ? (
                 <div className="h-full min-h-[120px] grid place-items-center text-[12px] text-center px-2" style={{ color: 'var(--text-muted)' }} data-testid="media-empty">
                   拖入或点击导入
@@ -690,37 +712,47 @@ export function MediaLibrary() {
                       key={m.id}
                       className={clsx(
                         'group relative rounded-lg overflow-hidden border cursor-grab active:cursor-grabbing',
-                        selectedMediaId === m.id && 'ring-2',
+                        chosen.includes(m.id) && 'ring-2 media-card-selected',
                       )}
                       style={{ borderColor: 'var(--border)', '--tw-ring-color': 'var(--accent)' } as React.CSSProperties}
                       data-testid={`media-item-${m.id}`}
+                      data-selected={chosen.includes(m.id)}
                       draggable
-                      onClick={() => setSelectedMedia(m.id)}
+                      onClick={e=>{
+                        if(e.shiftKey&&selectionAnchor.current){
+                          const a=list.findIndex(x=>x.id===selectionAnchor.current),b=list.findIndex(x=>x.id===m.id)
+                          setChosen(ids=>[...new Set([...((e.ctrlKey||e.metaKey)?ids:[]),...list.slice(Math.max(0,Math.min(a,b)),Math.max(a,b)+1).map(x=>x.id)])])
+                        }else if(e.ctrlKey||e.metaKey){setChosen(ids=>ids.includes(m.id)?ids.filter(id=>id!==m.id):[...ids,m.id]);selectionAnchor.current=m.id}
+                        else{setChosen([m.id]);selectionAnchor.current=m.id}
+                        setSelectedMedia(m.id)
+                      }}
                       onDoubleClick={() => addClipFromMedia(m.id)}
                       onDragStart={(e) => {
                         beginMediaDrag(e.dataTransfer, m.id)
                         setFolderDrop(null)
                       }}
                       onDragEnd={() => { finishMediaDrag(); setFolderDrop(null) }}
-                      title={m.name}
+                      title={`${m.name}\n来源：${generatedNameOf(m)?`生成文件 ${generatedNameOf(m)}`:'本地导入'}\n位置：${m.path||m.url}\n全部序列引用：${usage.get(m.id)||0} 处`}
                     >
                       <div className="aspect-video w-full overflow-hidden" style={{ background: 'var(--surface-2)' }}>
                         <MediaThumb m={m} />
                       </div>
+                      <button type="button" className={clsx('media-card-checkbox',chosen.includes(m.id)&&'checked')} aria-label={`选择 ${m.name}`} aria-pressed={chosen.includes(m.id)} onClick={e=>{e.stopPropagation();setChosen(ids=>ids.includes(m.id)?ids.filter(id=>id!==m.id):[...ids,m.id]);selectionAnchor.current=m.id}}>{chosen.includes(m.id)?'✓':''}</button>
                       <div
                         className="absolute inset-x-0 bottom-0 px-1.5 py-1 truncate text-[10px] font-medium"
                         style={{
-                          color: '#F5F2EC',
-                          background: 'linear-gradient(transparent, hsl(220 20% 8% / 0.75))',
+                          color: '#f2f2f2',
+                          background: 'linear-gradient(transparent, hsl(0 0% 8% / 0.75))',
                         }}
                       >
                         {m.offline ? '⚠ ' : ''}{m.name}
+                        <span className="media-card-info">{generatedNameOf(m)?'生成':'本地'} · {usage.get(m.id)||0} 处引用</span>
                       </div>
                       <div className="absolute top-1 right-1 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button
                           type="button"
                           className="icon-btn"
-                          style={{ width: 22, height: 22, background: 'hsl(220 20% 8% / 0.55)', color: '#F5F2EC' }}
+                          style={{ width: 22, height: 22, background: 'hsl(0 0% 8% / 0.55)', color: '#f2f2f2' }}
                           data-testid={`fav-${m.id}`}
                           title="收藏"
                           onClick={(e) => { e.stopPropagation(); toggleFavorite(m.id) }}
@@ -730,12 +762,12 @@ export function MediaLibrary() {
                         <button
                           type="button"
                           className="icon-btn"
-                          style={{ width: 22, height: 22, background: 'hsl(220 20% 8% / 0.55)', color: '#F5F2EC' }}
+                          style={{ width: 22, height: 22, background: 'hsl(0 0% 8% / 0.55)', color: '#f2f2f2' }}
                           data-testid={`del-media-${m.id}`}
-                          title="从媒体库删除"
+                          title="从工程移除（先查看引用）"
                           onClick={(e) => {
                             e.stopPropagation()
-                            removeMedia(m.id)
+                            setCleanup({ids:[m.id]})
                           }}
                         >
                           <Trash2 size={11} />
@@ -749,6 +781,7 @@ export function MediaLibrary() {
           </div>
         )}
       </div>
+      {cleanup&&<MediaCleanupDialog ids={cleanup.ids} onClose={()=>setCleanup(null)}/>}
     </aside>
   )
 }

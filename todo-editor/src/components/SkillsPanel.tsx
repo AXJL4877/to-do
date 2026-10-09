@@ -1,12 +1,13 @@
 import { memo, useCallback, useEffect, useMemo, useState } from 'react'
+import { EXTENSIONS_CHANGED, getLastInstalledExtension, uninstallExtension } from '../lib/extensionImport'
 import { Blocks, ChevronDown, ChevronLeft, ChevronRight, Loader2, Plus, RotateCcw, SlidersHorizontal, Sparkles, Trash2, Wand2 } from 'lucide-react'
 import clsx from 'clsx'
 import { useApp } from '../store'
 import { aiFetch, aiUrl } from '../lib/aiFetch'
 import { importAiJob, isSameAiMedia, shouldImport } from '../lib/aiJobImport'
 import {
-  CHALK_SKILL_ID, defaultSkillParams, enqueueSkill, fetchSkills, optionLabel, paramVisible, phasePercent, phaseText, speechSeconds,
-  type SkillJob, type SkillPack, type SkillParams, type SkillPlan, type TimelinePlacement,
+  CHALK_SKILL_ID, defaultSkillParams, enqueueSkill, fetchSkills, optionLabel, paramVisible, phasePercent, phaseText, speechSeconds, resolveSkillDraft,
+  type SkillDraft, type SkillJob, type SkillPack, type SkillParams, type SkillPlan, type TimelinePlacement,
 } from '../lib/aiSkills'
 import { isNarratedJob, narratedStage, type NarratedJob } from '../lib/narratedTimeline'
 import { createProduction, listProductions, type ProductionSummary } from '../lib/production'
@@ -26,7 +27,7 @@ const isVideoSkillJob = (j: SkillJob) =>
 /** 早期任务没记 skill id，都是黑板手绘 */
 const jobSkillId = (j: SkillJob) => j.params.skill?.id ?? CHALK_SKILL_ID
 
-type Draft = { prompt: string; params: SkillParams; plan: SkillPlan | null }
+type Draft = SkillDraft
 
 const PLACEMENT_KEY = 'todo.skillPlacement'
 const loadPlacement = (): TimelinePlacement => {
@@ -180,13 +181,13 @@ export function SkillsPanel() {
 
   const availablePacks = [DYNAMIC_TEXT_PACK, ...(packs ?? []).filter(p => p.id !== DYNAMIC_TEXT_PACK.id)]
   const pack = availablePacks.find((p) => p.id === selectedId) ?? null
-  const emptyDraft = useMemo<Draft>(() => ({ prompt: '', params: pack ? defaultSkillParams(pack) : {}, plan: null }), [pack])
-  const draft = (pack && drafts[pack.id]) || emptyDraft
+  const emptyDraft = useMemo<Draft>(() => ({ prompt: '', params: pack ? defaultSkillParams(pack) : {}, plan: null, version: pack?.version ?? '' }), [pack])
+  const draft = pack ? resolveSkillDraft(pack, drafts[pack.id]) : emptyDraft
   const { prompt, params, plan } = draft
 
   const patchDraft = useCallback((patch: Partial<Draft>) => {
     if (!pack) return
-    setDrafts((d) => ({ ...d, [pack.id]: { ...emptyDraft, ...d[pack.id], ...patch } }))
+    setDrafts((d) => ({ ...d, [pack.id]: { ...resolveSkillDraft(pack, d[pack.id]), ...patch } }))
   }, [pack, emptyDraft])
   const setPrompt = useCallback((v: string) => patchDraft({ prompt: v }), [patchDraft])
   const setParams = useCallback((v: SkillParams) => patchDraft({ params: v }), [patchDraft])
@@ -197,6 +198,23 @@ export function SkillsPanel() {
     setParamsOpen(false)
     setError(null)
   }
+
+  const removePack = useCallback(async (p: SkillPack) => {
+    if (!p.installed) return
+    if (!window.confirm(`移除拓展「${p.name}」？移除后可重新拖入 .todoext 安装。`)) return
+    try {
+      await uninstallExtension('skill', p.id)
+      setDrafts((d) => {
+        const next = { ...d }
+        delete next[p.id]
+        return next
+      })
+      if (selectedId === p.id) select(null)
+      useApp.getState().setToast(`已移除「${p.name}」`)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+  }, [selectedId])
 
   const refreshJobs = useCallback(async () => {
     try {
@@ -217,16 +235,23 @@ export function SkillsPanel() {
   useEffect(() => { void refreshJobs() }, [productionIds, refreshJobs])
 
   useEffect(() => {
-    fetchSkills()
+    let alive = true
+    let request = 0
+    const refresh = () => { const revision = ++request; void fetchSkills()
       .then((list) => {
+        if (!alive || revision !== request) return
         const video = list.filter(isVideoSkill)
         setPacks(video)
-        if (!video.length) setLoadError('还没有可用的技能包')
+        setLoadError(video.length ? '' : '还没有可用的技能包')
+        const installed = getLastInstalledExtension()
+        if (installed?.kind === 'skill' && video.some(p => p.id === installed.id)) setSelectedId(installed.id)
       })
-      .catch((e) => setLoadError(e instanceof Error ? e.message : String(e)))
+      .catch((e) => { if (alive && revision === request) setLoadError(e instanceof Error ? e.message : String(e)) }) }
+    refresh()
+    window.addEventListener(EXTENSIONS_CHANGED, refresh)
     void refreshJobs()
     const t = window.setInterval(() => void refreshJobs(), 2000)
-    return () => window.clearInterval(t)
+    return () => { alive = false; window.clearInterval(t); window.removeEventListener(EXTENSIONS_CHANGED, refresh) }
   }, [])
 
   const quick = useMemo(() => {
@@ -317,19 +342,33 @@ export function SkillsPanel() {
         {availablePacks.map((p) => {
           const running = jobs.filter((j) => jobSkillId(j) === p.id && (j.status === 'queued' || j.status === 'running')).length
           return (
-            <button key={p.id} type="button" className="skill-card" title={p.description} data-testid={`skill-pick-${p.id}`} onClick={() => select(p.id)}>
-              <span className="skill-card-thumb">
-                {p.previews[0] ? <img src={p.previews[0]} alt="" /> : <Blocks size={16} />}
-              </span>
-              <span className="min-w-0 flex-1 flex flex-col gap-0.5">
-                <span className="flex items-center gap-1.5 min-w-0">
-                  <span className="skill-card-name">{p.name}</span>
-                  {running > 0 && <Loader2 size={11} className="animate-spin shrink-0" style={{ color: 'var(--accent)' }} />}
+            <div key={p.id} className="skill-card-row">
+              <button type="button" className="skill-card" title={p.description} data-testid={`skill-pick-${p.id}`} onClick={() => select(p.id)}>
+                <span className="skill-card-thumb">
+                  {p.previews[0] ? <img src={p.previews[0]} alt="" /> : <Blocks size={16} />}
                 </span>
-                <p className="skill-card-desc">{p.description}</p>
-              </span>
-              <ChevronRight size={14} className="shrink-0" style={{ color: 'var(--text-muted)' }} />
-            </button>
+                <span className="min-w-0 flex-1 flex flex-col gap-0.5">
+                  <span className="flex items-center gap-1.5 min-w-0">
+                    <span className="skill-card-name">{p.name}</span>
+                    {running > 0 && <Loader2 size={11} className="animate-spin shrink-0" style={{ color: 'var(--accent)' }} />}
+                  </span>
+                  <p className="skill-card-desc">{p.description}</p>
+                </span>
+                <ChevronRight size={14} className="shrink-0" style={{ color: 'var(--text-muted)' }} />
+              </button>
+              {p.installed && (
+                <button
+                  type="button"
+                  className="icon-btn skill-card-remove"
+                  title={`移除「${p.name}」`}
+                  aria-label={`移除拓展 ${p.name}`}
+                  data-testid={`skill-remove-${p.id}`}
+                  onClick={() => void removePack(p)}
+                >
+                  <Trash2 size={13} />
+                </button>
+              )}
+            </div>
           )
         })}
       </div>
@@ -344,7 +383,20 @@ export function SkillsPanel() {
         <button type="button" className="icon-btn" style={{ width: 24, height: 24 }} title="返回技能列表" aria-label="返回技能列表" data-testid="skill-back" onClick={() => select(null)}>
           <ChevronLeft size={14} />
         </button>
-        <span className="text-[12px] font-semibold truncate" title={pack.description}>{pack.name}</span>
+        <span className="text-[12px] font-semibold truncate flex-1 min-w-0" title={pack.description}>{pack.name}</span>
+        {pack.installed && (
+          <button
+            type="button"
+            className="icon-btn"
+            style={{ width: 24, height: 24 }}
+            title={`移除「${pack.name}」`}
+            aria-label={`移除拓展 ${pack.name}`}
+            data-testid={`skill-remove-${pack.id}`}
+            onClick={() => void removePack(pack)}
+          >
+            <Trash2 size={13} />
+          </button>
+        )}
       </div>
 
       <div className="field">

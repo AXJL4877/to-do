@@ -21,6 +21,7 @@ import { subtitleClipStyle, type TimelinePlacement } from './aiSkills'
 import { chalkEnterLabel, elementTransform, setChalkHand } from './chalkHand'
 import { getProduction, listProductions, type Production, type ProductionSegment } from './production'
 import { isStoreAuthority } from './storeSync'
+import { isRemovedGenerated } from './mediaManagement'
 
 const VOICE_LANE = 0
 const PLATE_LANE = 99
@@ -64,6 +65,7 @@ function folderFor(p: Production) {
 }
 
 function ensureMedia(item: { name: string; url: string; kind: MediaItem['kind']; duration: number; width?: number; height?: number; alpha?: boolean }, folderId: string) {
+  if(isRemovedGenerated(item.url,useApp.getState().settings.removedGeneratedMedia))return null
   const hit = useApp.getState().media.find((m) => isSameAiMedia(m, item.url))
   if (hit) return hit.id
   return useApp.getState().importMedia([{ ...item, hasAudio: item.kind === 'audio', folderId }], { silent: true })[0] ?? null

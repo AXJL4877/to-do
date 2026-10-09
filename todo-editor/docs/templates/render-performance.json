@@ -1,0 +1,7 @@
+{
+  "spec":"todo-render-performance/1",
+  "cases":[
+    {"id":"REPLACE_COLD_CASE","cacheState":"cold","workload":"填写素材哈希/种子/字体/画幅/fps/时长/编码/测量阶段","baseline":{"environment":"填写硬件与版本","runsMs":[]},"candidate":{"environment":"填写同一环境","runsMs":[],"peakMiB":null,"workers":null},"budget":{"maxWallMs":null,"maxPeakMiB":null,"maxRegressionRatio":null},"memoryScope":"填写完整进程树或实际测量范围","strategy":"填写依赖、并发、线程、缓存、复用与背压","quality":{"passed":false,"evidence":[]}},
+    {"id":"REPLACE_WARM_CASE","cacheState":"warm","workload":"填写相同条件，仅缓存状态不同","baseline":{"environment":"填写硬件与版本","runsMs":[]},"candidate":{"environment":"填写同一环境","runsMs":[],"peakMiB":null,"workers":null},"budget":{"maxWallMs":null,"maxPeakMiB":null,"maxRegressionRatio":null},"memoryScope":"填写实际测量范围","strategy":"填写缓存复用策略","quality":{"passed":false,"evidence":[]}}
+  ]
+}

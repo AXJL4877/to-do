@@ -1,0 +1,469 @@
+{
+  "spec": "todo-skill-pack/1",
+  "id": "studio.corner-chain",
+  "name": "转角推进",
+  "version": "1.2.1",
+  "author": "TO DO Studio",
+  "description": "纯文字口播：句尾90°衔接；按句序轮换八套镜头与文字编排，独立平移、旋转、放大节奏，甩镜、追字、折页、轮廓纵深、重击急停。保留可编辑文字。",
+  "tags": [
+    "口播",
+    "成片",
+    "动态文字",
+    "配音",
+    "字幕"
+  ],
+  "pipeline": "production",
+  "input": {
+    "label": "口播文案",
+    "maxLength": 12000,
+    "placeholder": "粘贴整篇口播。自动分段配音、按时间戳生成动态文字画面并加入时间线；空行或 --- 表示换段。"
+  },
+  "output": {
+    "mime": "video/webm",
+    "codec": "vp9",
+    "alphaWhen": {}
+  },
+  "params": [
+    {
+      "id": "voice",
+      "type": "select",
+      "group": "voice",
+      "label": "音色",
+      "default": "mizai",
+      "options": [
+        {
+          "value": "mizai",
+          "label": "咪仔"
+        },
+        {
+          "value": "clone",
+          "label": "克隆音",
+          "hint": "火山声音复刻 2.0 的音色 ID"
+        }
+      ]
+    },
+    {
+      "id": "cloneId",
+      "type": "text",
+      "group": "voice",
+      "label": "克隆音 ID",
+      "when": {
+        "voice": [
+          "clone"
+        ]
+      },
+      "default": "",
+      "maxLength": 64,
+      "pattern": "^S_[A-Za-z0-9_-]{2,60}$",
+      "placeholder": "S_xxxxxxxx"
+    },
+    {
+      "id": "split",
+      "type": "select",
+      "group": "story",
+      "label": "分段方式",
+      "default": "paragraph",
+      "options": [
+        {
+          "value": "semantic",
+          "label": "AI 按意思",
+          "hint": "AI 找话题转折处切段，顺带定片名和人物外观；空行和 --- 一定换段"
+        },
+        {
+          "value": "paragraph",
+          "label": "按段落",
+          "hint": "尽量一个自然段一段，过长的再切"
+        },
+        {
+          "value": "length",
+          "label": "按字数",
+          "hint": "按目标字数在句号处切，不调用 AI"
+        }
+      ]
+    },
+    {
+      "id": "segmentChars",
+      "type": "number",
+      "group": "story",
+      "label": "每段字数",
+      "min": 60,
+      "max": 200,
+      "step": 10,
+      "default": 120,
+      "unit": "字",
+      "hint": "口播段的目标长度；一段 = 一条配音，硬上限 200 字"
+    },
+    {
+      "id": "size",
+      "type": "select",
+      "group": "scene",
+      "label": "画幅",
+      "default": "1920x1080",
+      "options": [
+        {
+          "value": "1280x720",
+          "label": "16:9 · 720p"
+        },
+        {
+          "value": "1920x1080",
+          "label": "16:9 · 1080p"
+        },
+        {
+          "value": "1080x1920",
+          "label": "9:16 竖屏"
+        },
+        {
+          "value": "1080x1080",
+          "label": "1:1 方形"
+        }
+      ]
+    },
+    {
+      "id": "tail",
+      "type": "number",
+      "group": "timing",
+      "label": "结尾停留",
+      "min": 0,
+      "max": 3,
+      "step": 0.5,
+      "default": 0,
+      "unit": "秒",
+      "hint": "配音结束后保留最后一个文字镜头"
+    },
+    {
+      "id": "fps",
+      "type": "select",
+      "group": "timing",
+      "label": "帧率",
+      "default": "30",
+      "options": [
+        {
+          "value": "24",
+          "label": "24 fps"
+        },
+        {
+          "value": "30",
+          "label": "30 fps"
+        }
+      ]
+    },
+    {
+      "id": "subtitles",
+      "type": "select",
+      "group": "output",
+      "label": "字幕",
+      "default": "off",
+      "options": [
+        {
+          "value": "on",
+          "label": "生成",
+          "hint": "按配音逐字时间戳切好字幕条，进时间轴后可直接改字"
+        },
+        {
+          "value": "off",
+          "label": "不要"
+        }
+      ]
+    },
+    {
+      "id": "subtitleChars",
+      "type": "number",
+      "group": "output",
+      "label": "每条字数",
+      "min": 8,
+      "max": 30,
+      "step": 1,
+      "default": 18,
+      "when": {
+        "subtitles": [
+          "on"
+        ]
+      }
+    },
+    {
+      "id": "motion",
+      "type": "number",
+      "group": "timing",
+      "label": "运动强度",
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "default": 0.9
+    },
+    {
+      "id": "textColor",
+      "type": "text",
+      "group": "scene",
+      "label": "文字颜色",
+      "default": "#ffffff",
+      "pattern": "^#[0-9a-fA-F]{6}$",
+      "maxLength": 7,
+      "placeholder": "#f8f5e9"
+    },
+    {
+      "id": "accent",
+      "type": "text",
+      "group": "scene",
+      "label": "历史文字颜色",
+      "default": "#b5b5b5",
+      "pattern": "^#[0-9a-fA-F]{6}$",
+      "maxLength": 7,
+      "placeholder": "#ffb454"
+    },
+    {
+      "id": "font",
+      "type": "select",
+      "group": "text",
+      "label": "字体",
+      "default": "MicrosoftYaHei",
+      "options": [
+        {
+          "value": "MicrosoftYaHei",
+          "label": "微软雅黑"
+        },
+        {
+          "value": "SimHei",
+          "label": "黑体"
+        },
+        {
+          "value": "SmileySans",
+          "label": "得意黑"
+        },
+        {
+          "value": "KaiTi",
+          "label": "楷体"
+        },
+        {
+          "value": "SimSun",
+          "label": "宋体"
+        },
+        {
+          "value": "Arial",
+          "label": "Arial"
+        },
+        {
+          "value": "custom",
+          "label": "本机自定义字体"
+        }
+      ]
+    },
+    {
+      "id": "effect",
+      "type": "select",
+      "group": "scene",
+      "label": "文字引擎",
+      "default": "corner-chain",
+      "options": [
+        {
+          "value": "corner-chain",
+          "label": "90°转角推进"
+        }
+      ]
+    },
+    {
+      "id": "direction",
+      "type": "select",
+      "group": "scene",
+      "label": "转角方向",
+      "default": "alternate",
+      "options": [
+        {
+          "value": "clockwise",
+          "label": "连续顺时针"
+        },
+        {
+          "value": "alternate",
+          "label": "左右交替"
+        },
+        {
+          "value": "mixed",
+          "label": "混合转向"
+        }
+      ]
+    },
+    {
+      "id": "variant",
+      "type": "select",
+      "group": "scene",
+      "label": "表现变化",
+      "default": "mix",
+      "options": [
+        {
+          "value": "mix",
+          "label": "自动混合"
+        },
+        {
+          "value": "type",
+          "label": "打字机与光标"
+        },
+        {
+          "value": "pop",
+          "label": "逐字弹出"
+        },
+        {
+          "value": "mask",
+          "label": "遮罩逐字升入"
+        },
+        {
+          "value": "slam",
+          "label": "冲击压缩"
+        },
+        {
+          "value": "ribbon",
+          "label": "逐字弹簧"
+        },
+        {
+          "value": "echo",
+          "label": "文字残影"
+        },
+        {
+          "value": "focus",
+          "label": "失焦推进"
+        }
+      ]
+    },
+    {
+      "id": "easing",
+      "type": "select",
+      "group": "timing",
+      "label": "缓动曲线",
+      "default": "spring",
+      "options": [
+        {
+          "value": "spring",
+          "label": "弹簧震荡"
+        },
+        {
+          "value": "back",
+          "label": "强回弹"
+        },
+        {
+          "value": "expo",
+          "label": "指数推进"
+        }
+      ]
+    },
+    {
+      "id": "zoom",
+      "type": "number",
+      "group": "timing",
+      "label": "放大力度",
+      "min": 0.6,
+      "max": 1.4,
+      "step": 0.05,
+      "default": 1
+    },
+    {
+      "id": "transition",
+      "type": "number",
+      "group": "timing",
+      "label": "转角时长",
+      "min": 0.15,
+      "max": 1.8,
+      "step": 0.05,
+      "default": 1.05
+    },
+    {
+      "id": "stagger",
+      "type": "number",
+      "group": "timing",
+      "label": "逐字间隔",
+      "min": 0,
+      "max": 0.08,
+      "step": 0.002,
+      "default": 0.018
+    },
+    {
+      "id": "trail",
+      "type": "number",
+      "group": "scene",
+      "label": "保留前句",
+      "min": 1,
+      "max": 4,
+      "step": 1,
+      "default": 3
+    },
+    {
+      "id": "fontWeight",
+      "type": "select",
+      "group": "text",
+      "label": "字重",
+      "default": "900",
+      "options": [
+        {
+          "value": "400",
+          "label": "常规"
+        },
+        {
+          "value": "700",
+          "label": "粗体"
+        },
+        {
+          "value": "900",
+          "label": "特粗"
+        }
+      ]
+    },
+    {
+      "id": "customFont",
+      "type": "text",
+      "group": "text",
+      "label": "本机字体名称",
+      "default": "Microsoft YaHei",
+      "maxLength": 64,
+      "pattern": "^[^\"\\\\\\r\\n]{1,64}$",
+      "when": {
+        "font": [
+          "custom"
+        ]
+      }
+    },
+    {
+      "id": "background",
+      "type": "select",
+      "group": "scene",
+      "label": "背景",
+      "default": "style",
+      "options": [
+        {
+          "value": "style",
+          "label": "纯色背景"
+        },
+        {
+          "value": "transparent",
+          "label": "透明叠加"
+        }
+      ]
+    },
+    {
+      "id": "backgroundColor",
+      "type": "text",
+      "group": "scene",
+      "label": "背景颜色",
+      "default": "#101010",
+      "maxLength": 7,
+      "pattern": "^#[0-9a-fA-F]{6}$",
+      "when": {
+        "background": [
+          "style"
+        ]
+      }
+    }
+  ],
+  "quick": [
+    "font",
+    "variant",
+    "easing",
+    "direction",
+    "motion",
+    "size"
+  ],
+  "planner": {
+    "maxElements": 1,
+    "system": "严格按配音短句时间戳保留口播原文，按顺序安排文字镜头；下一句从上一句末端以九十度衔接，文字不能省略或改写。"
+  },
+  "runtime": {
+    "type": "text",
+    "engine": "jizura"
+  }
+}

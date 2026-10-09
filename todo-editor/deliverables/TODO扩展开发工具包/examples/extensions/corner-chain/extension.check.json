@@ -1,0 +1,12 @@
+{
+  "spec": "todo-extension-check/1",
+  "origin": "new",
+  "checks": [
+    {"id":"host-build","cwd":"repo","argv":["node","node_modules/typescript/bin/tsc","--noEmit"],"mode":"offline","covers":["host"],"timeoutMs":180000,"artifacts":[]},
+    {"id":"production-cache","cwd":"repo","argv":["node","scripts/test-corner-production.mjs"],"mode":"mock","covers":["runtime","cache"],"timeoutMs":60000,"artifacts":["native/test-output/corner-chain/production.json"]},
+    {"id":"timeline-editing","cwd":"repo","argv":["node","scripts/test-production-timeline.mjs","--corner"],"mode":"mock","covers":["timeline","editing"],"timeoutMs":90000,"artifacts":[]},
+    {"id":"motion-layout","cwd":"repo","argv":["node","scripts/test-corner-chain.mjs"],"mode":"offline","covers":["runtime"],"timeoutMs":90000,"artifacts":["native/test-output/corner-chain/fixtures.json","native/test-output/corner-chain/gallery.png"]},
+    {"id":"build-renderer","cwd":"repo","argv":["node","node_modules/vite/bin/vite.js","build"],"mode":"offline","covers":["host"],"timeoutMs":180000,"artifacts":[]},
+    {"id":"preview-export","cwd":"repo","argv":["node","scripts/test-corner-export.mjs"],"mode":"offline","covers":["export"],"timeoutMs":180000,"artifacts":["deliverables/corner-chain-preview.mp4"]}
+  ]
+}

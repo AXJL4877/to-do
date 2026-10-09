@@ -1,0 +1,77 @@
+{
+  "spec": "todo-render-performance/1",
+  "cases": [
+    {
+      "id": "stickers-cold",
+      "cacheState": "cold",
+      "workload": "1280x720 two stickers fade webm+hold, fresh out dir",
+      "baseline": {
+        "environment": "Windows python ffmpeg",
+        "runsMs": [
+          757.3139000014635,
+          749.438500002725,
+          741.800299998431
+        ]
+      },
+      "candidate": {
+        "environment": "Windows python ffmpeg",
+        "runsMs": [
+          523.4352999978,
+          520.1587000046857,
+          522.1229000017047
+        ],
+        "peakMiB": 180,
+        "workers": 2
+      },
+      "budget": {
+        "maxWallMs": 20000,
+        "maxPeakMiB": 800,
+        "maxRegressionRatio": 1.15
+      },
+      "memoryScope": "单次 render.py 进程；未计 ffmpeg 子进程峰值之外的估计上限",
+      "strategy": "候选：每元素独立 FFmpeg 滤镜，最多 2 路并行。基线：PIL 逐帧串行。静态贴纸只编码一次入场，不定长逐帧重绘。",
+      "quality": {
+        "passed": true,
+        "evidence": [
+          "perf-note.json"
+        ]
+      }
+    },
+    {
+      "id": "stickers-warm",
+      "cacheState": "warm",
+      "workload": "same inputs after three encodes, OS file cache warm",
+      "baseline": {
+        "environment": "Windows python ffmpeg",
+        "runsMs": [
+          694.7021000014502,
+          716.932800001814,
+          690.6950999982655
+        ]
+      },
+      "candidate": {
+        "environment": "Windows python ffmpeg",
+        "runsMs": [
+          574.1612999991048,
+          563.5735000032582,
+          605.3279000043403
+        ],
+        "peakMiB": 180,
+        "workers": 2
+      },
+      "budget": {
+        "maxWallMs": 20000,
+        "maxPeakMiB": 800,
+        "maxRegressionRatio": 1.15
+      },
+      "memoryScope": "单次 render.py 进程",
+      "strategy": "热路径复用同一 PNG 与滤镜图，不重建字体或浏览器。",
+      "quality": {
+        "passed": true,
+        "evidence": [
+          "perf-note.json"
+        ]
+      }
+    }
+  ]
+}

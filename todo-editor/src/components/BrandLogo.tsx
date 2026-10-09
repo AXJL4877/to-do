@@ -2,7 +2,7 @@
 const LEFT_HOLES = [[220, 600], [268, 626], [316, 652], [364, 678]]
 const RIGHT_HOLES = [[664, 680], [711, 655], [758, 630], [805, 605]]
 
-export function BrandMark({ size = 32, cut = '#F4F0EA' }: { size?: number; cut?: string }) {
+export function BrandMark({ size = 32, cut = '#f0f0f0' }: { size?: number; cut?: string }) {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -14,12 +14,12 @@ export function BrandMark({ size = 32, cut = '#F4F0EA' }: { size?: number; cut?:
       className="shrink-0 block"
     >
       <g transform="translate(-24.4 -22.6) scale(0.1705)">
-        <path fill="#0A84D6" d="M513 250 L402 384 L386 377 L250 553 L455 655 L455 562 L500 430 Z" />
-        <path fill="#0B1E36" d="M513 250 L624 384 L641 377 L776 553 L620 640 L463 552 L500 430 Z" />
+        <path fill="#707070" d="M513 250 L402 384 L386 377 L250 553 L455 655 L455 562 L500 430 Z" />
+        <path fill="#1c1c1c" d="M513 250 L624 384 L641 377 L776 553 L620 640 L463 552 L500 430 Z" />
         <path fill={cut} d="M514 256 L570 504 L502 428 L349 558 L388 380 L424 406 Z" />
-        <path fill="#0A84D6" d="M478 590 L610 665 L478 760 Z" />
-        <path fill="#0B1E36" d="M193 553 L456 688 L456 762 L193 625 Z" />
-        <path fill="#0B1E36" d="M633 655 L834 553 L834 624 L633 732 Z" />
+        <path fill="#707070" d="M478 590 L610 665 L478 760 Z" />
+        <path fill="#1c1c1c" d="M193 553 L456 688 L456 762 L193 625 Z" />
+        <path fill="#1c1c1c" d="M633 655 L834 553 L834 624 L633 732 Z" />
         <g fill={cut}>
           {LEFT_HOLES.map(([x, y]) => <rect key={x} x={x - 11} y={y - 15} width="22" height="30" rx="5" />)}
           {RIGHT_HOLES.map(([x, y]) => <rect key={x} x={x - 11} y={y - 15} width="22" height="30" rx="5" />)}
@@ -39,7 +39,7 @@ export function BrandLogo({ compact = false }: { compact?: boolean }) {
           width: size,
           height: size,
           borderRadius: Math.round(size * 0.22),
-          background: '#F4F0EA',
+          background: '#f0f0f0',
         }}
       >
         <BrandMark size={Math.round(size * 0.92)} />

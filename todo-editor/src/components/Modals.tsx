@@ -383,7 +383,7 @@ export function Modals() {
                 <div key={j.id} className="text-[12px]" data-testid={`export-job-${j.id}`}>
                   {j.name}{j.size ? ` · ${j.size}` : ''} — {j.status} {Math.round(j.progress)}%
                   {j.status === 'running' && j.stage ? <div style={{ color: 'var(--text-muted)' }}>{j.stage}</div> : null}
-                  {j.error ? <div style={{ color: 'var(--danger, #c44)' }}>{j.error}</div> : null}
+                  {j.error ? <div style={{ color: 'var(--danger, #616161)' }}>{j.error}</div> : null}
                   {j.path && j.status === 'done' ? (
                     <div className="grid gap-1 mt-1">
                       <div className="truncate" style={{ color: 'var(--text-muted)' }} title={j.path}>{j.path}</div>

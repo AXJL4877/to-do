@@ -223,7 +223,7 @@ export function renderProgramFrame(
     if (snapGuides?.length) drawSnapGuides(ctx, w, h, snapGuides)
 
     if (settings.safeFrame) {
-      ctx.strokeStyle = 'rgba(255,220,100,0.4)'
+      ctx.strokeStyle = 'rgba(255,255,255,0.4)'
       ctx.lineWidth = 2
       ctx.strokeRect(w * 0.05, h * 0.05, w * 0.9, h * 0.9)
     }
@@ -231,7 +231,7 @@ export function renderProgramFrame(
 
   // 无片段时给出可辨识的空态，避免「黑屏像坏了」
   if (visible.length === 0) {
-    ctx.fillStyle = 'rgba(245,242,236,0.55)'
+    ctx.fillStyle = 'rgba(242,242,242,0.55)'
     ctx.font = `${Math.round(28 * sy)}px Syne, sans-serif`
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
@@ -273,7 +273,7 @@ export function renderProgramOverlay(
   }
   if (snapGuides?.length) drawSnapGuides(ctx, w, h, snapGuides)
   if (settings.safeFrame) {
-    ctx.strokeStyle = 'rgba(255,220,100,0.4)'
+    ctx.strokeStyle = 'rgba(255,255,255,0.4)'
     ctx.lineWidth = 2
     ctx.strokeRect(w * 0.05, h * 0.05, w * 0.9, h * 0.9)
   }
@@ -289,7 +289,7 @@ function drawSnapGuides(
   const toY = (ny: number) => h / 2 + ny * h / 2
   ctx.save()
   for (const g of guides) {
-    ctx.strokeStyle = g.strong ? 'rgba(226,106,44,0.95)' : 'rgba(245,242,236,0.22)'
+    ctx.strokeStyle = g.strong ? 'rgba(255,255,255,0.95)' : 'rgba(242,242,242,0.22)'
     ctx.lineWidth = g.strong ? 1.5 : 1
     ctx.setLineDash(g.strong ? [] : [4, 4])
     ctx.beginPath()
@@ -332,7 +332,7 @@ function drawMotionPath(
   }
 
   ctx.save()
-  ctx.strokeStyle = 'rgba(226,106,44,0.75)'
+  ctx.strokeStyle = 'rgba(255,255,255,0.75)'
   ctx.lineWidth = Math.max(1.5, Math.round(Math.min(w, h) * 0.003))
   ctx.setLineDash([6, 5])
   ctx.beginPath()
@@ -345,8 +345,8 @@ function drawMotionPath(
 
   const times = motionPathTimes(clip)
   const r = Math.max(3.5, Math.min(w, h) * 0.008)
-  ctx.fillStyle = '#E26A2C'
-  ctx.strokeStyle = 'rgba(245,242,236,0.9)'
+  ctx.fillStyle = '#ffffff'
+  ctx.strokeStyle = 'rgba(242,242,242,0.9)'
   ctx.lineWidth = 1.5
   for (const t of times) {
     const tr = resolveClipTransform(clip, clip.start + t)
@@ -403,12 +403,12 @@ function drawSelection(
   ctx.save()
   ctx.translate(cx, cy)
   ctx.rotate((tr.rotation * Math.PI) / 180)
-  ctx.strokeStyle = '#E26A2C'
+  ctx.strokeStyle = '#ffffff'
   ctx.lineWidth = Math.max(2, Math.round(Math.min(w, h) * 0.004))
   ctx.setLineDash([8, 5])
   ctx.strokeRect(-bw, -bh, bw * 2, bh * 2)
   ctx.setLineDash([])
-  ctx.fillStyle = '#E26A2C'
+  ctx.fillStyle = '#ffffff'
   for (const [hx, hy] of [[-bw, -bh], [bw, -bh], [-bw, bh], [bw, bh], [0, -bh], [0, bh], [-bw, 0], [bw, 0]]) {
     ctx.fillRect(hx - 4, hy - 4, 8, 8)
   }

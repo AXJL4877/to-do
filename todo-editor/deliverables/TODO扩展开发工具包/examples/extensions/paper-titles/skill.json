@@ -1,0 +1,4252 @@
+{
+  "spec": "todo-skill-pack/1",
+  "id": "example.paper-titles",
+  "name": "纸片标题",
+  "version": "1.0.0",
+  "author": "Example",
+  "description": "扩展包示例：复用宿主 JIZURA 引擎的黑白灰口播标题，可编辑文字与配音同步入轨。",
+  "tags": [
+    "口播",
+    "成片",
+    "动态文字",
+    "配音",
+    "字幕"
+  ],
+  "pipeline": "production",
+  "input": {
+    "label": "口播文案",
+    "maxLength": 12000,
+    "placeholder": "粘贴整篇口播。自动分段配音、按时间戳生成动态文字画面并加入时间线；空行或 --- 表示换段。"
+  },
+  "output": {
+    "mime": "video/webm",
+    "codec": "vp9",
+    "alphaWhen": {}
+  },
+  "params": [
+    {
+      "id": "voice",
+      "type": "select",
+      "group": "voice",
+      "label": "音色",
+      "default": "mizai",
+      "options": [
+        {
+          "value": "mizai",
+          "label": "咪仔"
+        },
+        {
+          "value": "clone",
+          "label": "克隆音",
+          "hint": "火山声音复刻 2.0 的音色 ID"
+        }
+      ]
+    },
+    {
+      "id": "cloneId",
+      "type": "text",
+      "group": "voice",
+      "label": "克隆音 ID",
+      "when": {
+        "voice": [
+          "clone"
+        ]
+      },
+      "default": "",
+      "maxLength": 64,
+      "pattern": "^S_[A-Za-z0-9_-]{2,60}$",
+      "placeholder": "S_xxxxxxxx"
+    },
+    {
+      "id": "split",
+      "type": "select",
+      "group": "story",
+      "label": "分段方式",
+      "default": "semantic",
+      "options": [
+        {
+          "value": "semantic",
+          "label": "AI 按意思",
+          "hint": "AI 找话题转折处切段，顺带定片名和人物外观；空行和 --- 一定换段"
+        },
+        {
+          "value": "paragraph",
+          "label": "按段落",
+          "hint": "尽量一个自然段一段，过长的再切"
+        },
+        {
+          "value": "length",
+          "label": "按字数",
+          "hint": "按目标字数在句号处切，不调用 AI"
+        }
+      ]
+    },
+    {
+      "id": "segmentChars",
+      "type": "number",
+      "group": "story",
+      "label": "每段字数",
+      "min": 60,
+      "max": 200,
+      "step": 10,
+      "default": 120,
+      "unit": "字",
+      "hint": "口播段的目标长度；一段 = 一条配音，硬上限 200 字"
+    },
+    {
+      "id": "size",
+      "type": "select",
+      "group": "scene",
+      "label": "画幅",
+      "default": "1920x1080",
+      "options": [
+        {
+          "value": "1280x720",
+          "label": "16:9 · 720p"
+        },
+        {
+          "value": "1920x1080",
+          "label": "16:9 · 1080p"
+        },
+        {
+          "value": "1080x1920",
+          "label": "9:16 竖屏"
+        },
+        {
+          "value": "1080x1080",
+          "label": "1:1 方形"
+        }
+      ]
+    },
+    {
+      "id": "tail",
+      "type": "number",
+      "group": "timing",
+      "label": "结尾停留",
+      "min": 0,
+      "max": 3,
+      "step": 0.5,
+      "default": 0,
+      "unit": "秒",
+      "hint": "配音结束后保留最后一个文字镜头"
+    },
+    {
+      "id": "fps",
+      "type": "select",
+      "group": "timing",
+      "label": "帧率",
+      "default": "30",
+      "options": [
+        {
+          "value": "24",
+          "label": "24 fps"
+        },
+        {
+          "value": "30",
+          "label": "30 fps"
+        }
+      ]
+    },
+    {
+      "id": "subtitles",
+      "type": "select",
+      "group": "output",
+      "label": "字幕",
+      "default": "on",
+      "options": [
+        {
+          "value": "on",
+          "label": "生成",
+          "hint": "按配音逐字时间戳切好字幕条，进时间轴后可直接改字"
+        },
+        {
+          "value": "off",
+          "label": "不要"
+        }
+      ]
+    },
+    {
+      "id": "subtitleChars",
+      "type": "number",
+      "group": "output",
+      "label": "每条字数",
+      "min": 8,
+      "max": 30,
+      "step": 1,
+      "default": 18,
+      "when": {
+        "subtitles": [
+          "on"
+        ]
+      }
+    },
+    {
+      "id": "effect",
+      "type": "select",
+      "group": "scene",
+      "label": "文字效果",
+      "default": "full",
+      "options": [
+        {
+          "value": "full",
+          "label": "完整自动编排"
+        },
+        {
+          "value": "auto",
+          "label": "自动搭配"
+        },
+        {
+          "value": "dynamic-pop",
+          "label": "弹入标题"
+        },
+        {
+          "value": "dynamic-type",
+          "label": "打字显现"
+        },
+        {
+          "value": "dynamic-wave",
+          "label": "波浪文字"
+        },
+        {
+          "value": "dynamic-stack",
+          "label": "逐词叠入"
+        },
+        {
+          "value": "dynamic-flow",
+          "label": "流动归位"
+        },
+        {
+          "value": "dynamic-cross",
+          "label": "十字排版"
+        }
+      ]
+    },
+    {
+      "id": "motion",
+      "type": "number",
+      "group": "timing",
+      "label": "运动强度",
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "default": 0.7
+    },
+    {
+      "id": "textColor",
+      "type": "text",
+      "group": "scene",
+      "label": "文字颜色",
+      "default": "#ffffff",
+      "pattern": "^#[0-9a-fA-F]{6}$",
+      "maxLength": 7,
+      "placeholder": "#f8f5e9",
+      "when": {
+        "effect": [
+          "auto",
+          "dynamic-pop",
+          "dynamic-type",
+          "dynamic-wave",
+          "dynamic-stack",
+          "dynamic-flow",
+          "dynamic-cross"
+        ]
+      }
+    },
+    {
+      "id": "accent",
+      "type": "text",
+      "group": "scene",
+      "label": "强调色",
+      "default": "#bdbdbd",
+      "pattern": "^#[0-9a-fA-F]{6}$",
+      "maxLength": 7,
+      "placeholder": "#ffb454",
+      "when": {
+        "effect": [
+          "auto",
+          "dynamic-pop",
+          "dynamic-type",
+          "dynamic-wave",
+          "dynamic-stack",
+          "dynamic-flow",
+          "dynamic-cross"
+        ]
+      }
+    },
+    {
+      "id": "font",
+      "type": "select",
+      "group": "text",
+      "label": "字体",
+      "default": "MicrosoftYaHei",
+      "options": [
+        {
+          "value": "MicrosoftYaHei",
+          "label": "微软雅黑"
+        },
+        {
+          "value": "SimHei",
+          "label": "黑体"
+        },
+        {
+          "value": "KaiTi",
+          "label": "楷体"
+        }
+      ]
+    },
+    {
+      "id": "style",
+      "type": "select",
+      "group": "scene",
+      "label": "整体风格",
+      "default": "noir",
+      "options": [
+        {
+          "value": "noir",
+          "label": "黑白色差"
+        },
+        {
+          "value": "crimson",
+          "label": "深红信号"
+        },
+        {
+          "value": "caution",
+          "label": "警示"
+        },
+        {
+          "value": "magenta",
+          "label": "波普洋红"
+        },
+        {
+          "value": "paper",
+          "label": "纸与墨"
+        },
+        {
+          "value": "hud",
+          "label": "暗色 HUD"
+        },
+        {
+          "value": "mint",
+          "label": "薄荷终端"
+        },
+        {
+          "value": "specimen",
+          "label": "字体样本"
+        },
+        {
+          "value": "transit",
+          "label": "交通标识"
+        },
+        {
+          "value": "blueprint",
+          "label": "蓝图"
+        },
+        {
+          "value": "rouge",
+          "label": "胭脂渐变"
+        },
+        {
+          "value": "mono",
+          "label": "单色 RGB"
+        },
+        {
+          "value": "hrRuin",
+          "label": "废墟"
+        },
+        {
+          "value": "hrNightRec",
+          "label": "深夜录像"
+        },
+        {
+          "value": "hrCurse",
+          "label": "诅咒之信"
+        },
+        {
+          "value": "sakura",
+          "label": "樱花"
+        },
+        {
+          "value": "ocean",
+          "label": "深海"
+        },
+        {
+          "value": "sunset",
+          "label": "日落渐变"
+        },
+        {
+          "value": "forest",
+          "label": "森林笔记"
+        },
+        {
+          "value": "vapor",
+          "label": "蒸汽波"
+        },
+        {
+          "value": "newsprint",
+          "label": "新闻纸"
+        },
+        {
+          "value": "synth80",
+          "label": "80 年代合成器"
+        },
+        {
+          "value": "kraft",
+          "label": "牛皮纸"
+        },
+        {
+          "value": "candy",
+          "label": "糖果"
+        },
+        {
+          "value": "acid",
+          "label": "酸性"
+        },
+        {
+          "value": "sumi",
+          "label": "墨与朱"
+        },
+        {
+          "value": "gold",
+          "label": "金色之夜"
+        }
+      ],
+      "when": {
+        "effect": [
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "mood",
+      "type": "select",
+      "group": "scene",
+      "label": "编排情绪",
+      "default": "graphic",
+      "options": [
+        {
+          "value": "graphic",
+          "label": "图形"
+        },
+        {
+          "value": "chaos",
+          "label": "混沌"
+        },
+        {
+          "value": "glitch",
+          "label": "故障"
+        },
+        {
+          "value": "calm",
+          "label": "平静"
+        },
+        {
+          "value": "pop",
+          "label": "活泼"
+        },
+        {
+          "value": "editorial",
+          "label": "杂志"
+        },
+        {
+          "value": "emotional",
+          "label": "抒情"
+        },
+        {
+          "value": "horror",
+          "label": "惊悚"
+        }
+      ],
+      "when": {
+        "effect": [
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "background",
+      "type": "select",
+      "group": "scene",
+      "label": "画面背景",
+      "default": "style",
+      "options": [
+        {
+          "value": "style",
+          "label": "风格背景"
+        },
+        {
+          "value": "transparent",
+          "label": "透明叠加"
+        }
+      ],
+      "when": {
+        "effect": [
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "unify",
+      "type": "select",
+      "group": "scene",
+      "label": "段内风格统一",
+      "default": "on",
+      "options": [
+        {
+          "value": "on",
+          "label": "统一"
+        },
+        {
+          "value": "off",
+          "label": "自由组合"
+        }
+      ],
+      "when": {
+        "effect": [
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "layout",
+      "type": "select",
+      "group": "scene",
+      "label": "排版",
+      "default": "auto",
+      "options": [
+        {
+          "value": "auto",
+          "label": "自动搭配"
+        },
+        {
+          "value": "center",
+          "label": "居中"
+        },
+        {
+          "value": "mixed",
+          "label": "大小混排"
+        },
+        {
+          "value": "vcols",
+          "label": "竖排"
+        },
+        {
+          "value": "marquee",
+          "label": "流动横幅"
+        },
+        {
+          "value": "tile",
+          "label": "满版平铺"
+        },
+        {
+          "value": "scatter",
+          "label": "散落"
+        },
+        {
+          "value": "ring",
+          "label": "环形"
+        },
+        {
+          "value": "wave",
+          "label": "波浪轨迹"
+        },
+        {
+          "value": "huge",
+          "label": "超出画面"
+        },
+        {
+          "value": "labels",
+          "label": "标签贴"
+        },
+        {
+          "value": "condensed",
+          "label": "瘦长压缩"
+        },
+        {
+          "value": "gloss",
+          "label": "注解"
+        },
+        {
+          "value": "type",
+          "label": "打字"
+        },
+        {
+          "value": "diag",
+          "label": "斜带"
+        },
+        {
+          "value": "circle",
+          "label": "圆窗"
+        },
+        {
+          "value": "stack",
+          "label": "残影堆叠"
+        },
+        {
+          "value": "pill",
+          "label": "胶囊"
+        },
+        {
+          "value": "hrFlashlight",
+          "label": "手电筒"
+        },
+        {
+          "value": "hrDoorGap",
+          "label": "门缝"
+        },
+        {
+          "value": "hrWallScrawl",
+          "label": "墙上涂写"
+        },
+        {
+          "value": "hrCctv",
+          "label": "监控屏幕"
+        },
+        {
+          "value": "hrOuija",
+          "label": "通灵板"
+        },
+        {
+          "value": "hrMissing",
+          "label": "寻人启事"
+        },
+        {
+          "value": "hrWrongOne",
+          "label": "唯一不对的字"
+        },
+        {
+          "value": "hrRisingDark",
+          "label": "从黑暗爬出"
+        },
+        {
+          "value": "hrRedacted",
+          "label": "涂黑文件"
+        },
+        {
+          "value": "hrStaticTv",
+          "label": "雪花电视"
+        },
+        {
+          "value": "hrSpiritPhoto",
+          "label": "灵异照片"
+        },
+        {
+          "value": "hrWrongShadow",
+          "label": "不对劲的影子"
+        },
+        {
+          "value": "knSlamStack",
+          "label": "堆叠重击"
+        },
+        {
+          "value": "knQuarterTurn",
+          "label": "直角转向"
+        },
+        {
+          "value": "knSwapCenter",
+          "label": "逐字替换"
+        },
+        {
+          "value": "knZoomDive",
+          "label": "钻入字中"
+        },
+        {
+          "value": "knFlowSnap",
+          "label": "流动后对齐"
+        },
+        {
+          "value": "knSeesaw",
+          "label": "跷跷板"
+        },
+        {
+          "value": "knTypeSlam",
+          "label": "打字→重击"
+        },
+        {
+          "value": "knRhythmCuts",
+          "label": "逐字分镜"
+        },
+        {
+          "value": "knPathRide",
+          "label": "环形轨道"
+        },
+        {
+          "value": "knGearWords",
+          "label": "齿轮"
+        },
+        {
+          "value": "knCollide",
+          "label": "正面冲撞"
+        },
+        {
+          "value": "knTumble",
+          "label": "翻滚方块"
+        },
+        {
+          "value": "knReflow",
+          "label": "竖排转横排"
+        },
+        {
+          "value": "knPadGrid",
+          "label": "打击垫"
+        },
+        {
+          "value": "lowerThird",
+          "label": "下方字幕条"
+        },
+        {
+          "value": "corners",
+          "label": "对角配置"
+        },
+        {
+          "value": "staircase",
+          "label": "阶梯"
+        },
+        {
+          "value": "zigzag",
+          "label": "锯齿"
+        },
+        {
+          "value": "arcTop",
+          "label": "彩虹弧"
+        },
+        {
+          "value": "spiral",
+          "label": "螺旋"
+        },
+        {
+          "value": "gridCells",
+          "label": "方格"
+        },
+        {
+          "value": "dropCap",
+          "label": "首字放大"
+        },
+        {
+          "value": "justified",
+          "label": "版心"
+        },
+        {
+          "value": "frameBox",
+          "label": "画框"
+        },
+        {
+          "value": "bubble",
+          "label": "对话框"
+        },
+        {
+          "value": "subtitleBar",
+          "label": "字幕条"
+        },
+        {
+          "value": "ticker",
+          "label": "新闻跑马灯"
+        },
+        {
+          "value": "splitScreen",
+          "label": "二分割"
+        },
+        {
+          "value": "mirror",
+          "label": "镜像"
+        },
+        {
+          "value": "sideways",
+          "label": "横躺竖排"
+        },
+        {
+          "value": "edgeFrame",
+          "label": "沿边环绕"
+        },
+        {
+          "value": "perspective",
+          "label": "景深"
+        },
+        {
+          "value": "hanko",
+          "label": "落款"
+        },
+        {
+          "value": "genkou",
+          "label": "稿纸"
+        },
+        {
+          "value": "panels",
+          "label": "漫画分格"
+        },
+        {
+          "value": "filmstrip",
+          "label": "胶片"
+        },
+        {
+          "value": "quote",
+          "label": "引用"
+        },
+        {
+          "value": "ruler",
+          "label": "尺寸线"
+        },
+        {
+          "value": "searchBar",
+          "label": "搜索框"
+        },
+        {
+          "value": "chat",
+          "label": "聊天"
+        },
+        {
+          "value": "notification",
+          "label": "通知"
+        },
+        {
+          "value": "ticket",
+          "label": "票券"
+        },
+        {
+          "value": "rain",
+          "label": "文字雨"
+        },
+        {
+          "value": "hanging",
+          "label": "吊挂"
+        },
+        {
+          "value": "orbit",
+          "label": "环绕"
+        },
+        {
+          "value": "tunnel",
+          "label": "隧道"
+        },
+        {
+          "value": "wordCloud",
+          "label": "文字云"
+        },
+        {
+          "value": "bounceLine",
+          "label": "弹跳"
+        },
+        {
+          "value": "elastic",
+          "label": "橡皮筋"
+        },
+        {
+          "value": "crossBands",
+          "label": "交叉带"
+        },
+        {
+          "value": "stickerBomb",
+          "label": "贴纸"
+        },
+        {
+          "value": "neon",
+          "label": "霓虹"
+        },
+        {
+          "value": "keycaps",
+          "label": "键帽"
+        },
+        {
+          "value": "bubbles",
+          "label": "泡泡"
+        },
+        {
+          "value": "slotMachine",
+          "label": "老虎机"
+        },
+        {
+          "value": "flipBoard",
+          "label": "翻牌看板"
+        },
+        {
+          "value": "credits",
+          "label": "片尾字幕"
+        },
+        {
+          "value": "zoomRepeat",
+          "label": "连续放大"
+        },
+        {
+          "value": "splitHalves",
+          "label": "上下分割"
+        },
+        {
+          "value": "columnsBig",
+          "label": "大小竖排"
+        },
+        {
+          "value": "circleWords",
+          "label": "同心圆"
+        },
+        {
+          "value": "dotMatrix",
+          "label": "点阵显示"
+        },
+        {
+          "value": "depthStack",
+          "label": "景深重叠"
+        },
+        {
+          "value": "typeSpecimen",
+          "label": "字体样本"
+        },
+        {
+          "value": "kanjiFocus",
+          "label": "单字强调"
+        },
+        {
+          "value": "halfVertical",
+          "label": "直横混排"
+        },
+        {
+          "value": "curtain",
+          "label": "布幕"
+        },
+        {
+          "value": "equalizer",
+          "label": "等化器"
+        },
+        {
+          "value": "tape",
+          "label": "胶带"
+        },
+        {
+          "value": "magazine",
+          "label": "杂志跨页"
+        },
+        {
+          "value": "headlineDeck",
+          "label": "标题与导言"
+        },
+        {
+          "value": "contents",
+          "label": "目录"
+        },
+        {
+          "value": "footnote",
+          "label": "注脚"
+        },
+        {
+          "value": "proofread",
+          "label": "校样"
+        },
+        {
+          "value": "numbered",
+          "label": "编号"
+        },
+        {
+          "value": "poster",
+          "label": "海报"
+        },
+        {
+          "value": "swissGrid",
+          "label": "瑞士网格"
+        },
+        {
+          "value": "dictionary",
+          "label": "辞典"
+        },
+        {
+          "value": "ema",
+          "label": "绘马"
+        },
+        {
+          "value": "ransom",
+          "label": "剪报字"
+        },
+        {
+          "value": "newspaper",
+          "label": "报纸"
+        },
+        {
+          "value": "vinyl",
+          "label": "黑胶唱片"
+        },
+        {
+          "value": "cassette",
+          "label": "卡带"
+        },
+        {
+          "value": "bookSpine",
+          "label": "书背"
+        },
+        {
+          "value": "polaroid",
+          "label": "拍立得"
+        },
+        {
+          "value": "stampSheet",
+          "label": "邮票版张"
+        },
+        {
+          "value": "postcard",
+          "label": "明信片"
+        },
+        {
+          "value": "letterPaper",
+          "label": "信纸"
+        },
+        {
+          "value": "calendar",
+          "label": "月历"
+        },
+        {
+          "value": "chochin",
+          "label": "灯笼"
+        },
+        {
+          "value": "routeMap",
+          "label": "路线图"
+        },
+        {
+          "value": "stationSign",
+          "label": "站名牌"
+        },
+        {
+          "value": "noren",
+          "label": "暖帘"
+        },
+        {
+          "value": "tanzaku",
+          "label": "短签"
+        },
+        {
+          "value": "omikuji",
+          "label": "御神签"
+        },
+        {
+          "value": "kakejiku",
+          "label": "挂轴"
+        },
+        {
+          "value": "shoji",
+          "label": "障子"
+        },
+        {
+          "value": "clapper",
+          "label": "场记板"
+        },
+        {
+          "value": "warningLabel",
+          "label": "警告标签"
+        },
+        {
+          "value": "priceTag",
+          "label": "价格标签"
+        },
+        {
+          "value": "nameTag",
+          "label": "名牌"
+        },
+        {
+          "value": "stickyNotes",
+          "label": "便利贴"
+        },
+        {
+          "value": "karuta",
+          "label": "歌牌"
+        },
+        {
+          "value": "cube",
+          "label": "立方体"
+        },
+        {
+          "value": "cylinder",
+          "label": "圆柱"
+        },
+        {
+          "value": "flipCards",
+          "label": "翻卡"
+        },
+        {
+          "value": "accordion",
+          "label": "风琴折"
+        },
+        {
+          "value": "flag",
+          "label": "飘扬的旗"
+        },
+        {
+          "value": "ribbon",
+          "label": "缎带"
+        },
+        {
+          "value": "pendulum",
+          "label": "钟摆"
+        },
+        {
+          "value": "pile",
+          "label": "文字堆"
+        },
+        {
+          "value": "blocks",
+          "label": "积木"
+        },
+        {
+          "value": "balloons",
+          "label": "文字气球"
+        },
+        {
+          "value": "magnets",
+          "label": "磁铁"
+        },
+        {
+          "value": "tiles",
+          "label": "文字磁砖"
+        },
+        {
+          "value": "bulbs",
+          "label": "灯泡招牌"
+        },
+        {
+          "value": "ledScroll",
+          "label": "电子跑马灯"
+        },
+        {
+          "value": "billboard",
+          "label": "广告牌"
+        },
+        {
+          "value": "crowdBubbles",
+          "label": "对话框群"
+        },
+        {
+          "value": "crossword",
+          "label": "填字游戏"
+        },
+        {
+          "value": "wordSearch",
+          "label": "找字游戏"
+        },
+        {
+          "value": "puzzle",
+          "label": "拼图"
+        },
+        {
+          "value": "shadowPlay",
+          "label": "皮影戏"
+        },
+        {
+          "value": "kaleido",
+          "label": "万花筒"
+        },
+        {
+          "value": "dominoes",
+          "label": "骨牌"
+        },
+        {
+          "value": "burst",
+          "label": "爆炸"
+        },
+        {
+          "value": "fisheye",
+          "label": "鱼眼镜头"
+        },
+        {
+          "value": "wall",
+          "label": "墙面透视"
+        },
+        {
+          "value": "origami",
+          "label": "折纸"
+        },
+        {
+          "value": "zipper",
+          "label": "拉链"
+        },
+        {
+          "value": "sliceStack",
+          "label": "切片堆叠"
+        },
+        {
+          "value": "glitchGrid",
+          "label": "故障网格"
+        },
+        {
+          "value": "mosaicTiles",
+          "label": "磁砖拼画"
+        },
+        {
+          "value": "maskReveal",
+          "label": "文字窗"
+        },
+        {
+          "value": "contour",
+          "label": "等高线"
+        },
+        {
+          "value": "halftoneBig",
+          "label": "网点巨字"
+        },
+        {
+          "value": "stencil",
+          "label": "镂空模板"
+        },
+        {
+          "value": "tyKeySplit",
+          "label": "大字夹排"
+        },
+        {
+          "value": "tyCropGiant",
+          "label": "出框大字"
+        },
+        {
+          "value": "tyCross",
+          "label": "十字排"
+        },
+        {
+          "value": "tyBandHide",
+          "label": "带状遮字"
+        },
+        {
+          "value": "tyRuby",
+          "label": "标音注记"
+        },
+        {
+          "value": "tyBaseline",
+          "label": "格线排版"
+        },
+        {
+          "value": "tyScaleSteps",
+          "label": "字级递增"
+        },
+        {
+          "value": "tyJustify",
+          "label": "等宽堆叠"
+        },
+        {
+          "value": "tyIndexTable",
+          "label": "字表"
+        },
+        {
+          "value": "tySplitType",
+          "label": "断字错位"
+        },
+        {
+          "value": "tyErode",
+          "label": "渐削重复"
+        },
+        {
+          "value": "tyVRuler",
+          "label": "竖排刻度"
+        },
+        {
+          "value": "tyFullTrack",
+          "label": "满版字距"
+        },
+        {
+          "value": "tyStatCount",
+          "label": "字数显示"
+        },
+        {
+          "value": "tyMargin",
+          "label": "留白"
+        },
+        {
+          "value": "tyRotBlock",
+          "label": "旋转字块"
+        },
+        {
+          "value": "tySquare",
+          "label": "方块排"
+        },
+        {
+          "value": "tyLineFocus",
+          "label": "行中强调"
+        }
+      ],
+      "when": {
+        "effect": [
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "enter",
+      "type": "select",
+      "group": "scene",
+      "label": "入场",
+      "default": "auto",
+      "options": [
+        {
+          "value": "auto",
+          "label": "自动搭配"
+        },
+        {
+          "value": "cut",
+          "label": "直切"
+        },
+        {
+          "value": "assemble",
+          "label": "分解→聚合"
+        },
+        {
+          "value": "slice",
+          "label": "切片"
+        },
+        {
+          "value": "type",
+          "label": "打字"
+        },
+        {
+          "value": "pop",
+          "label": "弹出"
+        },
+        {
+          "value": "drop",
+          "label": "落下"
+        },
+        {
+          "value": "stretch",
+          "label": "伸缩"
+        },
+        {
+          "value": "wipe",
+          "label": "擦除"
+        },
+        {
+          "value": "blur",
+          "label": "模糊"
+        },
+        {
+          "value": "spin",
+          "label": "旋转"
+        },
+        {
+          "value": "flicker",
+          "label": "闪烁"
+        },
+        {
+          "value": "scramble",
+          "label": "乱码"
+        },
+        {
+          "value": "zoom",
+          "label": "缩放"
+        },
+        {
+          "value": "riseMask",
+          "label": "由下浮现"
+        },
+        {
+          "value": "dropMask",
+          "label": "由上浮现"
+        },
+        {
+          "value": "slideL",
+          "label": "从左滑入"
+        },
+        {
+          "value": "slideR",
+          "label": "从右滑入"
+        },
+        {
+          "value": "slideWhole",
+          "label": "整体滑入"
+        },
+        {
+          "value": "flipX",
+          "label": "纵轴翻转"
+        },
+        {
+          "value": "flipY",
+          "label": "横轴翻转"
+        },
+        {
+          "value": "domino",
+          "label": "骨牌"
+        },
+        {
+          "value": "fold",
+          "label": "折叠展开"
+        },
+        {
+          "value": "unroll",
+          "label": "卷轴展开"
+        },
+        {
+          "value": "strokeDraw",
+          "label": "线稿到上色"
+        },
+        {
+          "value": "outlineFill",
+          "label": "轮廓→填色"
+        },
+        {
+          "value": "splitJoin",
+          "label": "上下合体"
+        },
+        {
+          "value": "vSlice",
+          "label": "纵向切片"
+        },
+        {
+          "value": "shutter",
+          "label": "快门"
+        },
+        {
+          "value": "iris",
+          "label": "光圈"
+        },
+        {
+          "value": "diagWipe",
+          "label": "斜向擦除"
+        },
+        {
+          "value": "blinds",
+          "label": "百叶窗"
+        },
+        {
+          "value": "checker",
+          "label": "棋盘格"
+        },
+        {
+          "value": "randomOrder",
+          "label": "随机顺序"
+        },
+        {
+          "value": "bounceBig",
+          "label": "大跳跃"
+        },
+        {
+          "value": "squashDrop",
+          "label": "压扁着地"
+        },
+        {
+          "value": "rubber",
+          "label": "橡皮拉伸"
+        },
+        {
+          "value": "glitchIn",
+          "label": "故障浮现"
+        },
+        {
+          "value": "echoIn",
+          "label": "残影聚合"
+        },
+        {
+          "value": "whip",
+          "label": "急甩"
+        },
+        {
+          "value": "skewIn",
+          "label": "倾斜"
+        },
+        {
+          "value": "trackIn",
+          "label": "字距收拢"
+        },
+        {
+          "value": "trackOut",
+          "label": "字距扩张"
+        },
+        {
+          "value": "blurStagger",
+          "label": "模糊错落"
+        },
+        {
+          "value": "fadeStagger",
+          "label": "逐字淡入"
+        },
+        {
+          "value": "waveIn",
+          "label": "波浪起伏"
+        },
+        {
+          "value": "spiralIn",
+          "label": "螺旋聚合"
+        },
+        {
+          "value": "zoomOut",
+          "label": "巨大→原尺寸"
+        },
+        {
+          "value": "resolve",
+          "label": "解码"
+        },
+        {
+          "value": "magnet",
+          "label": "磁吸"
+        },
+        {
+          "value": "inkBleed",
+          "label": "晕染"
+        },
+        {
+          "value": "neonOn",
+          "label": "霓虹点亮"
+        },
+        {
+          "value": "cursorSweep",
+          "label": "光标扫过"
+        },
+        {
+          "value": "stamp",
+          "label": "盖章"
+        },
+        {
+          "value": "springIn",
+          "label": "弹簧"
+        },
+        {
+          "value": "pendulum",
+          "label": "钟摆"
+        },
+        {
+          "value": "rollIn",
+          "label": "滚入"
+        },
+        {
+          "value": "slingshot",
+          "label": "弹弓"
+        },
+        {
+          "value": "rockSettle",
+          "label": "摇晃着地"
+        },
+        {
+          "value": "bounceBall",
+          "label": "弹跳球"
+        },
+        {
+          "value": "snapRail",
+          "label": "吸附对齐"
+        },
+        {
+          "value": "fanOpen",
+          "label": "扇子展开"
+        },
+        {
+          "value": "cylinder",
+          "label": "圆柱旋转"
+        },
+        {
+          "value": "shuffle",
+          "label": "洗牌"
+        },
+        {
+          "value": "stopMotion",
+          "label": "定格动画"
+        },
+        {
+          "value": "ripple",
+          "label": "涟漪"
+        },
+        {
+          "value": "zipper",
+          "label": "拉链"
+        },
+        {
+          "value": "zoomAlt",
+          "label": "交错缩放"
+        },
+        {
+          "value": "tiltUp",
+          "label": "站起"
+        },
+        {
+          "value": "stickerPeel",
+          "label": "贴上贴纸"
+        },
+        {
+          "value": "crumple",
+          "label": "揉皱还原"
+        },
+        {
+          "value": "noteUnfold",
+          "label": "展开信纸"
+        },
+        {
+          "value": "tornJoin",
+          "label": "撕纸拼合"
+        },
+        {
+          "value": "splitFlap",
+          "label": "翻牌"
+        },
+        {
+          "value": "overexpose",
+          "label": "过曝"
+        },
+        {
+          "value": "glint",
+          "label": "反光一闪"
+        },
+        {
+          "value": "loupe",
+          "label": "放大镜"
+        },
+        {
+          "value": "filmFeed",
+          "label": "胶片滚动"
+        },
+        {
+          "value": "backlight",
+          "label": "逆光"
+        },
+        {
+          "value": "lightLeak",
+          "label": "漏光"
+        },
+        {
+          "value": "heatHaze",
+          "label": "热浪扭曲"
+        },
+        {
+          "value": "crtOn",
+          "label": "CRT 开机"
+        },
+        {
+          "value": "interlace",
+          "label": "交错扫描"
+        },
+        {
+          "value": "loadingBar",
+          "label": "加载条"
+        },
+        {
+          "value": "dither",
+          "label": "抖动"
+        },
+        {
+          "value": "odometer",
+          "label": "数字滚轮"
+        },
+        {
+          "value": "matrixRain",
+          "label": "数据雨"
+        },
+        {
+          "value": "hatchFill",
+          "label": "斜线→实心"
+        },
+        {
+          "value": "brushReveal",
+          "label": "笔触扫出"
+        },
+        {
+          "value": "inkDrop",
+          "label": "墨滴"
+        },
+        {
+          "value": "quarters",
+          "label": "四方聚合"
+        },
+        {
+          "value": "invertBox",
+          "label": "反转挖空"
+        },
+        {
+          "value": "printRegister",
+          "label": "套印错位"
+        },
+        {
+          "value": "echoCount",
+          "label": "数拍进场"
+        },
+        {
+          "value": "liquidFill",
+          "label": "水位上升"
+        },
+        {
+          "value": "windBlown",
+          "label": "乘风而来"
+        },
+        {
+          "value": "strokeOrder",
+          "label": "逐笔书写"
+        },
+        {
+          "value": "clockWipe",
+          "label": "顺时针"
+        },
+        {
+          "value": "shadowFirst",
+          "label": "影子先落"
+        },
+        {
+          "value": "bubbles",
+          "label": "泡泡"
+        },
+        {
+          "value": "tokoroten",
+          "label": "挤压成条"
+        },
+        {
+          "value": "hrBlinkCreep",
+          "label": "眨眼之间"
+        },
+        {
+          "value": "hrJumpScare",
+          "label": "突然跳出"
+        },
+        {
+          "value": "hrUneasy",
+          "label": "不安的出现"
+        },
+        {
+          "value": "hrVhold",
+          "label": "垂直同步"
+        },
+        {
+          "value": "hrMirrorSnap",
+          "label": "镜像字"
+        },
+        {
+          "value": "hrManifest",
+          "label": "缓缓浮现"
+        },
+        {
+          "value": "hrClawReveal",
+          "label": "爪痕浮现"
+        },
+        {
+          "value": "knWordSlam",
+          "label": "逐词重击"
+        },
+        {
+          "value": "knTypeToSlam",
+          "label": "打字→放大"
+        },
+        {
+          "value": "knReplaceIn",
+          "label": "替换登场"
+        },
+        {
+          "value": "knHingeDrop",
+          "label": "铰链落下"
+        },
+        {
+          "value": "knLoopIn",
+          "label": "绕圈进场"
+        },
+        {
+          "value": "knPushIn",
+          "label": "推入"
+        },
+        {
+          "value": "knInertia",
+          "label": "急刹车"
+        },
+        {
+          "value": "knWordSpin",
+          "label": "逐词旋转"
+        },
+        {
+          "value": "knDiveIn",
+          "label": "从镜头飞入"
+        },
+        {
+          "value": "knStretchOut",
+          "label": "伸展弹出"
+        },
+        {
+          "value": "tyKeyFirst",
+          "label": "主字先行"
+        },
+        {
+          "value": "tyLineWipe",
+          "label": "逐行擦入"
+        },
+        {
+          "value": "tyZoomOne",
+          "label": "逐字放大"
+        },
+        {
+          "value": "tyUnderLift",
+          "label": "从底线升起"
+        },
+        {
+          "value": "tyDotGrow",
+          "label": "点化为字"
+        },
+        {
+          "value": "tyBracketOpen",
+          "label": "括号展开"
+        },
+        {
+          "value": "tyRetype",
+          "label": "打错重打"
+        },
+        {
+          "value": "tyRubyDrop",
+          "label": "从注音落下"
+        }
+      ],
+      "when": {
+        "effect": [
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "hold",
+      "type": "select",
+      "group": "scene",
+      "label": "持续运动",
+      "default": "auto",
+      "options": [
+        {
+          "value": "auto",
+          "label": "自动搭配"
+        },
+        {
+          "value": "still",
+          "label": "静止"
+        },
+        {
+          "value": "jitter",
+          "label": "抖动"
+        },
+        {
+          "value": "drift",
+          "label": "漂移"
+        },
+        {
+          "value": "breathe",
+          "label": "呼吸"
+        },
+        {
+          "value": "wave",
+          "label": "波浪"
+        },
+        {
+          "value": "glitchtick",
+          "label": "故障"
+        },
+        {
+          "value": "float",
+          "label": "轻飘飘"
+        },
+        {
+          "value": "sway",
+          "label": "摇曳"
+        },
+        {
+          "value": "pulse",
+          "label": "脉动"
+        },
+        {
+          "value": "shimmer",
+          "label": "闪耀"
+        },
+        {
+          "value": "colorRun",
+          "label": "流动色彩"
+        },
+        {
+          "value": "rotateSlow",
+          "label": "缓慢旋转"
+        },
+        {
+          "value": "trackBreathe",
+          "label": "字距呼吸"
+        },
+        {
+          "value": "skewWobble",
+          "label": "斜向摇晃"
+        },
+        {
+          "value": "beatHop",
+          "label": "随拍跳动"
+        },
+        {
+          "value": "hWave",
+          "label": "横向波浪"
+        },
+        {
+          "value": "heartbeat",
+          "label": "心跳"
+        },
+        {
+          "value": "orbitSmall",
+          "label": "小圆周运动"
+        },
+        {
+          "value": "jelly",
+          "label": "果冻"
+        },
+        {
+          "value": "scanBand",
+          "label": "扫描带"
+        },
+        {
+          "value": "noiseDrift",
+          "label": "噪点漂移"
+        },
+        {
+          "value": "tilt",
+          "label": "翘翘板"
+        },
+        {
+          "value": "zoomSlow",
+          "label": "缓慢推近"
+        },
+        {
+          "value": "stretchPulse",
+          "label": "随拍横向拉伸"
+        },
+        {
+          "value": "glitchJump",
+          "label": "偶尔错位"
+        },
+        {
+          "value": "echoTrail",
+          "label": "残影拖尾"
+        },
+        {
+          "value": "glowFlicker",
+          "label": "烛火摇曳"
+        },
+        {
+          "value": "windGust",
+          "label": "阵风"
+        },
+        {
+          "value": "dangle",
+          "label": "悬吊"
+        },
+        {
+          "value": "eqBounce",
+          "label": "随音量伸缩"
+        },
+        {
+          "value": "flashBox",
+          "label": "随拍反转"
+        },
+        {
+          "value": "glintSweep",
+          "label": "光泽扫过"
+        },
+        {
+          "value": "flipSwap",
+          "label": "偶尔翻面"
+        },
+        {
+          "value": "shadowSway",
+          "label": "影子摇晃"
+        },
+        {
+          "value": "magnetJiggle",
+          "label": "磁力"
+        },
+        {
+          "value": "typeRattle",
+          "label": "打字震动"
+        },
+        {
+          "value": "focusRack",
+          "label": "移焦"
+        },
+        {
+          "value": "pluckString",
+          "label": "拨弦"
+        },
+        {
+          "value": "hrTwitch",
+          "label": "抽搐"
+        },
+        {
+          "value": "hrStare",
+          "label": "凝视的字"
+        },
+        {
+          "value": "hrLagOne",
+          "label": "慢一拍的字"
+        },
+        {
+          "value": "hrFlickerLight",
+          "label": "将熄的灯"
+        },
+        {
+          "value": "knWordPulse",
+          "label": "逐词节拍"
+        },
+        {
+          "value": "knCounterRock",
+          "label": "反向摇摆"
+        },
+        {
+          "value": "knWordRide",
+          "label": "词语冲浪"
+        },
+        {
+          "value": "knTickShift",
+          "label": "滴答位移"
+        },
+        {
+          "value": "knBeatLean",
+          "label": "随拍倾斜"
+        },
+        {
+          "value": "knGapBreath",
+          "label": "词间呼吸"
+        },
+        {
+          "value": "tyKeyPulse",
+          "label": "主字脉动"
+        },
+        {
+          "value": "tyReadCursor",
+          "label": "阅读光标"
+        },
+        {
+          "value": "tyOutlineBlink",
+          "label": "空心闪烁"
+        },
+        {
+          "value": "tyTrackStep",
+          "label": "字距跳段"
+        }
+      ],
+      "when": {
+        "effect": [
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "exit",
+      "type": "select",
+      "group": "scene",
+      "label": "退场",
+      "default": "auto",
+      "options": [
+        {
+          "value": "auto",
+          "label": "自动搭配"
+        },
+        {
+          "value": "cut",
+          "label": "直切"
+        },
+        {
+          "value": "explode",
+          "label": "爆散"
+        },
+        {
+          "value": "fall",
+          "label": "崩落"
+        },
+        {
+          "value": "drift",
+          "label": "雾散"
+        },
+        {
+          "value": "slice",
+          "label": "切片退场"
+        },
+        {
+          "value": "wipe",
+          "label": "擦除退场"
+        },
+        {
+          "value": "shrink",
+          "label": "收缩"
+        },
+        {
+          "value": "blur",
+          "label": "模糊退场"
+        },
+        {
+          "value": "stretch",
+          "label": "伸缩退场"
+        },
+        {
+          "value": "scatter",
+          "label": "飞散"
+        },
+        {
+          "value": "glitch",
+          "label": "故障退场"
+        },
+        {
+          "value": "sinkMask",
+          "label": "下沉"
+        },
+        {
+          "value": "riseOut",
+          "label": "向上消失"
+        },
+        {
+          "value": "slideOutL",
+          "label": "向左滑出"
+        },
+        {
+          "value": "slideOutR",
+          "label": "向右滑出"
+        },
+        {
+          "value": "flipOutX",
+          "label": "关门"
+        },
+        {
+          "value": "flipOutY",
+          "label": "啪地倒下"
+        },
+        {
+          "value": "foldOut",
+          "label": "折叠收起"
+        },
+        {
+          "value": "squash",
+          "label": "压扁"
+        },
+        {
+          "value": "trackOutWide",
+          "label": "字距散开"
+        },
+        {
+          "value": "collapse",
+          "label": "吸入"
+        },
+        {
+          "value": "zoomThrough",
+          "label": "冲向镜头"
+        },
+        {
+          "value": "zoomFar",
+          "label": "退向远方"
+        },
+        {
+          "value": "spinOut",
+          "label": "旋转消失"
+        },
+        {
+          "value": "twist",
+          "label": "扭转"
+        },
+        {
+          "value": "waveOut",
+          "label": "波浪崩解"
+        },
+        {
+          "value": "blurOutStagger",
+          "label": "逐字模糊"
+        },
+        {
+          "value": "undraw",
+          "label": "回到线稿"
+        },
+        {
+          "value": "outlineOut",
+          "label": "填色褪去"
+        },
+        {
+          "value": "irisClose",
+          "label": "光圈"
+        },
+        {
+          "value": "diagWipeOut",
+          "label": "斜向擦除"
+        },
+        {
+          "value": "blindsClose",
+          "label": "百叶窗"
+        },
+        {
+          "value": "checkerOut",
+          "label": "棋盘格"
+        },
+        {
+          "value": "splitApart",
+          "label": "上下裂开"
+        },
+        {
+          "value": "vSliceDrop",
+          "label": "纵向切片掉落"
+        },
+        {
+          "value": "melt",
+          "label": "融化"
+        },
+        {
+          "value": "dissolve",
+          "label": "碎散"
+        },
+        {
+          "value": "backspace",
+          "label": "退格删除"
+        },
+        {
+          "value": "scrambleOut",
+          "label": "变成符号"
+        },
+        {
+          "value": "glitchDissolve",
+          "label": "化为方块"
+        },
+        {
+          "value": "echoOut",
+          "label": "残响"
+        },
+        {
+          "value": "whipOut",
+          "label": "急甩"
+        },
+        {
+          "value": "gravity",
+          "label": "重力坠落"
+        },
+        {
+          "value": "popOut",
+          "label": "迸裂"
+        },
+        {
+          "value": "burn",
+          "label": "烧毁"
+        },
+        {
+          "value": "sweepCover",
+          "label": "横条遮盖"
+        },
+        {
+          "value": "shatterLite",
+          "label": "四分飞散"
+        },
+        {
+          "value": "peelOff",
+          "label": "撕下贴纸"
+        },
+        {
+          "value": "crumpleOut",
+          "label": "揉成纸团丢掉"
+        },
+        {
+          "value": "tearOut",
+          "label": "撕掉"
+        },
+        {
+          "value": "scorchOut",
+          "label": "烧焦消失"
+        },
+        {
+          "value": "overexposeOut",
+          "label": "过曝泛白"
+        },
+        {
+          "value": "scanOut",
+          "label": "扫描线消除"
+        },
+        {
+          "value": "stripesOut",
+          "label": "条纹消除"
+        },
+        {
+          "value": "halftoneOut",
+          "label": "化为网点"
+        },
+        {
+          "value": "eraserOut",
+          "label": "黑板擦擦掉"
+        },
+        {
+          "value": "vacuumOut",
+          "label": "吸入一点"
+        },
+        {
+          "value": "sandOut",
+          "label": "化沙飞散"
+        },
+        {
+          "value": "shredOut",
+          "label": "碎纸机"
+        },
+        {
+          "value": "dominoOut",
+          "label": "骨牌倒下"
+        },
+        {
+          "value": "hingeOut",
+          "label": "单边脱落"
+        },
+        {
+          "value": "rocketOff",
+          "label": "发射升空"
+        },
+        {
+          "value": "bounceOff",
+          "label": "弹跳离开"
+        },
+        {
+          "value": "balloonOff",
+          "label": "气球飞走"
+        },
+        {
+          "value": "deflateOut",
+          "label": "泄气飞走"
+        },
+        {
+          "value": "hazeOut",
+          "label": "消失于热浪"
+        },
+        {
+          "value": "glassBreak",
+          "label": "玻璃碎裂"
+        },
+        {
+          "value": "zipOut",
+          "label": "拉链"
+        },
+        {
+          "value": "clapShut",
+          "label": "中央闭合"
+        },
+        {
+          "value": "lampOff",
+          "label": "熄灯"
+        },
+        {
+          "value": "slotOut",
+          "label": "老虎机转动"
+        },
+        {
+          "value": "clockOut",
+          "label": "时钟擦除"
+        },
+        {
+          "value": "matrixOut",
+          "label": "数字雨"
+        },
+        {
+          "value": "tornadoOut",
+          "label": "龙卷风"
+        },
+        {
+          "value": "rollUpOut",
+          "label": "卷起"
+        },
+        {
+          "value": "snakeOut",
+          "label": "排队离开"
+        },
+        {
+          "value": "flutterOut",
+          "label": "飘落"
+        },
+        {
+          "value": "rollOff",
+          "label": "滚走"
+        },
+        {
+          "value": "fanClose",
+          "label": "收起扇子"
+        },
+        {
+          "value": "rgbSplitOut",
+          "label": "分色"
+        },
+        {
+          "value": "shockOut",
+          "label": "冲击波"
+        },
+        {
+          "value": "floodOut",
+          "label": "淹没"
+        },
+        {
+          "value": "slashOut",
+          "label": "一刀两断"
+        },
+        {
+          "value": "mosaicOut",
+          "label": "马赛克"
+        },
+        {
+          "value": "scribbleOut",
+          "label": "乱涂抹消"
+        },
+        {
+          "value": "candleOut",
+          "label": "吹熄"
+        },
+        {
+          "value": "hrPulledDown",
+          "label": "被拖下去"
+        },
+        {
+          "value": "hrLookBack",
+          "label": "留下一字"
+        },
+        {
+          "value": "hrTurnAway",
+          "label": "转身背对"
+        },
+        {
+          "value": "hrShiver",
+          "label": "颤抖消失"
+        },
+        {
+          "value": "hrSwallow",
+          "label": "被黑暗吞没"
+        },
+        {
+          "value": "hrFlickerDie",
+          "label": "闪烁熄灭"
+        },
+        {
+          "value": "hrDrain",
+          "label": "滴落"
+        },
+        {
+          "value": "knWordKick",
+          "label": "逐词踢飞"
+        },
+        {
+          "value": "knPushOut",
+          "label": "推出退场"
+        },
+        {
+          "value": "knDiveGlyph",
+          "label": "冲入一字"
+        },
+        {
+          "value": "knLaunch",
+          "label": "急起步"
+        },
+        {
+          "value": "knWordBlink",
+          "label": "逐词熄灭"
+        },
+        {
+          "value": "knCloseGap",
+          "label": "收拢消失"
+        },
+        {
+          "value": "knJumpCutOut",
+          "label": "跳切"
+        },
+        {
+          "value": "knStackAway",
+          "label": "叠起落下"
+        },
+        {
+          "value": "tyStrike",
+          "label": "划线删除"
+        },
+        {
+          "value": "tyToDot",
+          "label": "缩回圆点"
+        },
+        {
+          "value": "tyLineFeed",
+          "label": "换行送出"
+        },
+        {
+          "value": "tyBracketClose",
+          "label": "括号合上"
+        },
+        {
+          "value": "tyToIndex",
+          "label": "化为编号"
+        },
+        {
+          "value": "tyKeyLast",
+          "label": "留下一字"
+        },
+        {
+          "value": "tyUnderSink",
+          "label": "沉入底线"
+        },
+        {
+          "value": "tyFoldVert",
+          "label": "折成竖排"
+        }
+      ],
+      "when": {
+        "effect": [
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "decor",
+      "type": "select",
+      "group": "scene",
+      "label": "装饰",
+      "default": "auto",
+      "options": [
+        {
+          "value": "auto",
+          "label": "自动搭配"
+        },
+        {
+          "value": "none",
+          "label": "关闭"
+        },
+        {
+          "value": "brackets",
+          "label": "框角标记"
+        },
+        {
+          "value": "rings",
+          "label": "座标圆"
+        },
+        {
+          "value": "dots",
+          "label": "点状圆环"
+        },
+        {
+          "value": "arrows",
+          "label": "箭头"
+        },
+        {
+          "value": "slash",
+          "label": "斜线"
+        },
+        {
+          "value": "sparks",
+          "label": "火花"
+        },
+        {
+          "value": "leaders",
+          "label": "引线"
+        },
+        {
+          "value": "waveform",
+          "label": "波形"
+        },
+        {
+          "value": "barcode",
+          "label": "条码"
+        },
+        {
+          "value": "grid",
+          "label": "网格"
+        },
+        {
+          "value": "stripes",
+          "label": "条纹"
+        },
+        {
+          "value": "blobs",
+          "label": "墨渍"
+        },
+        {
+          "value": "bars",
+          "label": "粗糙色带"
+        },
+        {
+          "value": "shapes",
+          "label": "几何图形"
+        },
+        {
+          "value": "counter",
+          "label": "大数字"
+        },
+        {
+          "value": "crosshair",
+          "label": "十字准线"
+        },
+        {
+          "value": "cropMarks",
+          "label": "裁切标记"
+        },
+        {
+          "value": "reticle",
+          "label": "锁定框"
+        },
+        {
+          "value": "radar",
+          "label": "雷达"
+        },
+        {
+          "value": "progressRing",
+          "label": "进度环"
+        },
+        {
+          "value": "timecodeBar",
+          "label": "时间码"
+        },
+        {
+          "value": "rulerEdge",
+          "label": "边缘尺规"
+        },
+        {
+          "value": "dimension",
+          "label": "尺寸线"
+        },
+        {
+          "value": "indexNum",
+          "label": "流水号"
+        },
+        {
+          "value": "dateStamp",
+          "label": "相片日期"
+        },
+        {
+          "value": "qrBlock",
+          "label": "QR 风格方块"
+        },
+        {
+          "value": "glitchRects",
+          "label": "故障碎片"
+        },
+        {
+          "value": "concentricSquares",
+          "label": "同心方框"
+        },
+        {
+          "value": "triangleSpin",
+          "label": "旋转三角"
+        },
+        {
+          "value": "lineBurst",
+          "label": "放射线"
+        },
+        {
+          "value": "plusGrid",
+          "label": "十字网格"
+        },
+        {
+          "value": "guides",
+          "label": "辅助线"
+        },
+        {
+          "value": "waveLine",
+          "label": "波浪线"
+        },
+        {
+          "value": "spiralLine",
+          "label": "漩涡"
+        },
+        {
+          "value": "halftonePatch",
+          "label": "网点"
+        },
+        {
+          "value": "checkerStrip",
+          "label": "棋盘格带"
+        },
+        {
+          "value": "beatRing",
+          "label": "节拍圆环"
+        },
+        {
+          "value": "orbitDots",
+          "label": "环绕圆点"
+        },
+        {
+          "value": "constellation",
+          "label": "星座"
+        },
+        {
+          "value": "confetti",
+          "label": "彩纸"
+        },
+        {
+          "value": "petals",
+          "label": "花瓣"
+        },
+        {
+          "value": "rainStreaks",
+          "label": "雨丝"
+        },
+        {
+          "value": "snow",
+          "label": "雪"
+        },
+        {
+          "value": "lightLeak",
+          "label": "漏光"
+        },
+        {
+          "value": "bokeh",
+          "label": "散景光点"
+        },
+        {
+          "value": "speedCorner",
+          "label": "集中线"
+        },
+        {
+          "value": "risingParticles",
+          "label": "上升粒子"
+        },
+        {
+          "value": "twinkle",
+          "label": "闪烁星光"
+        },
+        {
+          "value": "brushStroke",
+          "label": "笔刷痕"
+        },
+        {
+          "value": "tapePieces",
+          "label": "纸胶带"
+        },
+        {
+          "value": "scribbleCircle",
+          "label": "手绘圈"
+        },
+        {
+          "value": "scribbleUnder",
+          "label": "手绘底线"
+        },
+        {
+          "value": "crossOut",
+          "label": "推敲笔记"
+        },
+        {
+          "value": "highlightMark",
+          "label": "荧光笔"
+        },
+        {
+          "value": "heartsStars",
+          "label": "爱心与星星"
+        },
+        {
+          "value": "watermarkKanji",
+          "label": "浮水印大字"
+        },
+        {
+          "value": "verticalStrip",
+          "label": "竖排条"
+        },
+        {
+          "value": "romajiLine",
+          "label": "罗马字"
+        },
+        {
+          "value": "bracketsJP",
+          "label": "方头括号"
+        },
+        {
+          "value": "seal",
+          "label": "落款"
+        },
+        {
+          "value": "kamon",
+          "label": "家纹"
+        },
+        {
+          "value": "seigaiha",
+          "label": "青海波"
+        },
+        {
+          "value": "asanoha",
+          "label": "麻叶纹"
+        },
+        {
+          "value": "hanabi",
+          "label": "烟火"
+        },
+        {
+          "value": "chochin",
+          "label": "灯笼"
+        },
+        {
+          "value": "shimenawa",
+          "label": "注连绳"
+        },
+        {
+          "value": "sensu",
+          "label": "扇子"
+        },
+        {
+          "value": "tsukiKumo",
+          "label": "云中月"
+        },
+        {
+          "value": "momiji",
+          "label": "枫叶"
+        },
+        {
+          "value": "namiGashira",
+          "label": "浪头"
+        },
+        {
+          "value": "kasumi",
+          "label": "霞"
+        },
+        {
+          "value": "hexGrid",
+          "label": "六角网格"
+        },
+        {
+          "value": "spectrumRing",
+          "label": "环形频谱"
+        },
+        {
+          "value": "dataColumns",
+          "label": "数据列"
+        },
+        {
+          "value": "spinner",
+          "label": "加载中"
+        },
+        {
+          "value": "headingTape",
+          "label": "方位刻度"
+        },
+        {
+          "value": "glyphLock",
+          "label": "文字锁定"
+        },
+        {
+          "value": "atomOrbit",
+          "label": "原子轨道"
+        },
+        {
+          "value": "sonarArcs",
+          "label": "声波"
+        },
+        {
+          "value": "circuit",
+          "label": "电路"
+        },
+        {
+          "value": "swatches",
+          "label": "色票"
+        },
+        {
+          "value": "ruledLines",
+          "label": "横线笔记"
+        },
+        {
+          "value": "registration",
+          "label": "套准标记"
+        },
+        {
+          "value": "punchHoles",
+          "label": "打孔"
+        },
+        {
+          "value": "staple",
+          "label": "钉书针"
+        },
+        {
+          "value": "paperClip",
+          "label": "回纹针"
+        },
+        {
+          "value": "indexTabs",
+          "label": "索引标签"
+        },
+        {
+          "value": "vines",
+          "label": "藤蔓"
+        },
+        {
+          "value": "cloudPuffs",
+          "label": "云朵"
+        },
+        {
+          "value": "starField",
+          "label": "星空"
+        },
+        {
+          "value": "moonPhases",
+          "label": "月相"
+        },
+        {
+          "value": "sunRays",
+          "label": "阳光"
+        },
+        {
+          "value": "rainRipples",
+          "label": "雨滴涟漪"
+        },
+        {
+          "value": "bubbles",
+          "label": "肥皂泡"
+        },
+        {
+          "value": "smoke",
+          "label": "烟"
+        },
+        {
+          "value": "dandelion",
+          "label": "蒲公英"
+        },
+        {
+          "value": "fireflies",
+          "label": "萤火虫"
+        },
+        {
+          "value": "memphis",
+          "label": "孟菲斯"
+        },
+        {
+          "value": "zigzagRibbon",
+          "label": "锯齿缎带"
+        },
+        {
+          "value": "polkaPatch",
+          "label": "圆点"
+        },
+        {
+          "value": "stripeCircle",
+          "label": "条纹圆"
+        },
+        {
+          "value": "decoCorners",
+          "label": "装饰角"
+        },
+        {
+          "value": "halfCircles",
+          "label": "半圆堆叠"
+        },
+        {
+          "value": "loopArrows",
+          "label": "循环箭头"
+        },
+        {
+          "value": "starburst",
+          "label": "星芒"
+        },
+        {
+          "value": "tally",
+          "label": "画正字"
+        },
+        {
+          "value": "cursorClick",
+          "label": "光标"
+        },
+        {
+          "value": "windowChrome",
+          "label": "窗口"
+        },
+        {
+          "value": "progressBar",
+          "label": "进度条"
+        },
+        {
+          "value": "toggleSwitch",
+          "label": "切换开关"
+        },
+        {
+          "value": "notifBell",
+          "label": "通知"
+        },
+        {
+          "value": "likeCounter",
+          "label": "按赞数"
+        },
+        {
+          "value": "mediaControls",
+          "label": "播放按钮"
+        },
+        {
+          "value": "volumeBars",
+          "label": "音量"
+        },
+        {
+          "value": "musicNotes",
+          "label": "音符"
+        },
+        {
+          "value": "hrScratches",
+          "label": "抓痕"
+        },
+        {
+          "value": "hrSigil",
+          "label": "魔法阵"
+        },
+        {
+          "value": "hrWatchEye",
+          "label": "注视之眼"
+        },
+        {
+          "value": "hrStaticPatch",
+          "label": "杂讯碎片"
+        },
+        {
+          "value": "hrDustBeam",
+          "label": "光束与尘埃"
+        },
+        {
+          "value": "hrDrips",
+          "label": "垂落的墨"
+        },
+        {
+          "value": "hrCracks",
+          "label": "裂痕"
+        },
+        {
+          "value": "knSpeedTrail",
+          "label": "跟随速度线"
+        },
+        {
+          "value": "knWordTicks",
+          "label": "词数计数器"
+        },
+        {
+          "value": "tyColophon",
+          "label": "版权页"
+        },
+        {
+          "value": "tyRunningHead",
+          "label": "书眉页码"
+        },
+        {
+          "value": "tyGlyphBody",
+          "label": "字身分割线"
+        },
+        {
+          "value": "tyTextRule",
+          "label": "文字线条"
+        },
+        {
+          "value": "tyTypeScale",
+          "label": "字级样本"
+        },
+        {
+          "value": "tyBigPunct",
+          "label": "巨大引号"
+        }
+      ],
+      "when": {
+        "effect": [
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "treat",
+      "type": "select",
+      "group": "scene",
+      "label": "文字质感",
+      "default": "auto",
+      "options": [
+        {
+          "value": "auto",
+          "label": "自动搭配"
+        },
+        {
+          "value": "none",
+          "label": "无"
+        },
+        {
+          "value": "hrInkBleed",
+          "label": "晕染滴落"
+        },
+        {
+          "value": "hrEroded",
+          "label": "风化"
+        },
+        {
+          "value": "hrRedact",
+          "label": "涂黑"
+        },
+        {
+          "value": "hrDoubleExp",
+          "label": "双重曝光"
+        },
+        {
+          "value": "knWordScale",
+          "label": "大小词"
+        },
+        {
+          "value": "knWordPlate",
+          "label": "逐词反白"
+        },
+        {
+          "value": "outline",
+          "label": "空心字"
+        },
+        {
+          "value": "outlineFill",
+          "label": "描边"
+        },
+        {
+          "value": "doubleOutline",
+          "label": "双层描边"
+        },
+        {
+          "value": "extrude",
+          "label": "立体字"
+        },
+        {
+          "value": "longShadow",
+          "label": "长阴影"
+        },
+        {
+          "value": "hardShadow",
+          "label": "错位阴影"
+        },
+        {
+          "value": "softShadow",
+          "label": "柔和阴影"
+        },
+        {
+          "value": "glow",
+          "label": "发光"
+        },
+        {
+          "value": "marker",
+          "label": "荧光笔"
+        },
+        {
+          "value": "underline",
+          "label": "底线"
+        },
+        {
+          "value": "strike",
+          "label": "删除线"
+        },
+        {
+          "value": "boxed",
+          "label": "方框字"
+        },
+        {
+          "value": "gradientV",
+          "label": "垂直渐变"
+        },
+        {
+          "value": "splitColor",
+          "label": "上下双色"
+        },
+        {
+          "value": "halftone",
+          "label": "网点"
+        },
+        {
+          "value": "stripes",
+          "label": "条纹"
+        },
+        {
+          "value": "hatch",
+          "label": "斜线"
+        },
+        {
+          "value": "dotted",
+          "label": "点线轮廓"
+        },
+        {
+          "value": "alternate",
+          "label": "交错配色"
+        },
+        {
+          "value": "italic",
+          "label": "斜体"
+        },
+        {
+          "value": "wide",
+          "label": "扁平字"
+        },
+        {
+          "value": "tall",
+          "label": "瘦长字"
+        },
+        {
+          "value": "echoOutline",
+          "label": "轮廓残响"
+        },
+        {
+          "value": "emphasisDots",
+          "label": "着重号"
+        },
+        {
+          "value": "neonOutline",
+          "label": "霓虹灯管"
+        },
+        {
+          "value": "chrome",
+          "label": "镀铬"
+        },
+        {
+          "value": "rainbow",
+          "label": "彩虹色"
+        },
+        {
+          "value": "glitchSplit",
+          "label": "色版错位"
+        },
+        {
+          "value": "shadowStack",
+          "label": "多重阴影"
+        },
+        {
+          "value": "stencilGap",
+          "label": "镂空字"
+        },
+        {
+          "value": "waterline",
+          "label": "水位"
+        },
+        {
+          "value": "karaoke",
+          "label": "卡拉 OK"
+        },
+        {
+          "value": "sizeWave",
+          "label": "大小节奏"
+        },
+        {
+          "value": "rotateAlt",
+          "label": "摇摆字"
+        },
+        {
+          "value": "baselineShift",
+          "label": "高低错落"
+        },
+        {
+          "value": "fauxBold",
+          "label": "超粗"
+        },
+        {
+          "value": "circled",
+          "label": "圆圈字"
+        },
+        {
+          "value": "bracketsQuote",
+          "label": "引号"
+        },
+        {
+          "value": "reflection",
+          "label": "倒影"
+        },
+        {
+          "value": "inline",
+          "label": "内框线"
+        },
+        {
+          "value": "sticker",
+          "label": "贴纸描边"
+        },
+        {
+          "value": "gradientSweep",
+          "label": "光泽扫过"
+        },
+        {
+          "value": "kerningWide",
+          "label": "宽字距"
+        },
+        {
+          "value": "monoGrid",
+          "label": "稿纸风"
+        },
+        {
+          "value": "outlineOffset",
+          "label": "错位空心字"
+        },
+        {
+          "value": "toneShadow",
+          "label": "网点阴影"
+        },
+        {
+          "value": "fadeChars",
+          "label": "余韵"
+        },
+        {
+          "value": "cutShift",
+          "label": "切割错位"
+        },
+        {
+          "value": "focusPull",
+          "label": "模糊移焦"
+        },
+        {
+          "value": "spotChar",
+          "label": "单字标记"
+        },
+        {
+          "value": "ransom",
+          "label": "剪贴字"
+        },
+        {
+          "value": "tyHollowKey",
+          "label": "单字镂空"
+        },
+        {
+          "value": "tyHeadRules",
+          "label": "天地线"
+        },
+        {
+          "value": "tyHeadBig",
+          "label": "首字放大"
+        },
+        {
+          "value": "tyIndexSup",
+          "label": "字序号"
+        }
+      ],
+      "when": {
+        "effect": [
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "bg",
+      "type": "select",
+      "group": "scene",
+      "label": "背景图形",
+      "default": "auto",
+      "options": [
+        {
+          "value": "auto",
+          "label": "自动搭配"
+        },
+        {
+          "value": "none",
+          "label": "素色"
+        },
+        {
+          "value": "auroraRibbons",
+          "label": "极光"
+        },
+        {
+          "value": "meshBlobs",
+          "label": "网格渐变"
+        },
+        {
+          "value": "duotoneSweep",
+          "label": "双色扫动"
+        },
+        {
+          "value": "horizonGlow",
+          "label": "行星边缘"
+        },
+        {
+          "value": "seigaiha",
+          "label": "青海波"
+        },
+        {
+          "value": "asanoha",
+          "label": "麻叶纹"
+        },
+        {
+          "value": "houndstooth",
+          "label": "千鸟格"
+        },
+        {
+          "value": "herringbone",
+          "label": "人字纹"
+        },
+        {
+          "value": "argyle",
+          "label": "菱格纹"
+        },
+        {
+          "value": "tartan",
+          "label": "苏格兰格纹"
+        },
+        {
+          "value": "chevron",
+          "label": "V 形纹"
+        },
+        {
+          "value": "isoCubes",
+          "label": "立方体"
+        },
+        {
+          "value": "hexGrid",
+          "label": "六角网格"
+        },
+        {
+          "value": "triTess",
+          "label": "三角马赛克"
+        },
+        {
+          "value": "moire",
+          "label": "摩尔纹"
+        },
+        {
+          "value": "squareTunnel",
+          "label": "方形隧道"
+        },
+        {
+          "value": "spiralArms",
+          "label": "漩涡"
+        },
+        {
+          "value": "topoLines",
+          "label": "等高线"
+        },
+        {
+          "value": "ridgePlot",
+          "label": "山脊线图"
+        },
+        {
+          "value": "starfield",
+          "label": "星空"
+        },
+        {
+          "value": "nightMoon",
+          "label": "月夜"
+        },
+        {
+          "value": "skyline",
+          "label": "街景"
+        },
+        {
+          "value": "sunsetSun",
+          "label": "夕阳"
+        },
+        {
+          "value": "oceanWaves",
+          "label": "海浪"
+        },
+        {
+          "value": "rainWindow",
+          "label": "雨窗"
+        },
+        {
+          "value": "snowLayers",
+          "label": "雪"
+        },
+        {
+          "value": "fireworks",
+          "label": "烟火"
+        },
+        {
+          "value": "cloudLayers",
+          "label": "云"
+        },
+        {
+          "value": "mountains",
+          "label": "山峦"
+        },
+        {
+          "value": "filmStrip",
+          "label": "胶片"
+        },
+        {
+          "value": "vhsBand",
+          "label": "VHS 噪点"
+        },
+        {
+          "value": "tornPaper",
+          "label": "撕纸"
+        },
+        {
+          "value": "godRays",
+          "label": "光芒"
+        },
+        {
+          "value": "vignettePulse",
+          "label": "彩色暗角"
+        },
+        {
+          "value": "kaleidoscope",
+          "label": "万花筒"
+        },
+        {
+          "value": "marble",
+          "label": "大理石"
+        },
+        {
+          "value": "paperCut",
+          "label": "剪纸"
+        },
+        {
+          "value": "hrFailingLamp",
+          "label": "将熄的灯"
+        },
+        {
+          "value": "hrCorridor",
+          "label": "昏暗走廊"
+        },
+        {
+          "value": "hrMold",
+          "label": "蔓延的污渍"
+        },
+        {
+          "value": "hrDeadTrees",
+          "label": "枯树林"
+        },
+        {
+          "value": "sunburst",
+          "label": "放射"
+        },
+        {
+          "value": "concentric",
+          "label": "同心圆"
+        },
+        {
+          "value": "halftoneFade",
+          "label": "网点渐变"
+        },
+        {
+          "value": "bigStripes",
+          "label": "大斜纹"
+        },
+        {
+          "value": "splitV",
+          "label": "左右双色"
+        },
+        {
+          "value": "splitH",
+          "label": "上下双色"
+        },
+        {
+          "value": "splitDiag",
+          "label": "斜向双色"
+        },
+        {
+          "value": "gradientSweep",
+          "label": "渐变"
+        },
+        {
+          "value": "spotlight",
+          "label": "聚光灯"
+        },
+        {
+          "value": "tvBars",
+          "label": "电视彩条"
+        },
+        {
+          "value": "checker",
+          "label": "棋盘格"
+        },
+        {
+          "value": "bigChar",
+          "label": "巨大文字"
+        },
+        {
+          "value": "speedLines",
+          "label": "集中线"
+        },
+        {
+          "value": "scanBars",
+          "label": "扫描线带"
+        },
+        {
+          "value": "dotGrid",
+          "label": "点状网格"
+        },
+        {
+          "value": "retroGrid",
+          "label": "复古网格"
+        },
+        {
+          "value": "bokehBg",
+          "label": "散景光点"
+        },
+        {
+          "value": "particlesBg",
+          "label": "飞舞粒子"
+        },
+        {
+          "value": "ripples",
+          "label": "涟漪"
+        },
+        {
+          "value": "polka",
+          "label": "圆点"
+        },
+        {
+          "value": "eqBars",
+          "label": "背景等化器"
+        },
+        {
+          "value": "borderFrame",
+          "label": "粗框"
+        },
+        {
+          "value": "letterbox",
+          "label": "电影黑边"
+        },
+        {
+          "value": "noiseField",
+          "label": "噪点扰动"
+        }
+      ],
+      "when": {
+        "effect": [
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "cam",
+      "type": "select",
+      "group": "scene",
+      "label": "镜头",
+      "default": "auto",
+      "options": [
+        {
+          "value": "auto",
+          "label": "自动搭配"
+        },
+        {
+          "value": "none",
+          "label": "关闭"
+        },
+        {
+          "value": "push",
+          "label": "缓慢推近"
+        },
+        {
+          "value": "orbitDrift",
+          "label": "环绕"
+        },
+        {
+          "value": "barrelRoll",
+          "label": "桶滚"
+        },
+        {
+          "value": "pendulumSway",
+          "label": "钟摆"
+        },
+        {
+          "value": "focusIn",
+          "label": "对焦"
+        },
+        {
+          "value": "rackFocus",
+          "label": "失焦"
+        },
+        {
+          "value": "earthquake",
+          "label": "地震"
+        },
+        {
+          "value": "floatNoise",
+          "label": "漂浮"
+        },
+        {
+          "value": "vertigo",
+          "label": "晕眩变焦"
+        },
+        {
+          "value": "tiltDown",
+          "label": "镜头下摇"
+        },
+        {
+          "value": "spiralIn",
+          "label": "漩涡变焦"
+        },
+        {
+          "value": "snapPan",
+          "label": "快速横摇"
+        },
+        {
+          "value": "jelly",
+          "label": "果冻晃动"
+        },
+        {
+          "value": "hrNervous",
+          "label": "惊恐手持"
+        },
+        {
+          "value": "hrDutchSnap",
+          "label": "突然倾斜"
+        },
+        {
+          "value": "knReadPan",
+          "label": "随读平移"
+        },
+        {
+          "value": "knTiltKick",
+          "label": "逐词倾斜"
+        },
+        {
+          "value": "knCardFlip",
+          "label": "翻牌"
+        },
+        {
+          "value": "knShearKick",
+          "label": "斜切弹动"
+        },
+        {
+          "value": "knJumpCut",
+          "label": "跳切"
+        },
+        {
+          "value": "knRushIn",
+          "label": "从远处冲来"
+        },
+        {
+          "value": "pullOut",
+          "label": "拉远"
+        },
+        {
+          "value": "panL",
+          "label": "向左横摇"
+        },
+        {
+          "value": "panR",
+          "label": "向右横摇"
+        },
+        {
+          "value": "tiltUp",
+          "label": "镜头上摇"
+        },
+        {
+          "value": "dutch",
+          "label": "斜角镜头"
+        },
+        {
+          "value": "handheld",
+          "label": "手持"
+        },
+        {
+          "value": "beatPunch",
+          "label": "随拍放大"
+        },
+        {
+          "value": "whipIn",
+          "label": "急甩推入"
+        },
+        {
+          "value": "crashZoom",
+          "label": "急速变焦"
+        },
+        {
+          "value": "bounce",
+          "label": "弹跳"
+        },
+        {
+          "value": "roll",
+          "label": "滚转"
+        },
+        {
+          "value": "driftDiag",
+          "label": "斜向漂移"
+        },
+        {
+          "value": "shakeHard",
+          "label": "剧烈摇晃"
+        },
+        {
+          "value": "dollyIn",
+          "label": "推轨"
+        },
+        {
+          "value": "stepZoom",
+          "label": "分段变焦"
+        }
+      ],
+      "when": {
+        "effect": [
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "fx",
+      "type": "select",
+      "group": "scene",
+      "label": "后期效果",
+      "default": "auto",
+      "options": [
+        {
+          "value": "auto",
+          "label": "自动搭配"
+        },
+        {
+          "value": "none",
+          "label": "关闭"
+        },
+        {
+          "value": "chroma",
+          "label": "色彩错位跳动"
+        },
+        {
+          "value": "shake",
+          "label": "摇晃"
+        },
+        {
+          "value": "slice",
+          "label": "切片故障"
+        },
+        {
+          "value": "block",
+          "label": "区块故障"
+        },
+        {
+          "value": "invert",
+          "label": "反转"
+        },
+        {
+          "value": "flash",
+          "label": "闪光"
+        },
+        {
+          "value": "zoom",
+          "label": "缩放模糊"
+        },
+        {
+          "value": "mosaic",
+          "label": "马赛克"
+        },
+        {
+          "value": "radialChroma",
+          "label": "放射色差"
+        },
+        {
+          "value": "bloomFlash",
+          "label": "光晕"
+        },
+        {
+          "value": "bulge",
+          "label": "鱼眼"
+        },
+        {
+          "value": "pixelSort",
+          "label": "像素排序"
+        },
+        {
+          "value": "interlace",
+          "label": "交错扫描"
+        },
+        {
+          "value": "macroBlock",
+          "label": "区块噪点"
+        },
+        {
+          "value": "halftone",
+          "label": "网点"
+        },
+        {
+          "value": "duotone",
+          "label": "双色调"
+        },
+        {
+          "value": "ditherBit",
+          "label": "1 位抖动"
+        },
+        {
+          "value": "rotateSnap",
+          "label": "角度急转"
+        },
+        {
+          "value": "echoFrames",
+          "label": "残影回声"
+        },
+        {
+          "value": "kaleido",
+          "label": "万花筒"
+        },
+        {
+          "value": "bandInvert",
+          "label": "带状反转"
+        },
+        {
+          "value": "lightRays",
+          "label": "光芒"
+        },
+        {
+          "value": "anamorphic",
+          "label": "横向光斑"
+        },
+        {
+          "value": "heartbeat",
+          "label": "心跳"
+        },
+        {
+          "value": "tvStatic",
+          "label": "雪花噪点"
+        },
+        {
+          "value": "dustScratches",
+          "label": "胶片划痕"
+        },
+        {
+          "value": "filmAdvance",
+          "label": "胶片滚动"
+        },
+        {
+          "value": "perspectiveTilt",
+          "label": "透视摇晃"
+        },
+        {
+          "value": "ripple",
+          "label": "涟漪"
+        },
+        {
+          "value": "focusLines",
+          "label": "集中线"
+        },
+        {
+          "value": "speedLines",
+          "label": "速度线"
+        },
+        {
+          "value": "starGlint",
+          "label": "星芒闪光"
+        },
+        {
+          "value": "colorBars",
+          "label": "彩条"
+        },
+        {
+          "value": "zoomStutter",
+          "label": "连续缩放"
+        },
+        {
+          "value": "negativeRing",
+          "label": "反转圆环"
+        },
+        {
+          "value": "edgeDetect",
+          "label": "边缘侦测"
+        },
+        {
+          "value": "shatter",
+          "label": "玻璃碎裂"
+        },
+        {
+          "value": "defocus",
+          "label": "失焦"
+        },
+        {
+          "value": "snapshot",
+          "label": "快门"
+        },
+        {
+          "value": "squash",
+          "label": "伸缩"
+        },
+        {
+          "value": "scanBar",
+          "label": "扫描"
+        },
+        {
+          "value": "loopScroll",
+          "label": "横向循环"
+        },
+        {
+          "value": "hrSubliminal",
+          "label": "潜意识闪现"
+        },
+        {
+          "value": "hrSignalLoss",
+          "label": "信号中断"
+        },
+        {
+          "value": "hrPassingShadow",
+          "label": "掠过的影子"
+        },
+        {
+          "value": "panelWipe",
+          "label": "面板擦除"
+        },
+        {
+          "value": "irisTrans",
+          "label": "光圈"
+        },
+        {
+          "value": "doors",
+          "label": "门"
+        },
+        {
+          "value": "blindsTrans",
+          "label": "百叶窗"
+        },
+        {
+          "value": "rgbSplit",
+          "label": "RGB 分离"
+        },
+        {
+          "value": "smear",
+          "label": "横向拖影"
+        },
+        {
+          "value": "vhsRoll",
+          "label": "VHS 滚动"
+        },
+        {
+          "value": "trackingNoise",
+          "label": "磁道噪点"
+        },
+        {
+          "value": "mirrorFlash",
+          "label": "镜像"
+        },
+        {
+          "value": "strobe",
+          "label": "频闪"
+        },
+        {
+          "value": "posterize",
+          "label": "色调分离"
+        },
+        {
+          "value": "hueShift",
+          "label": "色相偏移"
+        },
+        {
+          "value": "tileShift",
+          "label": "磁砖错位"
+        },
+        {
+          "value": "filmBurn",
+          "label": "胶片烧灼"
+        },
+        {
+          "value": "whipBlur",
+          "label": "急甩模糊"
+        },
+        {
+          "value": "blackFrame",
+          "label": "黑画格"
+        },
+        {
+          "value": "whiteFrame",
+          "label": "白画格"
+        },
+        {
+          "value": "gridRepeat",
+          "label": "分割画面"
+        },
+        {
+          "value": "waveWarp",
+          "label": "波浪扭曲"
+        },
+        {
+          "value": "pixelDrift",
+          "label": "像素偏移"
+        },
+        {
+          "value": "zoomPunch",
+          "label": "缩放重击"
+        },
+        {
+          "value": "lightSweep",
+          "label": "光束扫过"
+        },
+        {
+          "value": "crtOff",
+          "label": "映像管关机"
+        },
+        {
+          "value": "splitSlide",
+          "label": "上下滑移"
+        }
+      ],
+      "when": {
+        "effect": [
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "trans",
+      "type": "select",
+      "group": "scene",
+      "label": "转场",
+      "default": "auto",
+      "options": [
+        {
+          "value": "auto",
+          "label": "自动搭配"
+        },
+        {
+          "value": "none",
+          "label": "关闭"
+        },
+        {
+          "value": "hrStaticCut",
+          "label": "杂讯转场"
+        },
+        {
+          "value": "hrBlink",
+          "label": "眨眼"
+        },
+        {
+          "value": "knCornerSwing",
+          "label": "转角回旋"
+        },
+        {
+          "value": "knStutterCut",
+          "label": "节奏跳切"
+        },
+        {
+          "value": "knStripSlam",
+          "label": "条幅落下"
+        },
+        {
+          "value": "wipe",
+          "label": "边缘擦除"
+        },
+        {
+          "value": "diagonalWipe",
+          "label": "斜带擦除"
+        },
+        {
+          "value": "clockWipe",
+          "label": "时钟擦除"
+        },
+        {
+          "value": "irisOpen",
+          "label": "光圈开启"
+        },
+        {
+          "value": "pushSlide",
+          "label": "推移"
+        },
+        {
+          "value": "cover",
+          "label": "覆盖"
+        },
+        {
+          "value": "uncover",
+          "label": "揭开"
+        },
+        {
+          "value": "zoomThrough",
+          "label": "穿越缩放"
+        },
+        {
+          "value": "doorsOpen",
+          "label": "对开门"
+        },
+        {
+          "value": "blinds",
+          "label": "百叶窗转场"
+        },
+        {
+          "value": "checker",
+          "label": "棋盘格转场"
+        },
+        {
+          "value": "blockDissolve",
+          "label": "方块崩解"
+        },
+        {
+          "value": "whipPan",
+          "label": "急甩横摇"
+        },
+        {
+          "value": "spinOut",
+          "label": "旋转转出"
+        },
+        {
+          "value": "inkBlob",
+          "label": "墨渍"
+        },
+        {
+          "value": "shatterTiles",
+          "label": "磁砖崩落"
+        },
+        {
+          "value": "sliceShift",
+          "label": "长条错位"
+        },
+        {
+          "value": "cubeTurn",
+          "label": "立方体"
+        },
+        {
+          "value": "flashCross",
+          "label": "闪光转场"
+        },
+        {
+          "value": "pixelate",
+          "label": "马赛克转场"
+        },
+        {
+          "value": "tyRuleWipe",
+          "label": "格线擦换"
+        },
+        {
+          "value": "tyGridCells",
+          "label": "稿纸格填入"
+        }
+      ],
+      "when": {
+        "effect": [
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "decorStrength",
+      "type": "number",
+      "group": "scene",
+      "label": "装饰密度",
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "default": 0.6,
+      "when": {
+        "effect": [
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "chroma",
+      "type": "number",
+      "group": "scene",
+      "label": "色差强度",
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "default": 0.4,
+      "when": {
+        "effect": [
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "glitch",
+      "type": "number",
+      "group": "scene",
+      "label": "故障强度",
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "default": 0.25,
+      "when": {
+        "effect": [
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "texture",
+      "type": "number",
+      "group": "scene",
+      "label": "纹理强度",
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "default": 0.5,
+      "when": {
+        "effect": [
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "bgSwitch",
+      "type": "number",
+      "group": "scene",
+      "label": "背景变化",
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "default": 0.5,
+      "when": {
+        "effect": [
+          "full"
+        ]
+      }
+    },
+    {
+      "id": "seed",
+      "type": "number",
+      "group": "scene",
+      "label": "随机种子",
+      "min": 0,
+      "max": 4294967295,
+      "step": 1,
+      "default": 2026,
+      "when": {
+        "effect": [
+          "full"
+        ]
+      }
+    }
+  ],
+  "quick": [
+    "voice",
+    "split",
+    "size",
+    "style",
+    "mood",
+    "subtitles"
+  ],
+  "planner": {
+    "maxElements": 1,
+    "system": "按口播时间戳拆分短句，每个镜头显示一条原文，不改写、不省略文字。按顺序安排文字镜头，在配音讲到对应内容时显示。"
+  },
+  "runtime": {
+    "type": "text",
+    "engine": "jizura"
+  }
+}

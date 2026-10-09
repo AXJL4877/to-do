@@ -55,7 +55,7 @@ export function planDynamicText(ctx, seg, hash) {
 export function dynamicRenderHash(ctx, seg, board) {
   return stableHash({ version: ctx.pack.version, voice: seg.voice.hash, timing: board.textTiming,
     content: board.elements.map(e => e.label), params: ctx.doc.params,
-    sequence: ctx.doc.params.effect === 'full' ? seg.boards.map(b => [b.textTiming, b.elements.map(e => e.label)]) : null,
+    sequence: ['full','corner-chain'].includes(ctx.doc.params.effect) ? seg.boards.map(b => [b.textTiming, b.elements.map(e => e.label)]) : null,
     index: ctx.doc.segments.slice(0, ctx.doc.segments.indexOf(seg)).reduce((n, s) => n + s.boards.length, 0) + seg.boards.indexOf(board),
     last: seg === ctx.doc.segments.at(-1) && board === seg.boards.at(-1) })
 }
@@ -70,22 +70,24 @@ export function renderDynamicText(ctx, seg, board) {
   const endMs = board.textTiming.endMs + (seg === ctx.doc.segments.at(-1) && board === seg.boards.at(-1) ? Math.round((Number(params.tail) || 0) * 1000) : 0)
   const duration = Math.max(0.05, (endMs - board.textTiming.startMs) / 1000)
   const seed = parseInt(stableHash({ id: ctx.doc.id, board: board.id }).slice(0, 8), 16)
-  const full = params.effect === 'full'
+  const corner = params.effect === 'corner-chain'
+  const full = params.effect === 'full' || corner
   const composition = full ? {
     style: params.style || 'noir', mood: params.mood || 'graphic', background: params.background || 'style', unify: params.unify !== 'off',
+    ...(corner ? {corner: {sceneBase:index-seg.boards.indexOf(board),direction:params.direction,easing:params.easing,variant:params.variant,zoom:Number(params.zoom),transition:Number(params.transition),stagger:Number(params.stagger),trail:Number(params.trail),backgroundColor:params.backgroundColor}} : {}),
     parts: Object.fromEntries(['layout','enter','hold','exit','decor','treat','bg','cam','fx','trans'].filter(k => params[k] && params[k] !== 'auto').map(k => [k, params[k]])),
     fx: { decor: Number(params.decorStrength), chroma: Number(params.chroma), glitch: Number(params.glitch), texture: Number(params.texture), bgSwitch: Number(params.bgSwitch) },
     offset: board.textTiming.startMs / 1000,
     scenes: seg.boards.map(b => ({ content: b.elements.map(e => e.label).join(' '), start: b.textTiming.startMs / 1000,
       end: (b.textTiming.endMs + (seg === ctx.doc.segments.at(-1) && b === seg.boards.at(-1) ? Math.round((Number(params.tail) || 0) * 1000) : 0)) / 1000 }))
   } : undefined
-  const config = full ? { version: 2, engine: 'jizura', presetId: 'dynamic-full',
+  const config = full ? { version: 2, engine: 'jizura', presetId: corner ? 'dynamic-corner-chain' : 'dynamic-full',
     seed: parseInt(stableHash({ id: ctx.doc.id, segment: seg.id, seed: params.seed }).slice(0, 8), 16), duration, motion: Number(params.motion), accent: params.accent || '#ffb454', composition }
     : { version: 1, engine: 'jizura', presetId, seed, duration: Math.max(0.5, Math.min(12, duration)), motion: Number(params.motion), accent: params.accent || '#ffb454' }
   board.render = { hash: dynamicRenderHash(ctx, seg, board), result: {
-    fps: Number(params.fps) || 30, width, height, ...board.textTiming, endMs, layout: full ? `完整编排 · ${params.style}` : presetId, elements: [],
-    dynamicText: { content, fontFamily: params.font === 'MicrosoftYaHei' ? 'Microsoft YaHei' : params.font || 'Microsoft YaHei', fontSize: 96,
-      fancy: { preset: full ? 'dynamic-full' : presetId, fontWeight: 700, fill: [params.textColor || '#f8f5e9'], fillAngle: 90, strokes: [],
+    fps: Number(params.fps) || 30, width, height, ...board.textTiming, endMs, layout: corner ? '转角推进 · 90°' : full ? `完整编排 · ${params.style}` : presetId, elements: [],
+    dynamicText: { content, fontFamily: params.font === 'custom' ? params.customFont || 'Microsoft YaHei' : params.font === 'SmileySans' ? 'Smiley Sans Oblique' : params.font === 'MicrosoftYaHei' ? 'Microsoft YaHei' : params.font || 'Microsoft YaHei', fontSize: 96,
+      fancy: { preset: config.presetId, fontWeight: corner ? Number(params.fontWeight) || 900 : 700, fill: [params.textColor || '#f8f5e9'], fillAngle: 90, strokes: [],
         dynamic: config } },
   } }
 }

@@ -292,18 +292,18 @@ export function Timeline({
     return snap ? Math.round(t * fps) / fps : t
   }, [pxPerSec, snap, fps])
 
-  const timeFromEvent = useCallback((clientX: number) => {
+  const timeFromEvent = useCallback((clientX: number, continuous = false) => {
     const el = scrollRef.current
     if (!el) return 0
     const rect = el.getBoundingClientRect()
     const x = clientX - rect.left + el.scrollLeft
-    return Math.max(0, timeAtX(x))
-  }, [timeAtX])
+    return Math.max(0, continuous ? x / pxPerSec : timeAtX(x))
+  }, [timeAtX, pxPerSec])
 
   /** 拖播放头：按住 Shift 吸到附近片段切口 / 标记（和拖片段对齐切口一样） */
-  const playheadTimeFromEvent = useCallback((e: { clientX: number; shiftKey: boolean }) => {
+  const playheadTimeFromEvent = useCallback((e: { clientX: number; shiftKey: boolean }, continuous = false) => {
     const st = useApp.getState()
-    const raw = timeFromEvent(e.clientX)
+    const raw = timeFromEvent(e.clientX, continuous)
     if (e.shiftKey) return st.snapPlayheadTime(raw, pxPerSec)
     st.setSnapGuide(null)
     return raw
@@ -423,11 +423,16 @@ export function Timeline({
           return
         }
         d.moved = true
-        const t = playheadTimeFromEvent(e)
+        const t = playheadTimeFromEvent(e, true)
         markPreviewInteractive()
         // 拖动中只改 live 时钟（播放头/监视器订阅），不写 Zustand、不广播——避免掉帧
         setLivePlayhead(t)
-        pendingPh = t
+        // The live cursor follows every pixel; only the committed seek is
+        // frame-aligned. Explicit Shift snapping retains the exact cut time.
+        const cutSnapped = e.shiftKey && useApp.getState().snapGuide !== null
+        pendingPh = st.settings.snap && !cutSnapped
+          ? Math.round(t * st.settings.fps) / st.settings.fps
+          : t
         const el = scrollRef.current
         if (el) {
           const x = t * pxPerSec
@@ -1056,12 +1061,12 @@ export function Timeline({
             requestAnimationFrame(() => { syncingScroll.current = false })
           }}
         >
-          <div className="sticky top-0 z-10 h-7 border-b shrink-0" style={{ borderColor: 'var(--border)', background: 'var(--surface-2)' }} />
-          {seq.tracks.map((t) => (
+          <div className="sticky top-0 z-10 h-7 border-b shrink-0" style={{ borderColor: 'var(--border)', background: 'var(--timeline-ruler)' }} />
+          {seq.tracks.map((t, index) => (
             <div
               key={t.id}
               className="relative flex items-center justify-center gap-0.5 px-1 border-b"
-              style={{ height: t.height, borderColor: 'var(--border)' }}
+              style={{ height: t.height, borderColor: 'var(--timeline-divider)', background: index % 2 ? '#d5d5d5' : '#e2e2e2' }}
               title={`${t.name} · 拖底边调高度`}
               data-testid={`track-header-${t.id}`}
             >
@@ -1121,7 +1126,7 @@ export function Timeline({
         >
           <div
             className="sticky top-0 z-10 h-7 border-b cursor-pointer select-none relative"
-            style={{ width: lanePx, borderColor: 'var(--border)', background: 'var(--surface-2)' }}
+            style={{ width: lanePx, borderColor: 'var(--timeline-divider)', background: 'var(--timeline-ruler)' }}
             onClick={onRulerClick}
             onPointerDown={onRulerPointerDown}
             data-testid="timeline-ruler"
@@ -1144,11 +1149,11 @@ export function Timeline({
               width: Math.max(duration * geometryZoom, bodyW / geometryScale),
               transform: `scaleX(${geometryScale})`, transformOrigin: 'left top',
             }}>
-            {seq.tracks.map((track) => (
+            {seq.tracks.map((track, index) => (
               <div
                 key={track.id}
                 className="relative border-b"
-                style={{ height: track.height, borderColor: 'var(--border)', background: track.hidden ? 'var(--surface-2)' : 'transparent' }}
+                style={{ height: track.height, borderColor: 'var(--timeline-divider)', background: track.hidden ? 'var(--timeline-track-hidden)' : index % 2 ? 'var(--timeline-track-odd)' : 'var(--timeline-track-even)' }}
                 data-testid={`track-row-${track.id}`}
               >
                 {(clipsByTrack.get(track.id) ?? []).map((clip) => {
@@ -1270,7 +1275,7 @@ function PreviewCacheBar({ fps, pxPerSec }: { fps: number; pxPerSec: number }) {
     <div className="absolute left-0 right-0 bottom-0 h-[3px] pointer-events-none"
       data-testid="preview-cache-bar" title={ranges.length ? '绿色：已缓存预览' : '播放后将在此显示缓存进度'}>
       {ranges.map((r, i) => <div key={`${r.start}-${r.end}-${i}`} className="absolute top-0 bottom-0"
-        style={{ left: r.start * pxPerSec, width: Math.max(2, (r.end - r.start) * pxPerSec), background: 'hsl(145 55% 42%)', opacity: 0.9 }} />)}
+        style={{ left: r.start * pxPerSec, width: Math.max(2, (r.end - r.start) * pxPerSec), background: 'hsl(0 0% 42%)', opacity: 0.9 }} />)}
     </div>
   )
 }

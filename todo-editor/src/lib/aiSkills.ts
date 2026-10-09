@@ -29,11 +29,21 @@ export type SkillPack = {
    */
   pipeline: 'elements' | 'tts' | 'subtitle' | 'narrated' | 'production'
   planner: { maxElements: number; countParam: string | null } | null
+  /** 用户目录安装的拓展为 true，可移除；内置为 false / 缺省 */
+  installed?: boolean
 }
 
 export type SkillRole = 'hero' | 'support' | 'accent'
 export type SkillElement = { label: string; draw: string; role: SkillRole; weight: number }
 export type SkillPlan = { title: string; notes: string; elements: SkillElement[] }
+export type SkillDraft = { prompt: string; params: SkillParams; plan: SkillPlan | null; version: string }
+
+/** A manifest upgrade may remove parameters or change their meaning. Keep the
+ * author's prompt while resetting parameters and plans to the new schema. */
+export function resolveSkillDraft(pack: SkillPack, draft?: SkillDraft): SkillDraft {
+  if (draft?.version === pack.version) return draft
+  return { prompt: draft?.prompt ?? '', params: defaultSkillParams(pack), plan: null, version: pack.version }
+}
 
 export type SkillOutput = {
   spec: 'todo-skill-output/1'
@@ -146,7 +156,7 @@ export async function fetchSkills(): Promise<SkillPack[]> {
   const r = await aiFetch('/api/ai-skills')
   const data = await r.json()
   if (!data.ok) throw new Error(data.error || '技能包读取失败')
-  return (data.skills as SkillPack[]).map((s) => ({ ...s, previews: s.previews.map((p) => aiUrl(p)) }))
+  return (data.skills as SkillPack[]).map((s) => ({ ...s, previews: s.previews.map((p) => aiUrl(`${p}?v=${encodeURIComponent(s.version)}`)) }))
 }
 
 export function defaultSkillParams(pack: SkillPack): SkillParams {

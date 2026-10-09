@@ -5,11 +5,12 @@ import { spawn } from 'node:child_process'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
-import './test-dynamic-production.mjs'
+const corner = process.argv.includes('--corner')
+await import(corner ? './test-corner-production.mjs' : './test-dynamic-production.mjs')
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const out = resolve(root, 'native/test-output/production-timeline')
-const productionFixture = resolve(root, 'native/test-output/dynamic-production', process.argv.includes('--live') ? 'live-production.json' : 'production.json')
+const productionFixture = resolve(root, corner ? 'native/test-output/corner-chain' : 'native/test-output/dynamic-production', process.argv.includes('--live') ? 'live-production.json' : 'production.json')
 mkdirSync(out, { recursive: true })
 const bundle = await build({ entryPoints: [resolve(root, 'tests/production-timeline.browser.ts')], bundle: true,
   write: false, format: 'iife', jsx: 'automatic', define: { 'process.env.NODE_ENV': '"production"' } })

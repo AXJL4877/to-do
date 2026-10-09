@@ -3,6 +3,7 @@
  */
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
+import { installExtensionPack, uninstallExtensionPack, MAX_EXTENSION_BYTES } from './extensionPacks.mjs'
 import {
   bufferToDataUrl,
   dataUrlToBuffer,
@@ -40,6 +41,9 @@ import { runScriptStage } from './scriptStageAi.mjs'
 import { directAnim } from './animDirector.mjs'
 import { getSkillEntry, listSkillPacks, planSkill, resolveSkillParams, skillPreviewPath } from './skillPacks.mjs'
 import { cleanText } from './stylePacks.mjs'
+import { createMediaCleanup } from './mediaCleanup.mjs'
+
+const mediaCleanup = createMediaCleanup({ outDir: AI_OUT })
 
 export { kickWorker as kickAiWorker }
 
@@ -140,6 +144,13 @@ async function handleProductions(req, res, url) {
       }
       if (!action && req.method === 'DELETE') {
         const doc = loadProduction(id)
+        if (new URLSearchParams(query).get('terminalOnly') === '1') {
+          const live = liveProductionStatus(doc)
+          if (live.runningJobId || live.queuedJobId) {
+            sendJson(res, 409, { ok: false, error: '成片已开始生成或排队，请刷新后再处理记录' })
+            return
+          }
+        }
         if (isJobRunning(doc.lock?.jobId)) throw new Error('正在生成，先停止再删除')
         cancelProductionRun(id, null)
         sendJson(res, 200, { ok: deleteProduction(id) })
@@ -181,6 +192,34 @@ export async function handleAiHttp(req, res) {
   if (!url.startsWith('/api/ai-')) return false
 
   try {
+    if (/^\/api\/ai-media-cleanup\/(preview|execute)(?:\?|$)/.test(url)) {
+      if (req.method !== 'POST') {
+        sendJson(res, 405, { ok: false, error: 'method not allowed' })
+        return true
+      }
+      const origin = req.headers?.origin
+      let local = !origin || origin === 'null'
+      try {
+        const parsed = new URL(origin)
+        local ||= ['http:', 'https:'].includes(parsed.protocol) && ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname)
+      } catch {}
+      if (!local) { sendJson(res, 403, { ok: false, error: '只允许本地应用清理生成文件' }); return true }
+      if ((req.headers?.['content-type'] || '').split(';')[0].trim().toLowerCase() !== 'application/json') {
+        sendJson(res, 415, { ok: false, error: '清理请求须使用 application/json' })
+        return true
+      }
+      const action = url.split('?')[0].split('/').pop()
+      try {
+        let raw = ''
+        for await (const chunk of req) {
+          raw += chunk
+          if (Buffer.byteLength(raw) > 2 * 1024 * 1024) throw new Error('清理请求过大')
+        }
+        const body = JSON.parse(raw || '{}')
+        sendJson(res, 200, mediaCleanup[action](body))
+      } catch (error) { sendJson(res, 400, { ok: false, error: error.message }) }
+      return true
+    }
     if (url.startsWith('/api/ai-assets')) {
       if (req.method === 'GET' && (url === '/api/ai-assets' || url.startsWith('/api/ai-assets?'))) {
         const lim = Number(new URL(url, 'http://x').searchParams.get('limit') || 24)
@@ -307,7 +346,16 @@ export async function handleAiHttp(req, res) {
       }
 
       if (req.method === 'DELETE' && oneMatch) {
-        sendJson(res, 200, cancelAiJob(decodeURIComponent(oneMatch[1])))
+        const id = decodeURIComponent(oneMatch[1])
+        if (new URL(url, 'http://x').searchParams.get('terminalOnly') === '1') {
+          const job = getAiJob(id)
+          if (!job) { sendJson(res, 404, { ok: false, error: 'not found' }); return true }
+          if (!['done', 'error', 'imported'].includes(job.status)) {
+            sendJson(res, 409, { ok: false, error: '任务已开始生成或排队，请刷新后再处理记录' })
+            return true
+          }
+        }
+        sendJson(res, 200, cancelAiJob(id))
         return true
       }
 
@@ -576,6 +624,40 @@ export async function handleAiHttp(req, res) {
 export function createAiMiddleware() {
   return async (req, res, next) => {
     const url = req.url || ''
+    if (url.split('?')[0] === '/api/ai-extensions/import') {
+      if (req.method !== 'POST') return sendJson(res, 405, { ok: false, error: 'POST only' })
+      const origin = req.headers.origin
+      let local = !origin || origin === 'null'
+      try { const parsed = new URL(origin); local ||= ['http:', 'https:'].includes(parsed.protocol) && ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname) } catch {}
+      if (!local) return sendJson(res, 403, { ok: false, error: '只允许本地应用安装扩展' })
+      // Opaque browser origins can send simple requests; require a non-simple
+      // binary content type so sandboxed foreign pages cannot install packages.
+      if ((req.headers['content-type'] || '').split(';')[0].trim().toLowerCase() !== 'application/octet-stream') {
+        return sendJson(res, 415, { ok: false, error: '扩展上传须使用 application/octet-stream' })
+      }
+      try {
+        let size = 0
+        const chunks = []
+        if (Number(req.headers['content-length']) > MAX_EXTENSION_BYTES) return sendJson(res, 413, { ok: false, error: '扩展包不能超过 32 MB' })
+        for await (const chunk of req) {
+          size += chunk.length
+          if (size > MAX_EXTENSION_BYTES) return sendJson(res, 413, { ok: false, error: '扩展包不能超过 32 MB' })
+          chunks.push(chunk)
+        }
+        return sendJson(res, 200, { ok: true, extension: installExtensionPack(Buffer.concat(chunks)) })
+      } catch (e) { return sendJson(res, 400, { ok: false, error: e instanceof Error ? e.message : String(e) }) }
+    }
+    if (url.split('?')[0] === '/api/ai-extensions/uninstall') {
+      if (req.method !== 'POST') return sendJson(res, 405, { ok: false, error: 'POST only' })
+      const origin = req.headers.origin
+      let local = !origin || origin === 'null'
+      try { const parsed = new URL(origin); local ||= ['http:', 'https:'].includes(parsed.protocol) && ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname) } catch {}
+      if (!local) return sendJson(res, 403, { ok: false, error: '只允许本地应用移除扩展' })
+      try {
+        const body = JSON.parse((await readBody(req)) || '{}')
+        return sendJson(res, 200, { ok: true, extension: uninstallExtensionPack(body) })
+      } catch (e) { return sendJson(res, 400, { ok: false, error: e instanceof Error ? e.message : String(e) }) }
+    }
     if (!url.startsWith('/api/ai-') && !url.startsWith('/ai-generated/')) return next()
     const handled = await handleAiHttp(req, res)
     if (!handled) next()

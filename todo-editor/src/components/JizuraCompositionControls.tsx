@@ -4,6 +4,22 @@ import { NumInput } from './NumInput'
 type Composition = NonNullable<DynamicText['composition']>
 export function JizuraCompositionControls({ value, onChange }: { value: Composition; onChange: (p: Composition) => void }) {
   const patch = (p: Partial<Composition>) => onChange({ ...value, ...p })
+  if (value.corner) {
+    const c=value.corner, change=(p:Partial<NonNullable<Composition['corner']>>)=>patch({corner:{...c,...p}})
+    return <details open><summary>90° 转角推进</summary>
+      {([
+        ['direction','转向',{clockwise:'连续顺转',alternate:'左右交替',mixed:'混合转向'}],
+        ['easing','缓动',{spring:'弹簧震荡',back:'强回弹',expo:'指数推进'}],
+        ['variant','变化',{mix:'自动混合',type:'打字机与光标',pop:'逐字弹出',mask:'遮罩逐字升入',slam:'冲击压缩',ribbon:'逐字弹簧',echo:'文字残影',focus:'失焦推进'}],
+      ] as const).map(([key,label,options])=><label className="editor-inline" key={key}>{label}<select className="input" value={c[key]} onChange={e=>change({[key]:e.target.value})}>{Object.entries(options).map(([id,name])=><option key={id} value={id}>{name}</option>)}</select></label>)}
+      <NumInput label="转角时长" value={c.transition} min={.15} max={1.8} step={.05} onChange={transition=>change({transition})}/>
+      <NumInput label="放大力度" value={c.zoom} min={.6} max={1.4} step={.05} onChange={zoom=>change({zoom})}/>
+      <NumInput label="逐字间隔" value={c.stagger} min={0} max={.08} step={.002} onChange={stagger=>change({stagger})}/>
+      <NumInput label="历史句数" value={c.trail} min={1} max={4} step={1} onChange={trail=>change({trail})}/>
+      <label className="editor-inline">背景<select className="input" value={value.background} onChange={e=>patch({background:e.target.value as Composition['background']})}><option value="style">纯色</option><option value="transparent">透明</option></select></label>
+      <label className="editor-inline">背景色<input type="color" value={c.backgroundColor} onChange={e=>change({backgroundColor:e.target.value})}/></label>
+    </details>
+  }
   return <details data-testid="jizura-composition-controls" open>
     <summary>完整编排 · 27 套风格 / 860 个效果部件</summary>
     <label className="editor-inline">风格<select className="input flex-1 min-w-0" aria-label="整体风格" value={value.style} onChange={e => patch({style:e.target.value})}>

@@ -242,11 +242,12 @@ export const render = {
     const { doc, entry } = ctx
     const hash = this.hash(ctx, seg, board, sched)
     const prefix = `${doc.id}_${hash.slice(0, 8)}`
-    const handName = `${doc.id}_hand_${String(doc.params.handSize ?? 1).replace('.', '_')}.png`
+    const handName = `${doc.id}_hand_${String(doc.params.handSize ?? 1).replace('.', '_')}_${board.id}.png`
     const request = {
       spec: SKILL_RENDER_SPEC,
       jobId: doc.id,
       mode: 'scene-clips',
+      ...(ctx.pack.id==='builtin.chalk-hand'?{resources:ctx.renderResources}:{}),
       outDir: ctx.outDir,
       ffmpeg: resolveFfmpeg(),
       params: doc.params,
@@ -332,7 +333,8 @@ export const plate = {
 export function defaultServices(config, withRetry) {
   return {
     synth: (text, o) => withRetry(() => synthTimeline(text, o)),
-    chat: (messages) => withRetry(() => chatPlanner(config, messages)),
+    // A caller carrying a deadline owns retries; generic backoff would outlive its budget.
+    chat: (messages, o = {}) => o.signal ? chatPlanner(config, messages, o) : withRetry(() => chatPlanner(config, messages)),
     image: (request, out) => generateElementImage(config, withRetry, request, out),
     render: (entry, requestFile, o) => runRenderer(entry, requestFile, o),
   }

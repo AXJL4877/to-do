@@ -25,7 +25,8 @@ export function TimelineLabels({ seq, pxPerSec, scrollRef, viewportWidth, geomet
     if (!ctx) return
     const style = getComputedStyle(scroll)
     const family = style.fontFamily
-    const color = style.getPropertyValue('--text-primary').trim() || '#1b1f1d'
+    const labelColors = Object.fromEntries(['text', 'solid', 'audio', 'video'].map(tone =>
+      [tone, style.getPropertyValue(`--timeline-clip-${tone}-text`).trim() || (tone === 'text' || tone === 'solid' ? '#ffffff' : '#171717')]))
     const byTrack = indexClips(seq.clips).byTrack
     const geometry = canvas.parentElement?.querySelector('[data-testid="timeline-geometry"]')
     const totalH = seq.tracks.reduce((n, track) => n + track.height, 0)
@@ -74,18 +75,19 @@ export function TimelineLabels({ seq, pxPerSec, scrollRef, viewportWidth, geomet
           ctx.rect(labelX, cy + 4, Math.max(0, clipW - 10), track.height - 8)
           ctx.clip()
           ctx.globalAlpha = clip.enabled ? 1 : 0.4
-          ctx.font = `500 10px ${family}`
-          ctx.fillStyle = track.kind === 'audio' ? 'hsl(158 45% 30%)' : color
+          const tone = clip.text ? 'text' : clip.solid ? 'solid' : track.kind === 'audio' ? 'audio' : 'video'
+          ctx.font = `600 10px ${family}`
+          ctx.fillStyle = labelColors[tone]
           let textX = labelX, remaining = available
           if (Math.abs((clip.speed || 1) - 1) > 1e-3) {
             const rate = `${(clip.speed || 1).toFixed(2)}×`
             const badgeW = measure(rate) + 8
-            ctx.fillStyle = 'hsl(38 92% 50% / 0.9)'
+            ctx.fillStyle = '#ffffff'
             ctx.fillRect(textX, labelY, badgeW, 12)
-            ctx.fillStyle = '#1b1f1d'
+            ctx.fillStyle = '#1e1e1e'
             ctx.fillText(rate, textX + 4, labelY)
             textX += badgeW + 4; remaining -= badgeW + 4
-            ctx.fillStyle = track.kind === 'audio' ? 'hsl(158 45% 30%)' : color
+            ctx.fillStyle = labelColors[tone]
           }
           let label = clip.name
           if (remaining > 0) {

@@ -22,6 +22,10 @@ import subprocess
 import sys
 import time
 import zlib
+import copy
+import math
+from dataclasses import replace
+from functools import lru_cache
 from pathlib import Path
 
 import cv2
@@ -110,7 +114,7 @@ def element_timings(weights: list[float], areas: list[int], total_ms: int, hold_
 # ── 帧输出：ffmpeg 管道 ──────────────────────────────────────────────
 
 
-def open_sink(path: Path, W: int, H: int, fps: int, alpha: bool, crf: int, ffmpeg: str, audio: Path | None = None) -> subprocess.Popen:
+def open_sink(path: Path, W: int, H: int, fps: int, alpha: bool, crf: int, ffmpeg: str, audio: Path | None = None, threads: int = 4) -> subprocess.Popen:
     args = [
         ffmpeg, "-y", "-hide_banner", "-loglevel", "error",
         "-f", "rawvideo", "-pix_fmt", "bgra" if alpha else "bgr24",
@@ -122,7 +126,7 @@ def open_sink(path: Path, W: int, H: int, fps: int, alpha: bool, crf: int, ffmpe
         args.append("-an")
     args += [
         "-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p" if alpha else "yuv420p",
-        "-b:v", "0", "-crf", str(crf), "-row-mt", "1", "-deadline", "good", "-cpu-used", "4",
+        "-b:v", "0", "-crf", str(crf), "-row-mt", "1", "-deadline", "good", "-cpu-used", "4", "-threads", str(threads),
     ]
     if alpha:
         args += ["-auto-alt-ref", "0"]
@@ -169,6 +173,7 @@ def stamp_hand_rgba(tip, color: np.ndarray, a: np.ndarray, x: int, y: int) -> No
     ra[:] = na
 
 
+@lru_cache(maxsize=1)
 def make_renderer_class():
     import render_stream_whiteboard as rsw
 
@@ -189,6 +194,7 @@ def make_renderer_class():
         crop: tuple[int, int, int, int] | None = None
         stamp_hand = True
         tips: list | None = None
+        tip_origin = (0, 0)
 
         def _snapshot_with_tip(self, px: int, py: int) -> np.ndarray:
             self._last_tip = (int(px), int(py))
@@ -235,7 +241,7 @@ def make_renderer_class():
             frame = snap if snap.dtype == np.uint8 else snap.astype(np.uint8)
             self._last_snap = frame
             if self.tips is not None:
-                self.tips.append(tip)
+                self.tips.append(None if tip is None else (tip[0]+self.tip_origin[0], tip[1]+self.tip_origin[1]))
             if self.crop is not None:
                 x0, y0, x1, y1 = self.crop
                 frame = frame[y0:y1, x0:x1]
@@ -368,22 +374,40 @@ class Stage:
         self.hand = None if self.bare else (hand_png if hand_png.exists() else None)
         self.W, self.H, self.fps = W, H, fps
         self.crf = CRF.get(str(p.get("quality", "standard")), 31)
+        self.encoder_threads = max(1,min(16,int(p.get('_encoderThreads',4))))
         self.sink: subprocess.Popen | None = None
         self.frames = 0
         self.total_frames = 1
         self.progress: Progress | None = None
+        self._tip = None
+
+    def shared_tip(self):
+        """Hand image and scaled alpha are immutable; load once per scene."""
+        if self.bare:
+            return None
+        if self._tip is None:
+            import stream_render as sr
+            data = sr._load_hand(self.hand, self.cfg.target_hand_height) if self.hand else None
+            ax, ay = self.cfg.tip_anchor_x, self.cfg.tip_anchor_y
+            if data is None:
+                data = sr._procedural_tip(self.cfg.target_hand_height)
+                ax, ay = .5, .70
+            self._tip = sr.TipOverlay(data[0], data[1], tip_anchor_x=ax, tip_anchor_y=ay)
+        return self._tip
 
     def open(self, path: Path, ffmpeg: str, total_frames: int, progress: Progress, audio: Path | None = None,
              size: tuple[int, int] | None = None) -> None:
         w, h = size or (self.W, self.H)
-        self.sink = open_sink(path, w, h, self.fps, self.alpha, self.crf, ffmpeg, audio)
+        self.sink = open_sink(path, w, h, self.fps, self.alpha, self.crf, ffmpeg, audio, self.encoder_threads)
         self.total_frames = max(1, total_frames)
         self.progress = progress
 
-    def renderer(self, canvas: np.ndarray, ann: dict, ann_dir: Path, budget: int | None = None):
-        r = self.Renderer(canvas, ann, self.cfg, self.hand, self.bare, ann_dir=ann_dir)
-        if (r.out_w, r.out_h) != (self.W, self.H):
-            raise RuntimeError(f"输出尺寸对不齐: {r.out_w}x{r.out_h} ≠ {self.W}x{self.H}")
+    def renderer(self, canvas: np.ndarray, ann: dict, ann_dir: Path, budget: int | None = None, cfg=None):
+        r = self.Renderer(canvas, ann, cfg or self.cfg, None, True, ann_dir=ann_dir)
+        expected = (canvas.shape[1], canvas.shape[0])
+        if (r.out_w, r.out_h) != expected:
+            raise RuntimeError(f"输出尺寸对不齐: {r.out_w}x{r.out_h} ≠ {expected}")
+        r.tip = self.shared_tip()
         r.sink = self.sink
         r.alpha = self.alpha
         r.tone = self.tone
@@ -391,6 +415,35 @@ class Stage:
         r.frames = self.frames
         r.progress = self.progress
         r.budget = budget
+        return r
+
+    def element_renderer(self, canvas, ann, ann_dir, crop, budget=None):
+        """Keep the original grid and stroke reading-order phase while moving
+        a single element into a padded local workspace. Public crop/tips remain
+        in the source canvas coordinate system."""
+        if os.environ.get('TODO_CHALK_FULL_CANVAS')=='1':
+            r=self.renderer(canvas,ann,ann_dir,budget)
+            r.crop=crop
+            return r
+        # Grid strokes must retain their cell centres; skeleton sorting uses
+        # 12/24px reading bands. Align translation to all of those periods.
+        align = math.lcm(self.cfg.grid_edge, 24)
+        margin = self.cfg.ink_reveal_max_radius
+        x0,y0,x1,y1 = crop
+        left=max(0,((x0-margin)//align)*align)
+        top=max(0,((y0-margin)//align)*align)
+        right=min(self.W,math.ceil((x1+margin)/align)*align)
+        bottom=min(self.H,math.ceil((y1+margin)/align)*align)
+        local=canvas[top:bottom,left:right]
+        local_ann=copy.deepcopy(ann)
+        local_ann['canvas']={'width':right-left,'height':bottom-top}
+        for e in local_ann['elements']:
+            for region in [e['region'],*e.get('reveal',{}).get('protectedRegions',[])]:
+                region['x']-=left;region['y']-=top
+        cfg=replace(self.cfg,cap_long_edge=max(right-left,bottom-top))
+        r=self.renderer(local,local_ann,ann_dir,budget,cfg)
+        r.crop=(x0-left,y0-top,x1-left,y1-top)
+        r.tip_origin=(left,top)
         return r
 
     def run(self, r, total_ms: int, work: Path) -> None:
@@ -831,7 +884,9 @@ def save_hand(path: Path, tip) -> dict:
 def render_scene_clips(req: dict, progress: Progress) -> dict:
     """一块黑板 → 每个元素单独的透明素材。手写元素出书写 WebM（不带手）+ 笔尖轨迹；
     盖章和渐显直接把进场做进 WebM，不落笔尖。粉笔手单独出一张图，只跟着手写元素。"""
-    p = req.get("params") or {}
+    resources=req.get('resources') or {}
+    cv2.setNumThreads(max(1,min(4,int(resources.get('nativeThreads',1)))))
+    p = {**(req.get("params") or {}),'_encoderThreads':resources.get('encoderThreads',4)}
     W, H = canvas_size(p)
     fps = int(p.get("fps", 30))
     speed = float(p.get("drawSpeed", 1.0))
@@ -876,8 +931,8 @@ def render_scene_clips(req: dict, progress: Progress) -> dict:
             entrance = None
             if mode == "draw":
                 ann = annotation(f"{prefix}_{sid}_{e['id']}", W, H, du + DRAW_TAIL_MS, [e], [(0, du)], "masks/")
-                r = stage.renderer(single, ann, work, budget=n)
-                r.crop, r.stamp_hand, r.tips = crop, False, []
+                r = stage.element_renderer(single, ann, work, crop, budget=n)
+                r.stamp_hand, r.tips = False, []
                 if hand is None and r.tip is not None:
                     hand = save_hand(out_dir / hand_name, r.tip)
                 stage.run(r, du + DRAW_TAIL_MS, work)
@@ -891,7 +946,7 @@ def render_scene_clips(req: dict, progress: Progress) -> dict:
             stage.close()
             if not last_frame_png(out_dir / video, out_dir / hold, ffmpeg):
                 if mode == "draw":
-                    stage.save_still(out_dir / hold, r.drawn, crop)
+                    stage.save_still(out_dir / hold, r.drawn, r.crop)
                 else:
                     x0, y0, x1, y1 = crop
                     color, alpha = to_straight_rgba(single[y0:y1, x0:x1], stage.tone)

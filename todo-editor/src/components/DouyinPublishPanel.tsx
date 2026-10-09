@@ -742,7 +742,7 @@ export function DouyinPublishPanel() {
             >
               <span
                 className="inline-block w-1.5 h-1.5 rounded-full mr-1.5"
-                style={{ background: ok ? '#3a9a5a' : '#c45c3e' }}
+                style={{ background: ok ? '#818181' : '#707070' }}
               />
               {phoneLabel(p)}
             </button>

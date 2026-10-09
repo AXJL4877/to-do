@@ -1,0 +1,182 @@
+[
+  {
+    "path": "docs/chalk-render-performance.md",
+    "sha256": "93accb47a5ac98dc1e638b071b1e5cb43032f0e60b3bd920fe641f412ad2b685",
+    "bytes": 4374
+  },
+  {
+    "path": "docs/extension-authoring.md",
+    "sha256": "c4219945d8a710ee04d58912e7f2fcd380b3c1624ec5b0fba4eabcbe8ba04beb",
+    "bytes": 12781
+  },
+  {
+    "path": "docs/extension-self-check.md",
+    "sha256": "69651e3da249f3dc8dade264903077bc691dd07dbc33d125bdb211844cc52cfb",
+    "bytes": 7005
+  },
+  {
+    "path": "docs/prompts/convert-workflow-to-extension.md",
+    "sha256": "df5985e52ec752ecba397860c3b4ba09aa8fb2718bfeaeb573ba4b42408345d3",
+    "bytes": 5024
+  },
+  {
+    "path": "docs/render-export-performance.md",
+    "sha256": "f1dc84217f8e3fc73ac3947f25beff779cb11f77eee0db5e8844d01e725f3d7d",
+    "bytes": 7581
+  },
+  {
+    "path": "docs/templates/extension.check.json",
+    "sha256": "f517860d3c77286b04ed05479467e6ce6c709a626b45896bb9edaa2b97b0f78e",
+    "bytes": 1228
+  },
+  {
+    "path": "docs/templates/render-performance.json",
+    "sha256": "0a357f44703a5b6de8caf5c55df29be82887b02aa4e7ba64a995fb1472d39002",
+    "bytes": 1044
+  },
+  {
+    "path": "docs/templates/workflow-migration-report.md",
+    "sha256": "85f091637f429bb36addb9f3fff6e7f68779185b93762c05123b1aa39ffb9f8f",
+    "bytes": 3885
+  },
+  {
+    "path": "docs/workflow-to-extension.md",
+    "sha256": "98b846a7783020d266962a20c1cb65d5bbc807ecb58b61d6d554e956fc255609",
+    "bytes": 21404
+  },
+  {
+    "path": "examples/extensions/corner-chain/extension.check.json",
+    "sha256": "1c1ba82522f58d0ef4f9569947c0ca7f2264f8951239f33240348d8bbd5b3221",
+    "bytes": 1276
+  },
+  {
+    "path": "examples/extensions/corner-chain/MIGRATION.md",
+    "sha256": "d26d312a9fac1f4d465c03174cccbb10f2ade9168eeff89a8752ad22286bf097",
+    "bytes": 1895
+  },
+  {
+    "path": "examples/extensions/corner-chain/README.md",
+    "sha256": "9d54bda19eace5af09740cf95f145f7fb899c9d27be767e6654bc16bdfb1eb0f",
+    "bytes": 4362
+  },
+  {
+    "path": "examples/extensions/corner-chain/skill.json",
+    "sha256": "29c8bbc38f91059efde0026e41702343ae3586e489cd0a34dbd0046694cc30cb",
+    "bytes": 9998
+  },
+  {
+    "path": "examples/extensions/paper-titles/README.md",
+    "sha256": "cee89cfc9ffd36c6b051f42003970deec38013ed93e784ae474f579f1940f896",
+    "bytes": 600
+  },
+  {
+    "path": "examples/extensions/paper-titles/skill.json",
+    "sha256": "a90da436ba4b5eb120045fc04fd41bf8f2e8d20d09cad9fd6f9d713ba79f0b2d",
+    "bytes": 88504
+  },
+  {
+    "path": "README.md",
+    "sha256": "24773234eb9d807f6c7d299c32ca6a9cfcf05667120d4c5d33cdf792d9ed6206",
+    "bytes": 4768
+  },
+  {
+    "path": "samples/chalk-pipeline-benchmark.json",
+    "sha256": "642ce8f09c594640d7bc2ec575dff507814fe4b07ddbf8235689101358959f39",
+    "bytes": 1082
+  },
+  {
+    "path": "samples/corner-chain-check.json",
+    "sha256": "74087680c8b7acc954fcc9169ff420566ab69b8a8fac198c99af3b7da41ec5bd",
+    "bytes": 12058
+  },
+  {
+    "path": "samples/corner-chain-preview.mp4",
+    "sha256": "e4c090b48ecf0271ebaa650eb0ebee4f2dbfc2c5464325f23dc2beca613ed77c",
+    "bytes": 451344
+  },
+  {
+    "path": "samples/corner-chain.todoext",
+    "sha256": "d187c2c7ca0d8c4705ea322a57792ea7ac681846310293aabfdebb8214b3579a",
+    "bytes": 7700
+  },
+  {
+    "path": "scripts/benchmark-chalk-pipeline.py",
+    "sha256": "dba3ff2f68b12cde2f70680f846ebe27cb8ade70003fcea50b36c24d4bbf00c7",
+    "bytes": 4502
+  },
+  {
+    "path": "scripts/build-corner-pack.mjs",
+    "sha256": "82e84d6f0ed17e94c36e3591627ce9141deda9fa32e9ee92b391232b360c9a96",
+    "bytes": 3826
+  },
+  {
+    "path": "scripts/check-extension.mjs",
+    "sha256": "91f5ea7152db7636edbcc6680fbc907bf70dad2e12e743dcc78cd7ecbf37cd17",
+    "bytes": 9271
+  },
+  {
+    "path": "scripts/check-render-performance.mjs",
+    "sha256": "c257697e8064a443edace8d24744cb8e1d819089a61dafc9f563062d2570d120",
+    "bytes": 2852
+  },
+  {
+    "path": "scripts/test-chalk-concurrency.mjs",
+    "sha256": "bf1b363ce12f0b20c142a6146df79b6ec8e9a9b3e3065e0dd60045048fdfca25",
+    "bytes": 4152
+  },
+  {
+    "path": "scripts/test-chalk-render-performance.py",
+    "sha256": "348797298d0620239510e1859b1a2bd44c882433825a0a5490b699f979435bd2",
+    "bytes": 3465
+  },
+  {
+    "path": "scripts/test-corner-chain.mjs",
+    "sha256": "2a54fb1264765543febbf04748ad68d1a4802955ebec69e84d0815989e50cf20",
+    "bytes": 1662
+  },
+  {
+    "path": "scripts/test-corner-export.cjs",
+    "sha256": "25950c35adf8e00ec388d0adbea4543e59de014ca5f0a2bc1ae7d4c78632fc1b",
+    "bytes": 2652
+  },
+  {
+    "path": "scripts/test-corner-export.mjs",
+    "sha256": "bc6d9c7d2a359046a9f00a7f53b8aeeb09726aa010c2cfbb3ced6c3d2c6c87aa",
+    "bytes": 446
+  },
+  {
+    "path": "scripts/test-corner-production.mjs",
+    "sha256": "06b633f0b9e56a2b46e1b107d90f9ee1ffccf2e9d2f71d302c96cfa25abd722d",
+    "bytes": 3838
+  },
+  {
+    "path": "scripts/test-dynamic-production.mjs",
+    "sha256": "318fce955b3b009a9742b95ab27dfc9191aeacaa3650fb0d4026a5b1d2f59f3c",
+    "bytes": 5771
+  },
+  {
+    "path": "scripts/test-extension-check.mjs",
+    "sha256": "4c1ae5318b0bcb135528facd1aa40f8f2ef6add0e5b2fefa52775d19327b04fe",
+    "bytes": 3657
+  },
+  {
+    "path": "scripts/test-production-timeline.mjs",
+    "sha256": "5ce255a24dba4a3e086768b5a8678a715b92649fb9acdf88acf69c782039afbd",
+    "bytes": 2702
+  },
+  {
+    "path": "scripts/test-render-performance.mjs",
+    "sha256": "0ce2c89ef3511c497f4f930a7a8d0b5c277d704441094da3f68dc49e2fbf16e5",
+    "bytes": 1855
+  },
+  {
+    "path": "tests/corner-chain.browser.ts",
+    "sha256": "1944a3425ced4d252b35cce1e4c991cc2cbc6c9e7d440959d391e4b9abbe7113",
+    "bytes": 6837
+  },
+  {
+    "path": "tests/production-timeline.browser.ts",
+    "sha256": "e2e37318c1ef459117b397ae329a2d76bb1c4a22bcc690c9d843c969c5c626bc",
+    "bytes": 14192
+  }
+]

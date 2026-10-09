@@ -139,7 +139,7 @@ export function PrKeyframeRow({
             className={clsx(
               'w-6 h-6 grid place-items-center rounded border transition-colors',
               active
-                ? 'border-[hsl(18_76%_46%/0.4)] bg-[var(--accent-dim)] text-[var(--accent)]'
+                ? 'border-[hsl(0_0%_46%/0.4)] bg-[var(--accent-dim)] text-[var(--accent)]'
                 : armed
                   ? 'border-[var(--border)] text-[var(--accent)] bg-[var(--surface-1)]'
                   : 'border-[var(--border)] text-[var(--text-muted)] bg-[var(--surface-1)] hover:text-[var(--accent)]',

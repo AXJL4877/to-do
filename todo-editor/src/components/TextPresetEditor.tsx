@@ -204,9 +204,9 @@ export function TextPresetEditor({ extension = false }: { extension?: boolean })
           {!fonts.some(f => f.family === text.fontFamily) && <option value={text.fontFamily}>{text.fontFamily}</option>}
           {fonts.map(f => <option key={f.family} value={f.family}>{f.label}</option>)}
         </select>
-        {dynamic?.version !== 2 && <input aria-label="文字颜色" title="文字颜色" type="color" value={hex(style.fill[0], '#ffffff')} onChange={e => patch({ fancy: { ...style, fill: [e.target.value] }, color: e.target.value })} />}
+        {(dynamic?.version !== 2 || dynamic.composition?.corner) && <input aria-label="文字颜色" title="文字颜色" type="color" value={hex(style.fill[0], '#ffffff')} onChange={e => patch({ fancy: { ...style, fill: [e.target.value] }, color: e.target.value })} />}
       </div>
-      {dynamic?.version === 2 && <p className="editor-hint">配色由整体风格决定；衬线与等宽角色使用宋体和 Consolas，其余文字使用所选字体。</p>}
+      {dynamic?.version === 2 && !dynamic.composition?.corner && <p className="editor-hint">配色由整体风格决定；衬线与等宽角色使用宋体和 Consolas，其余文字使用所选字体。</p>}
       <NumInput label="字号" value={text.fontSize} min={12} max={300} defaultValue={96} showSlider={false} onChange={fontSize => patch({ fontSize })} />
       {!isDynamic && <NumInput label="字距" value={text.letterSpacing} min={-10} max={40} defaultValue={0} showSlider={false} onChange={letterSpacing => patch({ letterSpacing })} />}
       {outer && <div className="editor-inline">

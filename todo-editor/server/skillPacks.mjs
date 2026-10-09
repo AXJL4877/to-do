@@ -255,8 +255,12 @@ export function getSkillEntry(skillId) {
   return entry
 }
 
+function isUserInstalled(dir, userRoot) {
+  return path.resolve(dir).startsWith(path.resolve(userRoot) + path.sep)
+}
+
 /** 给前端的公开描述（不含规划提示词、素材模板与路径） */
-export function publicSkill({ pack }) {
+export function publicSkill({ pack, dir }) {
   return {
     id: pack.id,
     name: pack.name,
@@ -274,6 +278,8 @@ export function publicSkill({ pack }) {
     pipeline: pack.pipeline,
     planner: pack.planner ? { maxElements: pack.planner.maxElements, countParam: pack.planner.countParam ?? null } : null,
     assets: pack.assets ? { models: pack.assets.models, resolution: pack.assets.resolution } : null,
+    /** 仅用户目录安装的包可移除；内置包为 false */
+    installed: isUserInstalled(dir, USER_SKILL_DIR),
   }
 }
 
@@ -408,14 +414,15 @@ export function buildPlannerMessages(pack, prompt, params) {
   return [{ role: 'system', content: system }, { role: 'user', content: String(prompt).slice(0, pack.input.maxLength) }]
 }
 
-export async function chatPlanner(config, messages) {
+export async function chatPlanner(config, messages, o = {}) {
+  o.signal?.throwIfAborted()
   if (!config?.apiKey) throw new Error('请先配置 API Key')
   const res = await fetch(`${normalizeBaseUrl(config.baseUrl)}/v1/chat/completions`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${config.apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ model: SKILL_PLANNER_MODEL, messages, temperature: 0.6 }),
     // 长口播的分板 JSON 可能上万 token
-    signal: AbortSignal.timeout(300_000),
+    signal: o.signal ? AbortSignal.any([o.signal, AbortSignal.timeout(300_000)]) : AbortSignal.timeout(300_000),
   })
   const text = await res.text()
   let payload = {}

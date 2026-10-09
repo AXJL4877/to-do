@@ -5,6 +5,7 @@
 import { useApp } from '../store'
 import type { ChalkStroke, Clip, Transform2D } from '../types'
 import { isSameAiMedia } from './aiJobImport'
+import { isRemovedGenerated } from './mediaManagement'
 
 export { elementTransform } from './chalkHandLayers'
 
@@ -18,6 +19,7 @@ export function chalkEnterLabel(enter?: string) {
 
 function ensureHandMedia(chalk: ChalkStroke, folderId?: string) {
   const st = useApp.getState()
+  if(isRemovedGenerated(chalk.hand.url,st.settings.removedGeneratedMedia))return null
   if (chalk.hand.mediaId && st.media.some((m) => m.id === chalk.hand.mediaId)) return chalk.hand.mediaId
   const hit = st.media.find((m) => isSameAiMedia(m, chalk.hand.url))
   if (hit) return hit.id

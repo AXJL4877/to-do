@@ -17,6 +17,7 @@ import type { TimelinePlacement } from './aiSkills'
 import { chalkEnterLabel, elementTransform, setChalkHand } from './chalkHand'
 import { pollProductions } from './productionTimeline'
 import { isStoreAuthority } from './storeSync'
+import { isRemovedGenerated } from './mediaManagement'
 
 export type NarratedClipElement = {
   id: string
@@ -123,6 +124,7 @@ function folderFor(j: NarratedJob) {
 }
 
 function ensureMedia(item: { name: string; url: string; kind: MediaItem['kind']; duration: number; width?: number; height?: number; alpha?: boolean }, folderId: string) {
+  if(isRemovedGenerated(item.url,useApp.getState().settings.removedGeneratedMedia))return null
   const hit = useApp.getState().media.find((m) => isSameAiMedia(m, item.url))
   if (hit) return hit.id
   return useApp.getState().importMedia([{ ...item, hasAudio: item.kind === 'audio', folderId }], { silent: true })[0] ?? null
