@@ -11,7 +11,7 @@ export { elementTransform } from './chalkHandLayers'
 
 export const CHALK_HAND_PRESET_ID = 'chalkHand'
 
-export const CHALK_ENTER_LABEL: Record<string, string> = { draw: '书写', stamp: '盖章', fade: '显现' }
+export const CHALK_ENTER_LABEL: Record<string, string> = { draw: '书写', stamp: '盖章', fade: '显现', play: '转场', wipe: '转场' }
 
 export function chalkEnterLabel(enter?: string) {
   return CHALK_ENTER_LABEL[enter || ''] || '书写'

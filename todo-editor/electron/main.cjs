@@ -9,6 +9,7 @@ const { createNativePlayer, rgb24ToBmpDataUrl } = require('./nativePlayer.cjs')
 const { makeProxy } = require('./makeProxy.cjs')
 const { createPreviewEngine } = require('./previewEngine.cjs')
 const { createRecentProjects, writeProjectFile, readProjectFile, createProjectFolder, PROJECT_SUBDIRS } = require('./projectFile.cjs')
+const projectCore = require('./projectCore.cjs')
 
 const isDev = !app.isPackaged
 
@@ -771,13 +772,23 @@ app.whenReady().then(async () => {
       if (r.canceled || !r.filePath) return { ok: false, canceled: true }
       filePath = r.filePath
     }
+    // 优先走无 UI 核心层：原子写 + .bak + 环形备份 + 清恢复日志。
+    // 别的进程正开着这个工程 → 明确报冲突，绝不静默覆盖（这次会话踩过）。
+    const coreUp = await projectCore.saveProject(filePath, json).catch((e) => ({ ok: false, degraded: `核心层异常：${e.message}` }))
+    if (coreUp && !coreUp.ok && coreUp.error?.code === 'conflict') {
+      return { ok: false, error: coreUp.error.message, path: filePath, code: 'conflict', details: coreUp.error.details }
+    }
+    if (coreUp && coreUp.ok) {
+      recentProjects.push(filePath)
+      return { ok: true, path: filePath, snapshot: coreUp.snapshot?.name ?? null, lock: coreUp.lock ?? null }
+    }
     try {
       writeProjectFile(filePath, json)
     } catch (e) {
       return { ok: false, error: e.message, path: filePath }
     }
     recentProjects.push(filePath)
-    return { ok: true, path: filePath }
+    return { ok: true, path: filePath, degraded: coreUp?.degraded ?? coreUp?.error?.message ?? null }
   })
 
   ipcMain.handle('desktop:open-project', async (_e, opts) => {
@@ -799,8 +810,19 @@ app.whenReady().then(async () => {
     }
     try {
       const { data, relinked, missing } = readProjectFile(filePath)
+      // 取写锁并报告崩溃残留（.journal.jsonl 未清空 = 上次没保存成功就退出）
+      const coreInfo = await projectCore.inspectOpen(filePath).catch(() => null)
+      if (coreInfo && !coreInfo.ok && coreInfo.error?.code === 'conflict') {
+        return { ok: false, path: filePath, error: coreInfo.error.message, code: 'conflict', details: coreInfo.error.details }
+      }
       recentProjects.push(filePath)
-      return { ok: true, path: filePath, json: data, relinked, missing }
+      return {
+        ok: true, path: filePath, json: data, relinked, missing,
+        lock: coreInfo?.lock ?? null,
+        journal: coreInfo?.journal ?? null,
+        snapshots: coreInfo?.snapshots ?? 0,
+        degraded: coreInfo?.degraded ?? null,
+      }
     } catch (e) {
       return { ok: false, path: filePath, error: e.message }
     }
@@ -844,10 +866,26 @@ app.whenReady().then(async () => {
   })
 
   /** 渲染端打开 / 新建 / 关闭项目时告知工程文件路径；null = 回到起始页 */
-  ipcMain.handle('desktop:set-project', (_e, filePath) => {
-    currentProjectDir = typeof filePath === 'string' && path.isAbsolute(filePath) ? path.dirname(filePath) : null
+  ipcMain.handle('desktop:set-project', async (_e, filePath) => {
+    const next = typeof filePath === 'string' && path.isAbsolute(filePath) ? filePath : null
+    if (next) {
+      // 切换工程时先把锁换过去；被别的进程占着就如实报冲突
+      const l = await projectCore.ensureLock(next).catch(() => null)
+      if (l && !l.ok && l.error?.code === 'conflict') {
+        return { ok: false, error: l.error.message, code: 'conflict', details: l.error.details }
+      }
+    } else {
+      await projectCore.releaseCurrentLock().catch(() => null)
+    }
+    currentProjectDir = next ? path.dirname(next) : null
     return { ok: true, dir: currentProjectDir }
   })
+
+  // 诊断：核心层是否接上、锁在哪个工程上（UI 可用来提示"另一个窗口开着这个工程"）
+  ipcMain.handle('desktop:project-status', async () => projectCore.status().catch((e) => ({ coreAvailable: false, degraded: e.message })))
+
+  // 崩溃恢复计划（只读；UI 拿它弹「要不要恢复」）
+  ipcMain.handle('desktop:project-recovery', async (_e, filePath) => projectCore.recoveryPlan(filePath).catch((e) => ({ ok: false, error: { code: 'internal', message: e.message } })))
 
   /** AI 服务产物（userData/data/ai-generated/<name>）复制进当前项目的 ai-generated/，项目搬家时素材跟着走 */
   ipcMain.handle('desktop:collect-ai-file', (_e, { name } = {}) => {
@@ -1242,6 +1280,110 @@ app.whenReady().then(async () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
 })
+
+app.on('will-quit', () => { void projectCore.releaseCurrentLock().catch(() => null) })
+// ───────────────────────── AI 控制端口（进程内桥）─────────────────────────
+// 为什么需要它：调试协议（CDP）只在开发模式存在，打包版没有 --debug-port，
+// 于是"稳定本地 API"就退化成"开发机上的调试口"。这里在主进程起一个**带 token 的**
+// 本地 HTTP 端口，把请求经 IPC 转给渲染进程，再用同一套命令层执行——
+// 打包版因此也有写入口。照 DSH 的教训：控制端口绝不裸奔，必须有 token。
+ipcMain.on('ai:command-reply', (_e, { reqId, result }) => {
+  const p = pendingCommands.get(reqId)
+  if (p) { pendingCommands.delete(reqId); p(result) }
+})
+
+const pendingCommands = new Map()
+let commandSeq = 0
+
+function startAiControlServer() {
+  const http = require('node:http')
+  const crypto = require('node:crypto')
+  const fs = require('node:fs')
+  const token = crypto.randomBytes(24).toString('hex')
+  const server = http.createServer((req, res) => {
+    const send = (code, body) => { res.writeHead(code, { 'content-type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(body)) }
+    if ((req.headers.authorization || '') !== `Bearer ${token}`) {
+      return send(401, { ok: false, error: { code: 'unauthorized', message: '需要 Authorization: Bearer <token>（见 userData/ai-control.json）' } })
+    }
+    const url = (req.url || '').split('?')[0]
+    if (url === '/status' && req.method === 'GET') {
+      return send(200, { ok: true, app: 'todo-editor', version: app.getVersion(), window: !!mainWindow, projectDir: currentProjectDir })
+    }
+    if (url === '/renderer' && req.method === 'POST') {
+      let body = ''
+      req.on('data', (c) => { body += c; if (body.length > 1e6) req.destroy() })
+      req.on('end', async () => {
+        let payload = null
+        try { payload = JSON.parse(body || '{}') } catch (e) {
+          return send(400, { ok: false, error: { code: 'bad_request', message: `请求体不是合法 JSON：${e.message}` } })
+        }
+        const action = payload && payload.action
+        if (!['inspect', 'commands', 'document', 'undo', 'redo'].includes(action)) {
+          return send(400, { ok: false, error: { code: 'bad_request', message: 'action 只能是 inspect / commands / document / undo / redo' } })
+        }
+        const win = mainWindow
+        if (!win || win.isDestroyed()) return send(503, { ok: false, error: { code: 'unavailable', message: '没有可用窗口' } })
+        const reqId = `cmd_${++commandSeq}`
+        const result = await new Promise((resolve) => {
+          pendingCommands.set(reqId, resolve)
+          win.webContents.send('ai:command-request', { reqId, action })
+          setTimeout(() => {
+            if (pendingCommands.has(reqId)) {
+              pendingCommands.delete(reqId)
+              resolve({ ok: false, error: { code: 'timeout', message: '渲染进程 20s 未回应' } })
+            }
+          }, 20000)
+        })
+        return send(result && result.ok !== false ? 200 : 409, result ?? { ok: false })
+      })
+      return
+    }
+    if (url === '/command' && req.method === 'POST') {
+      let body = ''
+      req.on('data', (c) => { body += c; if (body.length > 2e6) req.destroy() })
+      req.on('end', async () => {
+        let payload = null
+        try { payload = JSON.parse(body || '{}') } catch (e) {
+          return send(400, { ok: false, error: { code: 'bad_request', message: `请求体不是合法 JSON：${e.message}` } })
+        }
+        if (!payload || typeof payload.id !== 'string' || !payload.id) {
+          return send(400, { ok: false, error: { code: 'bad_request', message: '需要 { id: "<commandId>", args?: {...}, commit?: true }' } })
+        }
+        const win = mainWindow
+        if (!win || win.isDestroyed()) return send(503, { ok: false, error: { code: 'unavailable', message: '没有可用窗口' } })
+        const reqId = `cmd_${++commandSeq}`
+        const result = await new Promise((resolve) => {
+          pendingCommands.set(reqId, resolve)
+          win.webContents.send('ai:command-request', { reqId, id: payload.id, args: payload.args ?? {}, commit: payload.commit !== false })
+          setTimeout(() => {
+            if (pendingCommands.has(reqId)) {
+              pendingCommands.delete(reqId)
+              resolve({ ok: false, error: { code: 'timeout', message: '渲染进程 20s 未回应（窗口是不是卡住了？）' } })
+            }
+          }, 20000)
+        })
+        return send(result && result.ok ? 200 : 409, result ?? { ok: false, error: { code: 'internal', message: '渲染进程没有返回结果' } })
+      })
+      return
+    }
+    return send(404, { ok: false, error: { code: 'not_found', message: `未知路径 ${url}` } })
+  })
+  server.on('error', (e) => { console.log('[ai-control] 启动失败: ' + e.message) })
+  server.listen(0, '127.0.0.1', () => {
+    const port = server.address().port
+    const info = { port, token, pid: process.pid, at: new Date().toISOString() }
+    try {
+      const dir = app.getPath('userData')
+      fs.mkdirSync(dir, { recursive: true })
+      fs.writeFileSync(require('node:path').join(dir, 'ai-control.json'), JSON.stringify(info, null, 2))
+    } catch (e) { console.log('[ai-control] 写 token 文件失败: ' + e.message) }
+    console.log(`[ai-control] listening on 127.0.0.1:${port} (token in userData/ai-control.json)`)
+  })
+  app.on('will-quit', () => { try { server.close() } catch { /* 忽略 */ } })
+}
+
+app.whenReady().then(() => { startAiControlServer() })
+
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()

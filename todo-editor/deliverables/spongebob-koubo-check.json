@@ -1,14 +1,14 @@
 {
   "spec": "todo-extension-check-report/1",
   "source": "D:\\desktop\\to_do\\todo-editor\\examples\\extensions\\spongebob-koubo",
-  "startedAt": "2026-10-09T10:22:38.958Z",
+  "startedAt": "2026-10-10T04:19:38.327Z",
   "ok": true,
   "checks": [
     {
       "id": "format",
       "ok": true,
-      "bytes": 12820,
-      "sourceDigest": "fc09f9f67d5fe4ac95699d2858f8d1e022ae15fa58fee5951590ecea1f7f983d"
+      "bytes": 72724212,
+      "sourceDigest": "f313b270a070058e4ffbde683fbc224005156e4e1116bab41cdbab2820040800"
     },
     {
       "id": "isolated-install",
@@ -28,7 +28,7 @@
         "baseline",
         "performance"
       ],
-      "checks": 6
+      "checks": 7
     },
     {
       "id": "original-baseline",
@@ -41,7 +41,7 @@
         "node",
         "checks/baseline.mjs"
       ],
-      "durationMs": 2342,
+      "durationMs": 1708,
       "artifacts": [
         {
           "path": "D:\\desktop\\to_do\\todo-editor\\deliverables\\spongebob-koubo-check-artifacts\\original-baseline\\check-output\\baseline.json",
@@ -63,7 +63,7 @@
         "node",
         "checks/runtime.mjs"
       ],
-      "durationMs": 1600,
+      "durationMs": 2043,
       "artifacts": [
         {
           "path": "D:\\desktop\\to_do\\todo-editor\\deliverables\\spongebob-koubo-check-artifacts\\runtime-and-cache\\check-output\\result.json",
@@ -85,7 +85,7 @@
         "node",
         "scripts/test-spongebob-timeline.mjs"
       ],
-      "durationMs": 454,
+      "durationMs": 449,
       "artifacts": [
         {
           "path": "D:\\desktop\\to_do\\todo-editor\\native\\test-output\\spongebob-koubo\\timeline.json",
@@ -106,7 +106,7 @@
         "node",
         "scripts/test-spongebob-export.mjs"
       ],
-      "durationMs": 1315,
+      "durationMs": 1294,
       "artifacts": [
         {
           "path": "D:\\desktop\\to_do\\todo-editor\\native\\test-output\\spongebob-koubo\\export.mp4",
@@ -127,15 +127,28 @@
         "node",
         "checks/performance.mjs"
       ],
-      "durationMs": 10179,
+      "durationMs": 9847,
       "artifacts": [
         {
           "path": "D:\\desktop\\to_do\\todo-editor\\deliverables\\spongebob-koubo-check-artifacts\\render-benchmark\\check-output\\PERFORMANCE.json",
-          "bytes": 2072,
-          "sha256": "9420fc3ad73473a9dc2c2da27993c35f7bb530dd09eb8ddf57eea2db2061215e"
+          "bytes": 2075,
+          "sha256": "7814ac599adb6a4a3e273ef47e7dec1b8b26b407007363194fe3938fa46a9ffa"
         }
       ],
-      "log": "{\"coldBase\":[757.3139000014635,749.438500002725,741.800299998431],\"coldFast\":[523.4352999978,520.1587000046857,522.1229000017047],\"warmBase\":[694.7021000014502,716.932800001814,690.6950999982655],\"warmFast\":[574.1612999991048,563.5735000032582,605.3279000043403]}\n"
+      "log": "{\"coldBase\":[685.0854000003892,687.412300001597,686.5682999996352],\"coldFast\":[634.3412999995053,572.7211000012176,519.4828999992751],\"warmBase\":[672.3792000011599,684.1903999993519,664.3788000001223],\"warmFast\":[507.90869999946153,514.02969999981,514.136800000415]}\n"
+    },
+    {
+      "id": "source-contract",
+      "ok": true,
+      "covers": [],
+      "mode": "offline",
+      "argv": [
+        "node",
+        "checks/source-contract.mjs"
+      ],
+      "durationMs": 125,
+      "artifacts": [],
+      "log": "{\"ok\":true,\"version\":\"1.4.1\",\"entry\":\"workflow/run_pipeline.py\"}\n"
     },
     {
       "id": "performance-budget",
@@ -146,32 +159,32 @@
         "node",
         "scripts/check-render-performance.mjs"
       ],
-      "durationMs": 179,
+      "durationMs": 120,
       "artifacts": [],
-      "log": "{\"ok\":true,\"results\":[{\"id\":\"stickers-cold\",\"cacheState\":\"cold\",\"baselineMs\":749.438500002725,\"candidateMs\":522.1229000017047,\"speedup\":1.4353679947772415,\"peakMiB\":180,\"workers\":2},{\"id\":\"stickers-warm\",\"cacheState\":\"warm\",\"baselineMs\":694.7021000014502,\"candidateMs\":574.1612999991048,\"speedup\":1.209942397724356,\"peakMiB\":180,\"workers\":2}]}\n"
+      "log": "{\"ok\":true,\"results\":[{\"id\":\"stickers-cold\",\"cacheState\":\"cold\",\"baselineMs\":686.5682999996352,\"candidateMs\":572.7211000012176,\"speedup\":1.1987829678322932,\"peakMiB\":180,\"workers\":2},{\"id\":\"stickers-warm\",\"cacheState\":\"warm\",\"baselineMs\":672.3792000011599,\"candidateMs\":514.02969999981,\"speedup\":1.3080551571269297,\"peakMiB\":180,\"workers\":2}]}\n"
     },
     {
       "id": "source-stability",
       "ok": true,
-      "sourceDigest": "fc09f9f67d5fe4ac95699d2858f8d1e022ae15fa58fee5951590ecea1f7f983d"
+      "sourceDigest": "f313b270a070058e4ffbde683fbc224005156e4e1116bab41cdbab2820040800"
     },
     {
       "id": "host-stability",
       "ok": true,
-      "hostDigest": "27857551548bca550e7a466e2013b5d8c086926e10ede2295b2ecded393bcdf4"
+      "hostDigest": "35bcfa6de29ac10308ba0a488962a22de8669ebea494e4c11c8f76b3835c4c9e"
     }
   ],
   "limitations": [],
   "output": {
     "path": "D:\\desktop\\to_do\\todo-editor\\deliverables\\spongebob-koubo.todoext",
-    "bytes": 12820,
-    "sha256": "496a8fe06d4b49e712155f9bad67d2c32152ea514578b3edf14c2f0b6726abe5"
+    "bytes": 72724212,
+    "sha256": "109eddfc8ffc8c4e2d9c756b3ed06213ce94626992b33cf1e7a78494efdde731"
   },
   "extension": {
     "id": "studio.spongebob-koubo",
-    "version": "1.0.1",
+    "version": "1.4.1",
     "kind": "skill"
   },
-  "hostDigest": "27857551548bca550e7a466e2013b5d8c086926e10ede2295b2ecded393bcdf4",
-  "finishedAt": "2026-10-09T10:22:57.007Z"
+  "hostDigest": "35bcfa6de29ac10308ba0a488962a22de8669ebea494e4c11c8f76b3835c4c9e",
+  "finishedAt": "2026-10-10T04:20:28.564Z"
 }

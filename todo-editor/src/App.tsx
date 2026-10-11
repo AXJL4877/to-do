@@ -17,6 +17,8 @@ import { initStoreSync, isAiPopout, isStoreAuthority, isTimelinePopout, isLocalP
 import { setLivePlayhead } from './lib/livePlayhead'
 import { desktop } from './lib/desktop'
 import { bindNativePreviewLifecycle } from './lib/nativePreviewBridge'
+// 命令桥：开发模式下把命令表挂到 window.__TODO_CMD__（让 UI/CLI/MCP 走同一批命令 id）
+import './lib/commandBridge'
 import { startNarratedTimelineSync } from './lib/narratedTimeline'
 import { startChalkHandFollow } from './lib/chalkHand'
 import { stepZoom } from './lib/timelineZoom'
@@ -49,6 +51,15 @@ export default function App() {
       useApp.getState().importMedia(await parseMediaFiles(files))
     },
   }), [])
+
+  // 实机验收：轮询触发文件，在当前 Electron 主窗口内入轨/缩放海绵宝宝成片
+  const projectStarted = useApp((s) => s.started)
+  useEffect(() => {
+    if (POPOUT || !isStoreAuthority() || !projectStarted) return
+    let stop: (() => void) | undefined
+    void import('./lib/liveAcceptKoubo').then((m) => { stop = m.startLiveAcceptPoller() })
+    return () => { stop?.() }
+  }, [projectStarted])
 
   useEffect(() => {
     return initStoreSync()

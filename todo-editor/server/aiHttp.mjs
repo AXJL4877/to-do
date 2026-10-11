@@ -3,6 +3,11 @@
  */
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
+import { spawnSync } from 'node:child_process'
+import os from 'node:os'
+import { fileURLToPath } from 'node:url'
+import { capabilities } from './spec/capabilities.mjs'
+import { COMMAND_IDS } from './core/commands.mjs'
 import { installExtensionPack, uninstallExtensionPack, MAX_EXTENSION_BYTES } from './extensionPacks.mjs'
 import {
   bufferToDataUrl,
@@ -55,6 +60,66 @@ function readBody(req) {
   })()
 }
 
+/**
+ * 调用 scripts/app-command.mjs：把命令发给**运行中的应用**执行。
+ * 唯一入口——HTTP / MCP / CLI 三条面都走这个脚本，避免出现第二套实现。
+ * @returns {{ok:boolean, data?:object, error?:{code:string,message:string}}}
+ */
+/**
+ * 首选通路：**进程内桥**（主进程控制端口 → IPC → 渲染进程命令层）。
+ * 这是打包版也存在的接口（token 在 userData/ai-control.json），不依赖调试端口。
+ * @returns {Promise<{ok:boolean, data?:object, error?:object}|null>} null = 不可用，交给兜底
+ */
+async function viaControlServer(argv) {
+  try {
+    const infoPath = path.join(process.env.APPDATA || path.join(os.homedir(), '.config'), 'todo-editor', 'ai-control.json')
+    if (!existsSync(infoPath)) return null
+    const info = JSON.parse(readFileSync(infoPath, 'utf8'))
+    if (!info?.port || !info?.token) return null
+    const base = `http://127.0.0.1:${info.port}`
+    const headers = { authorization: `Bearer ${info.token}`, 'content-type': 'application/json' }
+    const action = argv[0]
+    if (['inspect', 'commands', 'document', 'undo', 'redo'].includes(action)) {
+      const r = await fetch(`${base}/renderer`, { method: 'POST', headers, body: JSON.stringify({ action }), signal: AbortSignal.timeout(25000) })
+      const j = await r.json()
+      return j && j.ok !== false
+        ? { ok: true, data: { ...j, via: 'ipc' } }
+        : { ok: false, data: j, error: j?.error ?? { code: 'internal', message: '渲染进程返回失败' } }
+    }
+    if (action === 'run' || action === 'preview') {
+      const i = argv.indexOf('--args')
+      let args = {}
+      try { args = i >= 0 ? JSON.parse(argv[i + 1] ?? '{}') : {} } catch { return { ok: false, error: { code: 'bad_request', message: '--args 不是合法 JSON' } } }
+      const r = await fetch(`${base}/command`, { method: 'POST', headers, body: JSON.stringify({ id: argv[1], args, commit: action === 'run' }), signal: AbortSignal.timeout(25000) })
+      const j = await r.json()
+      return { ok: r.ok && j?.ok !== false, data: { ...j, action, via: 'ipc' }, error: j?.error }
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+/** 兜底通路：调试协议（仅开发模式存在）。 */
+/** 对外统一入口：先试进程内桥，再退回调试协议。 */
+async function runAppCli(argv) {
+  const viaIpc = await viaControlServer(argv)
+  if (viaIpc) return viaIpc
+  return runAppCliSync(argv)
+}
+
+function runAppCliSync(argv) {
+  const repoRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
+  const r = spawnSync(process.execPath, [path.join(repoRoot, 'scripts', 'app-command.mjs'), ...argv], { cwd: repoRoot, encoding: 'utf8', timeout: 30000 })
+  const out = (r.stdout || '').trim()
+  if (!out) {
+    return { ok: false, error: { code: 'unavailable', message: (r.stderr || '').trim() || '连不上应用（没在跑，或没用 --debug-port 启动？）' } }
+  }
+  let parsed = null
+  try { parsed = JSON.parse(out) } catch { return { ok: false, error: { code: 'internal', message: `应用返回的不是 JSON：${out.slice(0, 200)}` } } }
+  if (parsed.ok === false && parsed.error) return { ok: false, error: parsed.error, data: parsed }
+  return { ok: true, data: parsed }
+}
 function sendJson(res, code, body) {
   res.statusCode = code
   res.setHeader('Content-Type', 'application/json; charset=utf-8')
@@ -624,6 +689,60 @@ export async function handleAiHttp(req, res) {
 export function createAiMiddleware() {
   return async (req, res, next) => {
     const url = req.url || ''
+    // 能力清单：智能体读的第一个端点——不用读源码就知道能做什么、怎么失败。
+    if (url.split('?')[0] === '/api/capabilities' || url.split('?')[0] === '/api/ai-capabilities') {
+      if (req.method !== 'GET' && req.method !== 'HEAD') {
+        return sendJson(res, 405, { ok: false, error: { code: 'bad_request', message: 'GET only' } })
+      }
+      const view = new URLSearchParams(url.split('?')[1] ?? '').get('view') === 'catalog' ? 'catalog' : 'full'
+      return sendJson(res, 200, capabilities({ aiBaseUrl: `http://127.0.0.1:${req.socket?.localPort ?? ''}`, view }))
+    }
+    // 写入口与运行态：智能体通过稳定的本地 HTTP API 驱动**运行中的应用**里的同一套命令。
+    // 为什么要绕到应用里执行：工程的真身是渲染进程内存中的文档，磁盘文件只是快照——
+    // 外部直接改文件，应用不知道，下次保存就覆盖掉。
+    if (url.split('?')[0] === '/api/app/status') {
+      if (req.method !== 'GET' && req.method !== 'HEAD') return sendJson(res, 405, { ok: false, error: { code: 'bad_request', message: 'GET only' } })
+      const r = await runAppCli(['inspect'])
+      return sendJson(res, r.ok ? 200 : 503, {
+        ok: r.ok,
+        app: r.ok
+          ? { reachable: true, title: r.data?.live?.title ?? null, projectOpen: !!r.data?.live?.started, dirty: !!r.data?.live?.dirty, clips: r.data?.validate?.stats?.clipCount ?? null, errors: r.data?.validate?.errors?.length ?? null }
+          : { reachable: false },
+        error: r.ok ? null : r.error,
+        hint: r.ok ? null : '应用需以开发模式运行：node scripts/open-todo-app.mjs --debug-port 9222',
+      })
+    }
+    if (url.split('?')[0] === '/api/timeline/undo' || url.split('?')[0] === '/api/timeline/redo') {
+      if (req.method !== 'POST') return sendJson(res, 405, { ok: false, error: { code: 'bad_request', message: 'POST only' } })
+      const which = url.split('?')[0].endsWith('/redo') ? 'redo' : 'undo'
+      const r = await runAppCli([which])
+      if (!r.ok) {
+        const code = r.error?.code ?? 'internal'
+        return sendJson(res, code === 'unavailable' ? 503 : 409, { ok: false, error: { ...r.error, code } })
+      }
+      return sendJson(res, 200, { ok: true, action: which, summaryAfter: r.data?.summaryAfter ?? null, live: r.data?.live ?? null, via: r.data?.via ?? null })
+    }
+    if (url.split('?')[0] === '/api/timeline/command') {
+      if (req.method !== 'POST') return sendJson(res, 405, { ok: false, error: { code: 'bad_request', message: 'POST only' } })
+      let body = null
+      try { body = JSON.parse((await readBody(req)) || '{}') } catch (e) {
+        return sendJson(res, 400, { ok: false, error: { code: 'bad_request', message: `请求体不是合法 JSON：${e.message}` } })
+      }
+      const { id, args, dryRun } = body ?? {}
+      if (!id || typeof id !== 'string') {
+        return sendJson(res, 400, { ok: false, error: { code: 'bad_request', message: '需要 { id: "<commandId>", args?: {...}, dryRun?: false }', hint: `可用命令：GET /api/capabilities 里的 commands.discover，或 POST {"action":"commands"}` } })
+      }
+      // 先把命令 id 校验掉：命令名写错属于**请求**错误，不该被"应用里没开工程"这类状态问题盖住。
+      if (!COMMAND_IDS.includes(id)) {
+        return sendJson(res, 404, { ok: false, error: { code: 'not_found', message: `未知命令 ${id}`, hint: `可用命令：${COMMAND_IDS.join(', ')}` } })
+      }
+      const r = await runAppCli([dryRun ? 'preview' : 'run', id, '--args', JSON.stringify(args ?? {})])
+      if (!r.ok) {
+        const code = r.error?.code === 'unavailable' ? 'unavailable' : (r.error?.code ?? 'internal')
+        return sendJson(res, code === 'unavailable' ? 503 : 409, { ok: false, error: { ...r.error, code }, hint: code === 'unavailable' ? '应用需以开发模式运行（--debug-port 9222）' : undefined })
+      }
+      return sendJson(res, 200, { ok: true, id, dryRun: !!dryRun, summary: r.data?.summary ?? null, changed: r.data?.changed ?? [], created: r.data?.created ?? [], live: r.data?.live ?? null })
+    }
     if (url.split('?')[0] === '/api/ai-extensions/import') {
       if (req.method !== 'POST') return sendJson(res, 405, { ok: false, error: 'POST only' })
       const origin = req.headers.origin
@@ -638,10 +757,10 @@ export function createAiMiddleware() {
       try {
         let size = 0
         const chunks = []
-        if (Number(req.headers['content-length']) > MAX_EXTENSION_BYTES) return sendJson(res, 413, { ok: false, error: '扩展包不能超过 32 MB' })
+        if (Number(req.headers['content-length']) > MAX_EXTENSION_BYTES) return sendJson(res, 413, { ok: false, error: '扩展包不能超过 512 MB' })
         for await (const chunk of req) {
           size += chunk.length
-          if (size > MAX_EXTENSION_BYTES) return sendJson(res, 413, { ok: false, error: '扩展包不能超过 32 MB' })
+          if (size > MAX_EXTENSION_BYTES) return sendJson(res, 413, { ok: false, error: '扩展包不能超过 512 MB' })
           chunks.push(chunk)
         }
         return sendJson(res, 200, { ok: true, extension: installExtensionPack(Buffer.concat(chunks)) })

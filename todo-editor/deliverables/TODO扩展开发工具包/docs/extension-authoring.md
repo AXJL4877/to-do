@@ -85,7 +85,7 @@ paper-titles.todoext
 
 ID 使用自己的命名空间，如 `yourname.paper-titles`；`builtin.*` 为宿主保留。版本使用三段数字，如 `1.0.0`。同 ID 高版本替换安装，同版本且内容相同跳过，同版本内容不同要求升版本，旧版本拒绝降级。用户安装路径为 `$TODO_DATA_DIR/skills|styles|anims/<id>`，开发默认是 `.data`。
 
-限制：压缩包 ≤32 MB，展开总量 ≤64 MB，单文件 ≤16 MB，最多256项（含外层声明与目录项）。禁止绝对路径、`..`、反斜杠、Windows 保留文件名、大小写重名和未声明文件。打包器禁止符号链接；安装先验证临时目录，再替换目标目录；升级替换失败恢复旧目录。用户扩展目录不能是符号链接。
+限制：压缩包 ≤512 MB，展开总量 ≤1 GB，单文件 ≤256 MB，最多2000项（含外层声明与目录项）。自包含工作流可打包字体、BGM、特效与脚本。禁止绝对路径、`..`、反斜杠、Windows 保留文件名、大小写重名和未声明文件。打包器禁止符号链接；安装先验证临时目录，再替换目标目录；升级替换失败恢复旧目录。用户扩展目录不能是符号链接。
 
 ## 4. skill.json 作者准则
 
@@ -147,6 +147,6 @@ npm run build
 
 ## 6. 本次新增实现位置
 
-`server/extensionPacks.mjs`：打包、ZIP/清单校验、安装与升级；`scripts/pack-extension.mjs`：作者 CLI；`POST /api/ai-extensions/import`：最多32 MB的二进制上传接口，返回 `{ ok, extension: { id, name, version, kind, action } }`，安装失败返回错误；`src/lib/extensionImport.ts`：文件识别、拖放拦截、串行导入、刷新事件；`App.tsx`：全局入口；SkillsPanel/AiPanel：列表刷新。
+`server/extensionPacks.mjs`：打包、ZIP/清单校验、安装与升级；`scripts/pack-extension.mjs`：作者 CLI；`POST /api/ai-extensions/import`：最多512 MB的二进制上传接口，返回 `{ ok, extension: { id, name, version, kind, action } }`，安装失败返回错误；`src/lib/extensionImport.ts`：文件识别、拖放拦截、串行导入、刷新事件；`App.tsx`：全局入口；SkillsPanel/AiPanel：列表刷新。
 
 接口要求 `Content-Type: application/octet-stream`，仅接受无 Origin 的本地客户端、file 页面 `null` Origin，以及 loopback Origin；异地 Origin 和浏览器简单请求的内容类型拒绝，也不开放跨域预检，防止外部 sandbox 页面利用 `null` Origin 写入。它不提供后台自动下载、远程市场、签名认证或卸载界面。Python 包生成时仍是本地代码执行，来源和依赖由作者与使用者负责。

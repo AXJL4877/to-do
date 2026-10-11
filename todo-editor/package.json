@@ -7,6 +7,12 @@
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
+    "spec:validate": "node server/cli.mjs validate",
+    "spec:summary": "node server/cli.mjs summary",
+    "spec:test": "node --test server/spec/projectSpec.test.mjs server/spec/capabilities.test.mjs server/spec/migrations.test.mjs server/spec/architecture.test.mjs server/spec/ticks.test.mjs server/interchange/otio.test.mjs server/spec/migrationRatchet.test.mjs server/core/core.test.mjs server/core/commands2.test.mjs server/core/commands3.test.mjs server/core/commands4.test.mjs server/core/projectStore.test.mjs && node electron/projectCore.smoke.cjs && node server/spec/__fixtures__/mcp-session.mjs",
+    "spec:capabilities": "node -e \"import('./server/spec/capabilities.mjs').then(m=>console.log(JSON.stringify(m.capabilities(),null,2)))\"",
+    "todo": "node server/cli.mjs",
+    "todo:mcp": "node server/cli.mjs mcp",
     "corner:pack": "node scripts/build-corner-pack.mjs",
     "corner:test": "node scripts/test-corner-production.mjs && node scripts/test-corner-chain.mjs",
     "corner:export": "node scripts/test-corner-export.mjs",
@@ -43,6 +49,9 @@
     "anims:check": "node scripts/anim-pack-selfcheck.mjs",
     "skills:check": "node scripts/skill-pack-selfcheck.mjs",
     "production:test": "node scripts/test-production-timeline.mjs",
+    "production:dispatch": "node scripts/test-production-dispatch.mjs",
+    "quality:visible": "node scripts/verify-quality-visible.mjs",
+    "runstatus:test": "node scripts/test-run-status-text.mjs",
     "motion:check": "npx tsx src/lib/motionPresets.selfcheck.ts",
     "bgm:check": "npx tsx src/lib/bgmLibrary.selfcheck.ts",
     "chapter:check": "npx tsx src/lib/chapterBar.selfcheck.ts",
@@ -72,12 +81,14 @@
       "server/**/*",
       "shared/**/*",
       "vendor/**/*",
+      "runtime/**/*",
       ".data/ai-config.json",
       "package.json"
     ],
     "asarUnpack": [
       "server/**/*",
       "vendor/**/*",
+      "runtime/**/*",
       "douyin-publish/**/*"
     ],
     "extraResources": [

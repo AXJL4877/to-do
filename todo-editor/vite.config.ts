@@ -23,6 +23,9 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     // 工具包里的 .html 文档 / 原生构建产物变动会触发整页刷新
-    watch: { ignored: ['**/.native-tools/**', '**/native/**'] },
+    // public/koubo-live-trigger.json 是实机控制通道的请求文件（渲染层要用 HTTP 取它，
+    // 所以必须放 public），但它每被写一次 Vite 就整页重载一次，会把编辑器内存状态丢掉。
+    // 这里排除它：文件照样能通过 HTTP 取到，只是不再触发重载。
+    watch: { ignored: ['**/.native-tools/**', '**/native/**', '**/public/koubo-live-trigger.json'] },
   },
 })

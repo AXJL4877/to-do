@@ -12,6 +12,32 @@ export const VENDOR_MISHI_ROOT = path.join(EDITOR_ROOT, 'vendor', 'mishi')
 export const VENDOR_BLACKBOARD_ROOT = path.join(EDITOR_ROOT, 'vendor', 'blackboard')
 export const VENDOR_BURN_SUBTITLES_ROOT = path.join(EDITOR_ROOT, 'vendor', 'burn-subtitles')
 
+/** 随 APP 一起装的 Python 运行时（scripts/bundle-python.mjs 产出）。 */
+export const BUNDLED_PYTHON = path.join(EDITOR_ROOT, 'runtime', 'python', 'python.exe')
+
+/**
+ * 用哪个 Python 跑包内工作流/服务。
+ * 顺序：显式 TODO_PYTHON → **包内自带** → 环境里的 PYTHON → PATH。
+ * 自带优先是为了满足「APP 不依赖机器上另装的东西」。
+ */
+export function resolvePython() {
+  const explicit = String(process.env.TODO_PYTHON || '').trim()
+  if (explicit) return explicit
+  if (existsSync(BUNDLED_PYTHON)) return BUNDLED_PYTHON
+  const fromEnv = String(process.env.PYTHON || '').trim()
+  return fromEnv || 'python'
+}
+
+/** 自带 Python 的子进程环境：禁用户 site、强制 UTF-8 —— 保证只吃包内依赖。 */
+export function pythonEnv(extra = {}) {
+  return {
+    PYTHONNOUSERSITE: '1',
+    PYTHONIOENCODING: 'utf-8',
+    PYTHONUTF8: '1',
+    ...extra,
+  }
+}
+
 export function resolveTtsTimelineRoot() {
   const fromEnv = String(process.env.TTS_TIMELINE_ROOT || '').trim()
   if (fromEnv) return path.resolve(fromEnv)

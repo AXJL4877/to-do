@@ -118,6 +118,11 @@ export interface MediaItem {
   hasAudio?: boolean
   /** 带透明通道的视频（VP9 alpha WebM）：不生成 H.264 代理、不走原生单层解码、不当作不透明遮挡层 */
   alpha?: boolean
+  /**
+   * 预览抠像：本机 FFmpeg/Chromium 对 VP9/qtrle/ffv1 alpha 不可靠时，
+   * 满幅转场改 H.264 黑底 + nearblack 抠透明（与 layers_export 泡泡转场一致）。
+   */
+  chromaKey?: 'nearblack'
   /** 已复制进项目文件夹的 AI 产物：原来在 AI 服务上的路径 /ai-generated/<name>（去重、找任务用） */
   aiUrl?: string
 }

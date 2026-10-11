@@ -24,7 +24,7 @@ export async function importExtensionFiles(files: File[]) {
   const errors: string[] = []
   for (const file of files.filter(isExtensionFile)) {
     try {
-      if (file.size > 32 * 1024 * 1024) throw new Error('扩展包不能超过 32 MB')
+      if (file.size > 512 * 1024 * 1024) throw new Error('扩展包不能超过 512 MB')
       const response = await aiFetch('/api/ai-extensions/import', { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: await file.arrayBuffer() })
       const result = await response.json()
       if (!response.ok || !result.ok || !result.extension) throw new Error(result.error || '扩展安装失败')

@@ -1,4 +1,16 @@
-"""scene-clips：每个贴纸一层透明 WebM + 定格 PNG。默认 FFmpeg 淡入，不逐帧 PIL。"""
+"""协议自检入口：贴纸排布一层透明 WebM + 定格 PNG（FFmpeg 淡入，不逐帧 PIL）。
+
+⚠️ 这不是成片渲染器，生成时宿主**不会**调用它。
+   本扩展用 `preserveSource` 把成片委托给包内 `workflow/run_pipeline.py`；
+   宿主看到该字段后直接走包内管线（见 server/production/runner.mjs:136），
+   分段/分镜/生图/渲染全由包内决定。真实逐元素分层在
+   `workflow/kit/kit/layers_export.py`，那才是时间轴上的产物。
+
+它的用途只有一个：按 `todo-skill-render/1` 手搓一次 `@progress` / `@result`
+握手，证明包内 Python 与宿主协议对得上（离线、不花钱、不需要 AI 服务）。
+所以这里刻意用最简单的贴纸排布，**不要**拿它去对齐成片观感——
+下面 layout 标成 `protocol-probe` 就是在提醒这件事。
+"""
 from __future__ import annotations
 
 import json
@@ -190,7 +202,9 @@ def main() -> None:
             "id": scene["id"],
             "startMs": int(scene.get("startMs") or 0),
             "endMs": int(scene.get("endMs") or 0),
-            "layout": "spongebob-stickers-v1",
+            # 明确标注这是协议探针产物，不是成片；真实分层见 workflow/kit/kit/layers_export.py
+            "layout": "protocol-probe",
+            "probe": True,
             "elements": done,
         },
     })

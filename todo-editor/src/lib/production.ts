@@ -35,8 +35,11 @@ export type RenderedElement = {
   id: string
   label: string
   role: string
-  /** draw 手写 / stamp 下压盖章扬尘 / fade 渐渐显现；旧产物没有这个字段，按手写 */
-  enter?: 'draw' | 'stamp' | 'fade'
+  /**
+   * 入场方式：draw 手写 / stamp 下压盖章扬尘 / fade 渐渐显现（旧产物没有这个字段，按手写）；
+   * cut 直接定格（底板、黑场）/ play 整段播转场片（泡泡遮罩）。
+   */
+  enter?: 'draw' | 'stamp' | 'fade' | 'cut' | 'play' | 'wipe'
   box: number[]
   crop?: number[]
   startMs: number
@@ -44,6 +47,11 @@ export type RenderedElement = {
   frames: number
   video: string
   hold: string
+  /**
+   * 元素自带的音效 wav（泡泡转场片源的原声等）。这里拿到的是宿主视图已经换成
+   * `/ai-generated/<name>` 的 URL，和 video/hold 同一语义（见 server/production/doc.mjs 的 urlOf）。
+   */
+  sfx?: string
   tip?: number[][]
 }
 
@@ -96,6 +104,12 @@ export type Production = {
   plate: { hash: string; file: string; url: string; width: number; height: number } | null
   hand: { file: string; url: string; width: number; height: number; tipX: number; tipY: number } | null
   segments: ProductionSegment[]
+  /**
+   * 包内工作流的质量门结果。`preserveSource` 型扩展约定"成片产出即成功、质量门未过只告警"，
+   * 这里把两者分开带给界面，避免"片子交付了但没人知道有几道门没过"。
+   * 非 preserveSource 扩展 / 老工作流为 null。
+   */
+  quality?: { productOk: boolean; gatesOk: boolean; failedGates: string[]; note: string } | null
   queuedJobId: string | null
   runningJobId: string | null
 }
@@ -171,7 +185,7 @@ export async function editProduction(id: string, ops: ProductionOp[]): Promise<P
   return (await call<{ production: Production }>(`/api/ai-productions/${encodeURIComponent(id)}/edit`, { json: { ops } })).production
 }
 
-export async function runProduction(id: string, body: { scope?: ProductionScope; stopAfter?: 'plan' } = {}) {
+export async function runProduction(id: string, body: { scope?: ProductionScope; stopAfter?: 'plan'; force?: boolean } = {}) {
   return call<{ production: Production; job: { id: string } }>(`/api/ai-productions/${encodeURIComponent(id)}/run`, { json: body })
 }
 

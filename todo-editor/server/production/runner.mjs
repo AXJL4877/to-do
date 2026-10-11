@@ -14,6 +14,7 @@ import { isDynamicText } from './dynamicText.mjs'
 import { cleanScript } from '../skillPacks.mjs'
 import { newSegment, pickedVariant, publicProduction, saveProduction, scopeTester } from './doc.mjs'
 import { asset, plate, render, segmentSchedule, storyboard, subtitles, voice } from './layers.mjs'
+import { cancelSourceWorkflow, runPreservedSource } from './sourceWorkflow.mjs'
 import { segmentScript } from './segment.mjs'
 import { chalkRenderBudget } from './renderBudget.mjs'
 
@@ -29,6 +30,7 @@ export class ProductionCanceled extends Error {}
 export function requestCancel(id) {
   cancels.add(id)
   segmentControllers.get(id)?.abort(new ProductionCanceled('已停止'))
+  cancelSourceWorkflow(id)
 }
 
 function gate(n, doc) {
@@ -131,6 +133,15 @@ export async function runProduction(doc, env, opts = {}) {
   saveProduction(doc)
 
   try {
+    if (ctx.pack.preserveSource) {
+      report('原工作流')
+      // save 传下去：包内工作流要在管线早期（TTS 一好）就把配音落盘，
+      // 好让前端轮询到并渐进铺轨，而不是等成片出完才一次性入轨。
+      await runPreservedSource(ctx, env, { ...opts, save, canceled: () => cancels.has(doc.id) })
+      if (cancels.has(doc.id)) throw new ProductionCanceled('已停止')
+      doc.status = { running: false, pct: 100, phase: '完成', failed: [], error: null, stopAfter: opts.stopAfter ?? null }
+      return doc
+    }
     // 0. 分段：新建的文档只有全文
     if (!doc.segments.length) {
       report('AI 分段')
@@ -258,9 +269,10 @@ export async function runProduction(doc, env, opts = {}) {
     if (failed.length) throw new Error(doc.status.error)
     return doc
   } catch (e) {
-    if (!(e instanceof ProductionCanceled) && !failed.length) {
+    const canceled = e instanceof ProductionCanceled || e.sourceCanceled
+    if (!canceled && !failed.length) {
       doc.status = { running: false, pct: lastPct, phase: '失败', failed, error: errText(e), stopAfter: opts.stopAfter ?? null }
-    } else if (e instanceof ProductionCanceled) {
+    } else if (canceled) {
       doc.status = { running: false, pct: lastPct, phase: '已停止', failed, error: null, stopAfter: opts.stopAfter ?? null }
     }
     throw e

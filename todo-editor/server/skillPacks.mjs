@@ -108,12 +108,33 @@ function validateParam(p, i, all) {
   }
 }
 
+function validatePreserveSource(raw, packDir) {
+  const s = raw.preserveSource
+  if (s == null) return
+  if (typeof s !== 'object' || Array.isArray(s)) fail('preserveSource', '必须是对象')
+  onlyKeys(s, ['env', 'entry', 'args', 'timeoutSec'], 'preserveSource')
+  // env 可选：不写则在已安装包目录内跑自包含工作流
+  if (s.env != null && !/^[A-Z][A-Z0-9_]{0,40}$/.test(String(s.env || ''))) fail('preserveSource.env', '须为环境变量名')
+  const entry = String(s.entry || '')
+  if (path.isAbsolute(entry) || entry.split(/[/\\]/).includes('..') || !/^[A-Za-z0-9_./-]+\.py$/.test(entry)) {
+    fail('preserveSource.entry', '必须是包内 .py 相对路径')
+  }
+  if (packDir && !existsSync(path.join(packDir, entry))) fail('preserveSource.entry', '文件不存在')
+  if (!Array.isArray(s.args) || !s.args.length || s.args.length > 12 || s.args.some((a) => typeof a !== 'string' || !a || a.length > 80 || /[\r\n\0]/.test(a) || /^[A-Za-z]:[\\/]/.test(a) || a.startsWith('/') || a.startsWith('\\'))) {
+    fail('preserveSource.args', '须为不含绝对路径的参数数组')
+  }
+  if (s.timeoutSec != null && (!Number.isInteger(s.timeoutSec) || s.timeoutSec < 60 || s.timeoutSec > 14400)) {
+    fail('preserveSource.timeoutSec', '须为 60~14400 的整数')
+  }
+}
+
 /** 严格校验 skill.json；packDir 用于检查预览图与运行时入口 */
 export function validateSkillPack(raw, packDir) {
   onlyKeys(raw, [
     '$schema', 'spec', 'id', 'name', 'version', 'author', 'description', 'tags', 'previews',
-    'pipeline', 'input', 'output', 'params', 'quick', 'planner', 'assets', 'runtime',
+    'pipeline', 'input', 'output', 'params', 'quick', 'planner', 'assets', 'runtime', 'preserveSource',
   ], 'skill.json')
+  validatePreserveSource(raw, packDir)
   if (raw.spec !== SKILL_SPEC) fail('spec', `必须为 "${SKILL_SPEC}"`)
   const pipeline = raw.pipeline ?? 'elements'
   if (!PIPELINES.includes(pipeline)) fail('pipeline', `取值须为 ${PIPELINES.join(' / ')}`)

@@ -415,7 +415,14 @@ export function publicProduction(doc, dirty) {
           ...b.render,
           result: b.render.result ? {
             ...b.render.result,
-            elements: b.render.result.elements.map((e) => ({ ...e, video: urlOf(e.video), hold: urlOf(e.hold) })),
+            elements: b.render.result.elements.map((e) => ({
+              ...e,
+              video: urlOf(e.video),
+              hold: urlOf(e.hold),
+              // 元素自带音效（泡泡转场原声等）是产物目录里的文件名，和 video/hold 同一语义，
+              // 必须一起换成 URL；漏掉时前端会把它当相对路径取到站点根 → 404 → 时间轴无声。
+              ...(e.sfx ? { sfx: urlOf(e.sfx) } : {}),
+            })),
           } : null,
         } : null,
         elements: b.elements.map((e) => ({

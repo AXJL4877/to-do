@@ -1,4 +1,6 @@
 import { create } from 'zustand'
+// 命令桥：UI 的写操作经它走无 UI 核心层的命令表（不变量 I3：一次编辑 = 一条命令 = 一次撤销）
+import { runCommand } from './lib/commandBridge'
 import {
   type Camera3D, type Clip, type ClipMeta, type Keyframe, type EffectPreset, type ExportJob, type MediaItem, type MediaFolder, type ProjectSettings, type Sequence,
   type Tool, type Track, type TrackKind, type Transform2D, type Transform3D, type TransitionType,
@@ -806,7 +808,7 @@ export type AppStore = {
   setClipThreeD: (enabled: boolean) => void
   updateSelectedTransform3d: (p: Partial<Transform3D>, opts?: { record?: boolean }) => void
   exportProgramFrame: () => Promise<void>
-  importMedia: (files: { name: string; url: string; path?: string; kind: MediaItem['kind']; duration: number; width?: number; height?: number; hasAudio?: boolean; alpha?: boolean; folderId?: string }[], opts?: { silent?: boolean }) => string[]
+  importMedia: (files: { name: string; url: string; path?: string; kind: MediaItem['kind']; duration: number; width?: number; height?: number; hasAudio?: boolean; alpha?: boolean; chromaKey?: MediaItem['chromaKey']; folderId?: string }[], opts?: { silent?: boolean }) => string[]
   /** 新建文件夹；parentId 为空则挂在根级。返回新 id */
   addFolder: (name: string, parentId?: string | null) => string | null
   renameFolder: (id: string, name: string) => void
@@ -906,6 +908,7 @@ export type AppStore = {
   addAiLayerClips: (
     items: {
       mediaId?: string; text?: NonNullable<Clip['text']>; start: number; duration: number; lane: number; name?: string
+      inPoint?: number; outPoint?: number
       transform?: Partial<Transform2D>; keyframes?: Clip['keyframes']; source?: Partial<NonNullable<ClipMeta['source']>>
     }[],
     opts: { jobId: string; kind: string; linkTo?: string; history?: boolean },
@@ -2009,6 +2012,8 @@ export const useApp = create<AppStore>((set, get) => {
         width: f.width, height: f.height, fps: 30,
         hasAudio: f.hasAudio ?? (f.kind === 'audio' || f.kind === 'video'),
         ...(f.alpha ? { alpha: true } : {}),
+        // 满幅近黑抠像标记：漏掉它 = 转场被当成不透明黑层盖满画面（预览黑屏）
+        ...(f.chromaKey ? { chromaKey: f.chromaKey } : {}),
         folderId: f.folderId ?? (f.kind === 'audio' ? 'f_audio' : f.kind === 'sticker' ? 'f_sticker' : 'f_all'),
         favorite: false, offline: false,
       }))
@@ -2461,31 +2466,21 @@ export const useApp = create<AppStore>((set, get) => {
     },
 
     moveClips(ids, dt, trackId, opts) {
-      if (opts?.record !== false) get().pushHistory()
-      const setIds = new Set(ids)
-      const snap = (t: number) => get().snapTime(t)
-      patchSeq((s) => {
-        const dest = trackId ? s.tracks.find((t) => t.id === trackId) : undefined
-        const moved = s.clips
-          .filter((c) => setIds.has(c.id))
-          .map((c) => {
-            const src = s.tracks.find((t) => t.id === c.trackId)
-            const canRetarget = !!(dest && src && dest.kind === src.kind)
-            return {
-              ...c,
-              start: Math.max(0, snap(c.start + dt)),
-              trackId: canRetarget ? dest!.id : c.trackId,
-            }
-          })
-        const applied = applyMoveNoOverlap(s, moved, setIds)
-        const byId = new Map(applied.clips.map((c) => [c.id, c]))
-        return enforceNoOverlap({
-          ...applied.seq,
-          clips: s.clips.map((c) => byId.get(c.id) ?? c),
+      // 走命令层：**吸附（交互辅助）留在这里，重叠规则（文档规则）交给命令**。
+      // 命令拿到的是吸附后的精确值，于是智能体与拖拽共用同一套确定规则。
+      const seq = get().seq()
+      const dest = trackId ? seq.tracks.find((t) => t.id === trackId) : undefined
+      const moves = seq.clips
+        .filter((c) => ids.includes(c.id))
+        .map((c) => {
+          const src = seq.tracks.find((t) => t.id === c.trackId)
+          const canRetarget = !!(dest && src && dest.kind === src.kind)
+          return { clipId: c.id, start: Math.max(0, get().snapTime(c.start + dt)), ...(canRetarget ? { trackId: dest!.id } : {}) }
         })
-      })
+      if (!moves.length) return
+      const r = runCommand('timeline.set_clip_starts', { moves, overlap: 'push' }, { commit: opts?.record !== false })
+      if (!r.ok) notify(r.error?.message ?? '移动失败')
     },
-
     nudgeAfterPlayhead(dir, frames = 5) {
       const s0 = get().seq()
       const fps = get().settings.fps || 30
@@ -2594,20 +2589,14 @@ export const useApp = create<AppStore>((set, get) => {
     },
 
     trimClip(id, edge, t, opts) {
-      if (opts?.record !== false) get().pushHistory()
-      const targets = trimTargets(get().seq(), id)
-      const snapped = get().snapTime(snapTrimEdge(get(), t, targets, { ...opts, trackId: get().seq().clips.find((c) => c.id === id)?.trackId }))
-      patchSeq((s) => {
-        return enforceNoOverlap({
-          ...s,
-          clips: s.clips.map((c) => {
-            if (!targets.has(c.id)) return c
-            return clampTrimNoOverlap(s, c, edge, snapped)
-          }),
-        })
-      })
+      // 走命令层：**吸附留 UI**（交互辅助），**联动目标与重叠规则进命令**（文档规则）。
+      // 修剪用 clamp 而不是 push：拖边缘时把邻居shove开是反直觉的。
+      const seq = get().seq()
+      const targets = trimTargets(seq, id)
+      const at = get().snapTime(snapTrimEdge(get(), t, targets, { ...opts, trackId: seq.clips.find((c) => c.id === id)?.trackId }))
+      const r = runCommand('timeline.trim_to', { clipId: id, edge, at, linked: true, overlap: 'clamp' }, { commit: opts?.record !== false })
+      if (!r.ok) notify(r.error?.message ?? '修剪失败')
     },
-
     rateStretchClip(id, edge, t, opts) {
       if (opts?.record !== false) get().pushHistory()
       const targets = trimTargets(get().seq(), id)
@@ -2892,51 +2881,22 @@ export const useApp = create<AppStore>((set, get) => {
     },
 
     razorAtTime(ph) {
+      // 走命令层（timeline.razor_at）：同一份实现同时服务 UI、CLI 与 MCP（不变量 I3）。
+      // 帧网格对齐、端点判定、联动片段右段重接都在命令里，UI 只负责提示文案。
       const fps = Math.max(1, get().settings.fps)
       const t = Math.round(Math.max(0, ph) * fps) / fps
-      const hits = get().seq().clips.filter(
-        (c) => t > c.start + 1 / fps / 2 && t < c.start + c.duration - 1 / fps / 2,
-      )
-      if (!hits.length) { notify('当前帧处无可分割片段'); return }
-      get().pushHistory()
-      patchSeq((s) => {
-        const next: Clip[] = []
-        const rightOf = new Map<string, string>()
-        for (const c of s.clips) {
-          const hit = t > c.start + 1 / fps / 2 && t < c.start + c.duration - 1 / fps / 2
-          if (!hit) { next.push(c); continue }
-          const [a, b] = splitClipAt(c, t - c.start)
-          rightOf.set(c.id, b.id)
-          next.push(a, b)
-        }
-        // 联动的音视频同时被切开时，右段与右段互相关联
-        const rights = new Set(rightOf.values())
-        const clips = next.map((c) =>
-          rights.has(c.id) && c.linkedId && rightOf.has(c.linkedId)
-            ? { ...c, linkedId: rightOf.get(c.linkedId) }
-            : c,
-        )
-        return { ...s, clips }
-      })
-      notify(`已在 ${formatTime(t, fps)} 分割 ${hits.length} 个片段`)
+      const r = runCommand('timeline.razor_at', { at: t, fps })
+      if (!r.ok) { notify(r.error?.message ?? '当前帧处无可分割片段'); return }
+      notify(`已在 ${formatTime(t, fps)} 分割 ${r.changed?.length ?? 0} 个片段`)
     },
 
     deleteSelected(ripple = false) {
-      get().pushHistory()
-      const ids = new Set(get().selectedClipIds)
-      const removed = get().seq().clips.filter((c) => ids.has(c.id))
-      patchSeq((s) => {
-        let clips = s.clips.filter((c) => !ids.has(c.id))
-        if (ripple) {
-          for (const r of removed) {
-            clips = clips.map((c) =>
-              c.trackId === r.trackId && c.start >= r.start + r.duration
-                ? { ...c, start: c.start - r.duration } : c,
-            )
-          }
-        }
-        return { ...s, clips }
-      })
+      // 走命令层：波纹/非波纹删除都是命令（timeline.delete_clips / timeline.ripple_delete）。
+      // 撤销、写入闸门、失败原因都由命令层负责，UI 只管选中态与提示。
+      const ids = get().selectedClipIds
+      if (!ids.length) return
+      const r = runCommand(ripple ? 'timeline.ripple_delete' : 'timeline.delete_clips', { clipIds: [...ids] })
+      if (!r.ok) { notify(r.error?.message ?? '删除失败'); return }
       set({ selectedClipIds: [] })
     },
 
@@ -3221,9 +3181,11 @@ export const useApp = create<AppStore>((set, get) => {
           sequence = { ...sequence, tracks: renameKindTracks(tracks) }
           track = sequence.tracks.find((t) => t.id === fresh.id)!
         }
+        const inPoint = Math.max(0, Number(it.inPoint) || 0)
+        const outPoint = Number(it.outPoint) > inPoint ? Number(it.outPoint) : inPoint + it.duration
         const clip: Clip = {
           id: uid('clip'), trackId: track.id, mediaId: m?.id, text: it.text, name: it.name ?? m?.name ?? '动态文字', linkedId: linkTo,
-          start: it.start, duration: it.duration, inPoint: 0, outPoint: it.duration,
+          start: it.start, duration: it.duration, inPoint, outPoint,
           enabled: true, speed: 1, reverse: false, speedKeyframes: [],
           transform: { ...defaultTransform(), ...it.transform }, color: defaultColor(), audio: defaultAudio(),
           effects: [], blend: 'normal', keyframes: it.keyframes ?? {},

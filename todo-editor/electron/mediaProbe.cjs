@@ -25,6 +25,11 @@ function normalize(raw) {
 // errors (including missing DLLs/corrupt media) must never silently fall back.
 function defaultFfprobe() {
   if (process.env.FFPROBE) return process.env.FFPROBE
+  // 先用自己的：打包后 native 目录随 extraResources 一起装，别去机器 PATH / WinGet 碰运气
+  const bundled = process.env.TODO_NATIVE_BIN
+    ? path.join(process.env.TODO_NATIVE_BIN, 'ffprobe.exe')
+    : path.join(__dirname, '..', 'native', 'bin', 'ffprobe.exe')
+  if (fs.existsSync(bundled)) return bundled
   const winget = path.join(process.env.LOCALAPPDATA || '', 'Microsoft/WinGet/Links/ffprobe.exe')
   return process.platform === 'win32' && fs.existsSync(winget) ? winget : 'ffprobe'
 }

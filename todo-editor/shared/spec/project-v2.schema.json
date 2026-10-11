@@ -1,0 +1,249 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://todo.local/spec/project-v2.schema.json",
+  "title": "TO DO 工程文件 v2（现行格式的形式化描述）",
+  "description": "对应 store.ts 的 PROJECT_FILE_VERSION=2 与 projectPayload()。这份 schema 只描述现状，不改行为：写入侧仍由主进程 projectFile.cjs 完成。所有时间单位见各字段 description。未知字段一律允许（additionalProperties:true），便于向前兼容；校验器会把未知字段作为 warning 报出。",
+  "type": "object",
+  "required": ["version", "settings", "media", "sequences"],
+  "additionalProperties": true,
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 2,
+      "description": "工程格式版本（裸整数）。v3 起改为 spec 字符串 'todo-project/3'，见 docs/specs。"
+    },
+    "projectName": { "type": "string", "description": "工程显示名（不含扩展名）。" },
+    "settings": { "$ref": "#/$defs/settings" },
+    "media": { "type": "array", "items": { "$ref": "#/$defs/media" } },
+    "folders": { "type": "array", "items": { "$ref": "#/$defs/folder" } },
+    "sequences": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/sequence" } },
+    "activeSeqId": { "type": "string", "description": "当前序列 id。必须存在于 sequences[].id；v2 实测出现过悬空值，校验器会报 error。" },
+    "playhead": { "type": "number", "description": "播放头位置，单位：秒。属会话状态，不应参与版本比较。" },
+    "monitorCompose": { "description": "监视器合成参数（会话态）。", "type": ["object", "null"], "additionalProperties": true },
+    "script": { "type": "string", "description": "脚本文本（口播稿）。" },
+    "scriptMemo": { "type": "string", "description": "脚本备注。" },
+    "scriptWorkspace": { "type": ["object", "null"], "description": "脚本工作区（会话态）。", "additionalProperties": true },
+    "prefs": { "type": "object", "description": "用户偏好（建议将来拆到独立文件）。", "additionalProperties": true },
+    "presets": { "type": "array", "description": "效果预设。", "items": { "type": "object", "additionalProperties": true } },
+    "fonts": { "type": "array", "description": "工程内嵌字体。", "items": { "type": "object", "additionalProperties": true } }
+  },
+  "$defs": {
+    "settings": {
+      "type": "object",
+      "required": ["width", "height", "fps"],
+      "additionalProperties": true,
+      "description": "画布与工程设置。**权威**：width/height/fps 决定成片规格。",
+      "properties": {
+        "width": { "type": "integer", "minimum": 16, "description": "画布宽，单位：像素。" },
+        "height": { "type": "integer", "minimum": 16, "description": "画布高，单位：像素。" },
+        "fps": { "type": "number", "exclusiveMinimum": 0, "maximum": 240, "description": "帧率，单位：帧/秒。" },
+        "aspect": { "type": "string", "description": "画幅标识，如 '16:9'。" },
+        "pixelAspect": { "type": "number", "description": "像素宽高比，非方形像素时不为 1。" },
+        "stillDuration": { "type": "number", "description": "静态图默认入轨时长，单位：秒。" },
+        "cachePath": { "type": "string", "description": "缓存目录（可为 './cache' 相对路径）。" },
+        "useProxy": { "type": "boolean", "description": "预览是否使用 H.264 低码率代理。" },
+        "hwAccel": { "type": "boolean", "description": "是否允许硬件加速解码。" },
+        "nativePreview": { "type": "boolean", "description": "原生节目预览窗口（B2）。" },
+        "canvasBg": { "enum": ["black", "color", "blur", "image"], "description": "画布背景类型。" },
+        "canvasColor": { "type": "string", "description": "画布背景色，'#RRGGBB'。" },
+        "safeFrame": { "type": "boolean" },
+        "magnetic": { "type": "boolean" },
+        "snap": { "type": "boolean" },
+        "removedGeneratedMedia": { "type": "array", "items": { "type": "string" }, "description": "用户显式删除过的生成物文件名；轮询不得静默恢复。" },
+        "aiPlaced": {
+          "type": "object",
+          "description": "AI 任务已入轨的产物键：任务 id → 键数组。删掉片段即删掉记录，会重新补。",
+          "additionalProperties": { "type": "array", "items": { "type": "string" } }
+        },
+        "aiProductions": {
+          "type": "object",
+          "description": "本工程引用的成片：成片 id → 入轨记录。",
+          "additionalProperties": { "$ref": "#/$defs/productionPlacement" }
+        }
+      }
+    },
+    "productionPlacement": {
+      "type": "object",
+      "required": ["t0", "auto"],
+      "additionalProperties": true,
+      "description": "成片在时间轴上的落位记录。",
+      "properties": {
+        "t0": { "type": "number", "description": "整片起点，单位：秒。" },
+        "auto": { "type": "boolean", "description": "是否允许宿主轮询自动入轨。" },
+        "placed": {
+          "type": "object",
+          "description": "产物键 → 最后一次入轨时的版本指纹。指纹未变而片段消失 = 用户删的，不再放回。",
+          "additionalProperties": { "type": "string" }
+        },
+        "createdAt": { "type": "number", "description": "登记时刻，单位：毫秒（epoch）。" }
+      }
+    },
+    "folder": {
+      "type": "object",
+      "required": ["id", "name"],
+      "additionalProperties": true,
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "parentId": { "type": ["string", "null"], "description": "为空表示根级。" }
+      }
+    },
+    "media": {
+      "type": "object",
+      "required": ["id", "kind", "name"],
+      "additionalProperties": true,
+      "description": "媒体库条目。**引用规则**：relPath 是工程内相对路径，为跨机可搬的权威引用；path 是绝对路径（打开时失效则用 relPath 找回）；url 是会话态（blob:/file:///AI 服务相对路径），不得写入需要长期有效的产物。",
+      "properties": {
+        "id": { "type": "string", "description": "工程内唯一 id；片段以 mediaId 引用它。" },
+        "kind": { "enum": ["video", "audio", "image", "font", "sticker"] },
+        "name": { "type": "string", "description": "展示名（含扩展名）。" },
+        "url": { "type": "string", "description": "会话态可播放地址。" },
+        "path": { "type": "string", "description": "本机绝对路径（桌面版持久化）。" },
+        "relPath": { "type": "string", "description": "相对工程文件的路径，正斜杠分隔。**长期引用权威**。" },
+        "proxyUrl": { "type": "string" },
+        "proxyPath": { "type": "string", "description": "低分辨率代理文件（userData/cache/proxies）。" },
+        "duration": { "type": "number", "minimum": 0, "description": "媒体时长，单位：秒。图片为 0。" },
+        "width": { "type": "integer", "description": "像素宽（探测值）。" },
+        "height": { "type": "integer", "description": "像素高（探测值）。" },
+        "fps": { "type": "number", "description": "帧率（探测值），单位：帧/秒。" },
+        "folderId": { "type": "string" },
+        "favorite": { "type": "boolean" },
+        "offline": { "type": "boolean", "description": "素材当前不可达。" },
+        "hasAudio": { "type": "boolean", "description": "视频是否含音轨（入轨时自动带 A 轨）。" },
+        "alpha": { "type": "boolean", "description": "带透明通道的视频（VP9 alpha WebM）：不生成 H.264 代理、不走原生单层解码、不当作不透明遮挡层。" },
+        "chromaKey": { "enum": ["nearblack"], "description": "预览抠像方式：满幅转场用 H.264 黑底 + nearblack 抠透明。" },
+        "aiUrl": { "type": "string", "description": "已复制进项目文件夹的 AI 产物在 AI 服务上的原路径 /ai-generated/<name>。" }
+      }
+    },
+    "sequence": {
+      "type": "object",
+      "required": ["id", "tracks", "clips"],
+      "additionalProperties": true,
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "tracks": { "type": "array", "items": { "$ref": "#/$defs/track" } },
+        "clips": { "type": "array", "items": { "$ref": "#/$defs/clip" } },
+        "markers": { "type": "array", "items": { "$ref": "#/$defs/marker" } },
+        "workIn": { "type": "number", "description": "工作区入点，单位：秒。" },
+        "workOut": { "type": "number", "description": "工作区出点，单位：秒。" },
+        "scene3d": { "type": "object", "additionalProperties": true, "description": "虚拟摄像机 3D 场景。" }
+      }
+    },
+    "track": {
+      "type": "object",
+      "required": ["id", "kind"],
+      "additionalProperties": true,
+      "properties": {
+        "id": { "type": "string" },
+        "kind": { "enum": ["video", "audio", "subtitle", "effect", "adjustment"] },
+        "name": { "type": "string" },
+        "locked": { "type": "boolean" },
+        "muted": { "type": "boolean" },
+        "solo": { "type": "boolean" },
+        "hidden": { "type": "boolean" },
+        "height": { "type": "number", "description": "轨道高度，单位：像素（UI）。" },
+        "role": { "enum": ["bgm"], "description": "配乐轨：锁定、不参与成片配音入轨。" }
+      }
+    },
+    "marker": {
+      "type": "object",
+      "required": ["id", "t"],
+      "additionalProperties": true,
+      "properties": {
+        "id": { "type": "string" },
+        "t": { "type": "number", "description": "标记时刻，单位：秒。" },
+        "color": { "type": "string" },
+        "label": { "type": "string" }
+      }
+    },
+    "clip": {
+      "type": "object",
+      "required": ["id", "trackId", "name", "start", "duration", "inPoint", "outPoint"],
+      "additionalProperties": true,
+      "description": "时间轴片段。**权威字段**：start / duration / inPoint / outPoint（本对象上的值）。meta.absIn/absOut/start/duration/end/inPoint/outPoint 是派生镜像，读时以本对象为准；二者不一致时校验器报 warning。",
+      "properties": {
+        "id": { "type": "string" },
+        "trackId": { "type": "string", "description": "必须存在于同序列 tracks[].id。" },
+        "mediaId": { "type": "string", "description": "引用 media[].id；纯色层/文字层可缺省。" },
+        "name": { "type": "string" },
+        "start": { "type": "number", "description": "时间轴起点，单位：秒。" },
+        "duration": { "type": "number", "minimum": 0, "description": "时间轴时长，单位：秒。" },
+        "inPoint": { "type": "number", "description": "媒体入点，单位：秒（媒体自身时间轴）。" },
+        "outPoint": { "type": "number", "description": "媒体出点，单位：秒（媒体自身时间轴）。" },
+        "speed": { "type": "number", "exclusiveMinimum": 0, "description": "变速倍率，1 = 原速。" },
+        "reverse": { "type": "boolean" },
+        "freeze": { "type": "number", "description": "冻结帧时刻，单位：秒（媒体时间）。" },
+        "enabled": { "type": "boolean" },
+        "blend": { "enum": ["normal", "multiply", "screen", "overlay", "soft-light", "add"] },
+        "threeD": { "type": "boolean", "description": "作为 3D 平面参与虚拟摄像机合成。" },
+        "tracking": { "type": "boolean" },
+        "stabilize": { "type": "boolean" },
+        "linkedId": { "type": "string" },
+        "groupId": { "type": "string" },
+        "solid": { "type": "object", "additionalProperties": true, "properties": { "color": { "type": "string", "description": "'#RRGGBB' 纯色底。" } } },
+        "transform": { "type": "object", "additionalProperties": true, "description": "2D 变换（归一化构图空间）。" },
+        "transform3d": { "type": "object", "additionalProperties": true },
+        "color": { "type": "object", "additionalProperties": true, "description": "调色。" },
+        "audio": { "type": "object", "additionalProperties": true, "description": "音量/增益等音频参数。" },
+        "text": { "type": "object", "additionalProperties": true, "description": "文字样式（字幕/花字）。" },
+        "effects": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
+        "mask": { "type": "object", "additionalProperties": true },
+        "keyframes": { "type": "object", "additionalProperties": true, "description": "属性名 → 关键帧数组。" },
+        "speedKeyframes": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
+        "transitionIn": { "$ref": "#/$defs/transition" },
+        "transitionOut": { "$ref": "#/$defs/transition" },
+        "chromaKey": { "type": "object", "additionalProperties": true },
+        "meta": { "$ref": "#/$defs/clipMeta" }
+      }
+    },
+    "transition": {
+      "type": "object",
+      "required": ["type", "duration"],
+      "additionalProperties": true,
+      "properties": {
+        "type": { "enum": ["dissolve", "fadeBlack", "fadeWhite", "push", "wipe"] },
+        "duration": { "type": "number", "description": "转场时长，单位：秒。" }
+      }
+    },
+    "clipMeta": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "派生镜像 + 来源溯源（AI 产物）。source 是**权威溯源信息**：jobId/kind/lane/key/rev 用于「同一产物只入轨一次」与「版本变了原位换新」。",
+      "properties": {
+        "absIn": { "type": "number", "description": "派生：等于 clip.start，单位：秒。" },
+        "absOut": { "type": "number", "description": "派生：等于 clip.start + clip.duration，单位：秒。" },
+        "start": { "type": "number", "description": "派生：等于 clip.start。" },
+        "duration": { "type": "number", "description": "派生：等于 clip.duration。" },
+        "end": { "type": "number", "description": "派生：等于 clip.start + clip.duration。" },
+        "inPoint": { "type": "number", "description": "派生：等于 clip.inPoint。" },
+        "outPoint": { "type": "number", "description": "派生：等于 clip.outPoint。" },
+        "trackId": { "type": "string" },
+        "trackName": { "type": "string" },
+        "trackKind": { "enum": ["video", "audio", "subtitle", "effect", "adjustment"] },
+        "enabled": { "type": "boolean" },
+        "trackHidden": { "type": "boolean" },
+        "trackMuted": { "type": "boolean" },
+        "visible": { "type": "boolean", "description": "最终可见性 = 片段启用且轨道未隐藏。" },
+        "role": { "enum": ["bgm"] },
+        "updatedAt": { "type": "number", "description": "单位：毫秒（epoch）。" },
+        "source": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "type": { "enum": ["ai", "import", "manual"] },
+            "jobId": { "type": "string", "description": "成片/任务 id。" },
+            "kind": { "type": "string" },
+            "lane": { "type": "integer", "description": "分层轨号：同层共用轨道，层号小的在上。" },
+            "key": { "type": "string", "description": "任务内产物的唯一键：同一产物只入轨一次。" },
+            "rev": { "type": "string", "description": "生成层的输入指纹；变了就原位换成新产物。" },
+            "layout": { "type": "string", "description": "入轨时的自动排布签名；与当前不同说明用户挪过。" },
+            "chalk": { "type": "object", "additionalProperties": true },
+            "handFor": { "type": "string" },
+            "handScale": { "type": "number" }
+          }
+        }
+      }
+    }
+  }
+}

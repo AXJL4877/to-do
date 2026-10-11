@@ -89,7 +89,7 @@ export function productionJobParams(doc, entry, body) {
     width: w || null,
     height: h || null,
     skill: { id: entry.pack.id, version: entry.pack.version, name: entry.pack.name, pipeline: 'production', summary: doc.title, alpha: true },
-    request: { skillId: entry.pack.id, productionId: doc.id, scope: normalizeScope(body.scope), stopAfter },
+    request: { skillId: entry.pack.id, productionId: doc.id, scope: normalizeScope(body.scope), stopAfter, force: body.force === true },
     output: null,
   }
 }
@@ -136,7 +136,7 @@ export async function executeProductionJob(job, ctx) {
       outDir: ctx.outDir,
       services: ctx.services ?? defaultServices(ctx.config, ctx.withRetry),
       phase: ctx.phase,
-    }, { scope: req.scope, stopAfter: req.stopAfter, jobId: job.id })
+    }, { scope: req.scope, stopAfter: req.stopAfter, force: req.force === true, jobId: job.id })
   } catch (e) {
     if (!(e instanceof ProductionCanceled)) throw e
     canceled = true

@@ -13,7 +13,7 @@ import {
   submitImageGeneration,
 } from './huniuClient.mjs'
 import { mishiEnvFromAiConfig, readAiConfig } from './huniuConfig.mjs'
-import { resolveMishiRoot } from './toolRoots.mjs'
+import { resolveMishiRoot, pythonEnv, resolvePython } from './toolRoots.mjs'
 import { compileStyleById } from './stylePacks.mjs'
 import { cutoutFile, decodeImage, encodePng } from './imageCutout.mjs'
 import { characterPrompt, compileAnimById, spritePrompt } from './animPacks.mjs'
@@ -107,10 +107,11 @@ function runPy(args) {
       ...process.env,
       ...mishiEnvFromAiConfig(),
       MISHI_ROOT: resolveMishiRoot(),
+      ...pythonEnv(),
       HTTP_PROXY: '', HTTPS_PROXY: '', http_proxy: '', https_proxy: '',
       ALL_PROXY: '', all_proxy: '', NO_PROXY: '*', no_proxy: '*', MISHI_DIRECT: '1',
     }
-    const p = spawn('python', [MISHI, ...args], { cwd: path.dirname(MISHI), env })
+    const p = spawn(resolvePython(), [MISHI, ...args], { cwd: path.dirname(MISHI), env })
     let out = ''
     let err = ''
     p.stdout.on('data', (d) => { out += d })
@@ -344,6 +345,8 @@ export function enqueueProductionRun(productionId, body = {}) {
     req.scope = mergeScope(req.scope, params.request.scope)
     // 有一方要完整生成，就不再停在分镜
     req.stopAfter = req.stopAfter && params.request.stopAfter ? req.stopAfter : null
+    // 有一方要求"强制真跑"（界面点重试），合并后也要保持，否则会被短路的"沿用已生成结果"吞掉
+    req.force = Boolean(req.force) || Boolean(params.request.force)
     if (setQueuedParams.run(JSON.stringify(queued.params), Date.now(), queued.id).changes) return rowToJob(getJob.get(queued.id))
   }
   const id = `s_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`

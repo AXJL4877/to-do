@@ -29,9 +29,9 @@ import { DYNAMIC_TEXT_PACK } from '../src/lib/dynamicTextPack'
   stop(); drop([media]); assert(ordinary === 2, 'listener cleanup')
   window.fetch = async () => new Response(JSON.stringify({ ok: false, error: 'bad package' }), { status: 400 })
   const failed = await importExtensionFiles([pack]); assert(failed.errors.length === 1 && events === 3, 'failed upload has no refresh event')
-  const oversized = new File(['x'], 'large.todoext'); Object.defineProperty(oversized, 'size', { value: 33 * 1024 * 1024 })
+  const oversized = new File(['x'], 'large.todoext'); Object.defineProperty(oversized, 'size', { value: 513 * 1024 * 1024 })
   window.fetch = async () => { throw new Error('must not upload oversized file') }
-  assert((await importExtensionFiles([oversized])).errors[0].includes('32 MB'), 'client upload limit')
+  assert((await importExtensionFiles([oversized])).errors[0].includes('512 MB'), 'client upload limit')
   const oldDraft = { prompt: '保留文案', params: { removed: 'value' }, plan: { title: 'old', notes: '', elements: [] }, version: '0.1.0' }
   const upgraded = resolveSkillDraft(DYNAMIC_TEXT_PACK, oldDraft)
   assert(upgraded.prompt === oldDraft.prompt && !('removed' in upgraded.params) && upgraded.plan === null, 'upgraded schema resets stale params and plans while preserving prompt')

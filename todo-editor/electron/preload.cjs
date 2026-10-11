@@ -33,6 +33,14 @@ contextBridge.exposeInMainWorld('todoDesktop', {
     return () => ipcRenderer.removeListener('desktop:request-close', handler)
   },
   closeReady: () => ipcRenderer.send('desktop:close-ready'),
+  // 进程内桥：主进程把命令请求发过来，渲染进程执行后用 replyCommand 回包
+  onCommandRequest: (cb) => {
+    const handler = (_e, payload) => { try { cb(payload) } catch { /* 回包由调用方负责 */ } }
+    ipcRenderer.on('ai:command-request', handler)
+    return () => ipcRenderer.removeListener('ai:command-request', handler)
+  },
+  replyCommand: (reqId, result) => ipcRenderer.send('ai:command-reply', { reqId, result }),
+
   pickMediaFiles: () => ipcRenderer.invoke('desktop:pick-media'),
   probeMedia: (filePath, timeoutMs) => ipcRenderer.invoke('desktop:probe-media', { filePath, timeoutMs }),
   decodeMediaFrame: (filePath, timeSec, timeoutMs) => ipcRenderer.invoke('desktop:decode-media-frame', { filePath, timeSec, timeoutMs }),

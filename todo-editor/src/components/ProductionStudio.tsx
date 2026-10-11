@@ -72,6 +72,27 @@ export function ProductionStudio({ id, pack, onClose }: { id: string; pack: Skil
   const running = !!doc && isProductionRunning(doc)
   const pending = doc ? pendingCount(doc) : 0
 
+  /**
+   * 运行中的状态文案。
+   *
+   * 为什么需要：`preserveSource` 型扩展（如海绵宝宝口播）把整条包内管线交给一个子进程，
+   * 宿主只能转发它的 stdout，**算不出百分比**，于是 `pct` 长期停在 0 ——
+   * 界面看起来就是"卡在 原工作流（0%）"（实测一次真机跑 38 分钟都这样）。
+   * 进度算不出来就说实话：显示**已运行多久**并带上工作流最新一行阶段文字，
+   * 让"在跑"和"卡死"能区分开。两者界面都拿得到（lock.since / status.phase），不需要新数据。
+   */
+  const runStatusText = (() => {
+    if (!running) return ''
+    const since = doc?.lock?.since
+    const mins = typeof since === 'number' && since > 0 ? Math.floor((Date.now() - since) / 60000) : null
+    const base = mins == null
+      ? '生成中'
+      : `生成中 · 已运行 ${mins < 1 ? '不到 1 分钟' : `${mins} 分钟`}`
+    const phase = String(doc?.status?.phase || '').trim()
+    const tail = phase && !/^原工作流/.test(phase) ? ` · ${phase}` : ''
+    return `${base}${tail}（改动请等这一轮结束，或先停止）`
+  })()
+
   const act = useCallback(async (fn: () => Promise<Production>) => {
     setBusy(true)
     setError(null)
@@ -172,6 +193,32 @@ export function ProductionStudio({ id, pack, onClose }: { id: string; pack: Skil
           </div>
         ) : null}
 
+        {/*
+          产物成功 ≠ 质量门通过。包内工作流按约定"成片产出即交付、质量门未过只告警"，
+          但那条告警只在子进程 stdout 上，宿主只留 tail —— 用户看不到。
+          这里如实展示，避免"片子已经到手却不知道有几道门没过"。
+        */}
+        {doc.quality && doc.quality.productOk && !doc.quality.gatesOk ? (
+          <div
+            className="px-4 py-2 text-[11px] border-b flex items-start gap-2"
+            style={{ borderColor: 'var(--border)', color: 'var(--text-secondary)' }}
+            data-testid="production-quality-warning"
+          >
+            <span
+              className="prod-badge shrink-0"
+              style={{ background: 'var(--accent-dim)', color: 'var(--accent)' }}
+              title="产物已生成，只是质量门有未通过项"
+            >
+              质量门未全过
+            </span>
+            <span className="min-w-0">
+              成片与分层已产出并正常入轨
+              {doc.quality.failedGates.length ? `；未通过：${doc.quality.failedGates.join('、')}` : ''}
+              {doc.quality.note ? `（${doc.quality.note}）` : ''}
+            </span>
+          </div>
+        ) : null}
+
         <div className="flex flex-1 min-h-0">
           <div className="w-[230px] shrink-0 overflow-y-auto p-3 border-r flex flex-col gap-2" style={{ borderColor: 'var(--border)', background: 'var(--surface-0)' }}>
             <span className="eyebrow">口播段</span>
@@ -205,7 +252,7 @@ export function ProductionStudio({ id, pack, onClose }: { id: string; pack: Skil
           <div className="flex-1 min-w-0 overflow-y-auto p-4 flex flex-col gap-4">
             {seg ? <SegmentEditor key={seg.id} ctx={ctx} seg={seg} index={doc.segments.indexOf(seg)} /> : (
               <div className="m-auto text-center text-[12px] flex flex-col gap-2 items-center" style={{ color: 'var(--text-muted)' }}>
-                {running ? <><Loader2 size={16} className="animate-spin" />AI 正在分段…</> : '点下面的「一键成片」或「先出分镜」开始'}
+                {running ? <><Loader2 size={16} className="animate-spin" />{phaseText(status?.phase) || '正在生成…'}</> : (status?.error || '点下面的「一键成片」或「先出分镜」开始')}
               </div>
             )}
           </div>
@@ -239,8 +286,8 @@ export function ProductionStudio({ id, pack, onClose }: { id: string; pack: Skil
         </div>
 
         <div className="flex items-center gap-2 px-4 py-3 border-t flex-wrap" style={{ borderColor: 'var(--border)' }}>
-          <span className="text-[11px] min-w-0 flex-1 truncate" style={{ color: error ? 'var(--error)' : 'var(--text-secondary)' }} data-testid="production-summary">
-            {error || (running ? '生成中，改动请等这一轮结束（或先停止）' : pending ? `${pending} 处待生成` : status?.phase || '全部已生成')}
+          <span className="text-[11px] min-w-0 flex-1 truncate" style={{ color: error ? 'var(--error)' : 'var(--text-secondary)' }} data-testid="production-summary" title={running ? runStatusText : undefined}>
+            {error || status?.error || (running ? runStatusText : pending ? `${pending} 处待生成` : status?.phase || '全部已生成')}
           </span>
           {running ? (
             <button type="button" className="btn btn-ghost" data-testid="production-stop" onClick={() => void stop()}>

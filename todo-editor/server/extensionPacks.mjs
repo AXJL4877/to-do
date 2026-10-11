@@ -8,10 +8,11 @@ import { USER_STYLE_DIR, validateStylePack } from './stylePacks.mjs'
 import { USER_ANIM_DIR, validateAnimPack } from './animPacks.mjs'
 
 export const EXTENSION_SPEC = 'todo-extension-pack/1'
-export const MAX_EXTENSION_BYTES = 32 * 1024 * 1024
-const MAX_EXPANDED = 64 * 1024 * 1024
-const MAX_FILE = 16 * 1024 * 1024
-const MAX_FILES = 256
+/** 自包含工作流包可带字体、BGM、特效；不再卡在 32MB */
+export const MAX_EXTENSION_BYTES = 512 * 1024 * 1024
+const MAX_EXPANDED = 1024 * 1024 * 1024
+const MAX_FILE = 256 * 1024 * 1024
+const MAX_FILES = 2000
 const TYPES = {
   skill: { manifest: 'skill.json', spec: 'todo-skill-pack/1', directory: USER_SKILL_DIR, validate: validateSkillPack },
   style: { manifest: 'style.json', spec: 'todo-style-pack/1', directory: USER_STYLE_DIR, validate: validateStylePack },
@@ -56,7 +57,7 @@ function validateEnvelope(files) {
 }
 
 function unpack(buffer) {
-  if (!buffer?.length || buffer.length > MAX_EXTENSION_BYTES) reject('扩展包过大（最多 32 MB）或为空')
+  if (!buffer?.length || buffer.length > MAX_EXTENSION_BYTES) reject('扩展包过大（最多 512 MB）或为空')
   const seen = new Set()
   let total = 0, count = 0
   const files = unzipSync(new Uint8Array(buffer), { filter(info) {
@@ -184,6 +185,6 @@ export function buildExtensionPack(packDirectory) {
     files: Object.entries(files).map(([name, data]) => ({ path: name, size: data.length, sha256: hash(data) })) }, null, 2))
   validateEnvelope(files)
   const packed = zipSync(files, { level: 6 })
-  if (packed.length > MAX_EXTENSION_BYTES) reject('扩展包过大（最多 32 MB）')
+  if (packed.length > MAX_EXTENSION_BYTES) reject('扩展包过大（最多 512 MB）')
   return Buffer.from(packed)
 }

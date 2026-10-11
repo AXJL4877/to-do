@@ -4,27 +4,21 @@
  *   tts：文案 → 配音（TTS_timeline），产出 <id>_voice.wav + <id>_timing.json，已存在则重试直接复用。
  *   subtitle：取一条 tts 任务的文案 / 配音 / 时间戳 → 渲染（按逐字时间戳切条 + 透明底烧录）。
  *   narrated：口播 → 配音 → 按短语时间戳分板拆元素 → 元素生图 ∥ 逐板渲染成时间轴片段；阶段产物随时写进 params.partial 供前端流式入轨。各步产物落盘，重试复用。
- *   production：交给 server/production/（分层生成 + 局部重做），任务里只带成片 id 和范围。
  */
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
-import {
-  resolveBlackboardRoot,
-  resolveBurnSubtitlesRoot,
-  resolveMishiRoot,
-  resolveTtsTimelineRoot,
-} from './toolRoots.mjs'
 import { saveImageResult, submitImageGeneration } from './huniuClient.mjs'
 import {
   assetAspect, assetPrompt, fallbackNarrationPlan, fallbackPlan, getSkillEntry, planNarration, planSkill, timingPhrases,
 } from './skillPacks.mjs'
 import { synthTimeline } from './ttsTimeline.mjs'
 import { resolveFfmpeg } from './animBuild.mjs'
+import { resolvePython } from './toolRoots.mjs'
 
 export const SKILL_RENDER_SPEC = 'todo-skill-render/1'
 export const SKILL_OUTPUT_SPEC = 'todo-skill-output/1'
-const PYTHON = process.env.TODO_PYTHON || 'python'
+const PYTHON = resolvePython()
 
 /** 整体进度：规划 0~5%，生图 5~40%，渲染 40~100% */
 const pctOf = (stage, local) => Math.round(stage === 'plan' ? 5 * local : stage === 'assets' ? 5 + 35 * local : 40 + 60 * local)
@@ -67,17 +61,7 @@ export function runRenderer(entry, requestFile, { timeoutSec, onProgress }) {
     const child = spawn(PYTHON, [script, '--request', requestFile], {
       cwd: entry.dir,
       windowsHide: true,
-      env: {
-        ...process.env,
-        ...(entry.pack.id==='builtin.chalk-hand'?{OMP_NUM_THREADS:'1',OPENBLAS_NUM_THREADS:'1',MKL_NUM_THREADS:'1'}:{}),
-        PYTHONIOENCODING: 'utf-8',
-        PYTHONUNBUFFERED: '1',
-        // 技能渲染端统一走内嵌 vendor，避免依赖本机桌面/Cursor skills 路径
-        BLACKBOARD_ROOT: resolveBlackboardRoot(),
-        BURN_SUBTITLES_DIR: resolveBurnSubtitlesRoot(),
-        TTS_TIMELINE_ROOT: resolveTtsTimelineRoot(),
-        MISHI_ROOT: resolveMishiRoot(),
-      },
+      env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUNBUFFERED: '1' },
     })
     let buf = ''
     let tail = ''
@@ -118,13 +102,19 @@ export function runRenderer(entry, requestFile, { timeoutSec, onProgress }) {
  * @returns {Promise<object>} todo-skill-output/1 清单
  */
 export async function executeSkillJob(job, ctx) {
-  if (job.params.request?.productionId) {
+  const entry = getSkillEntry(job.params.request.skillId)
+  // 黑板手绘 1.x 是 elements 管线，按入队时的管线重试老任务
+  const pipeline = job.params.skill?.pipeline ?? (job.params.request.plan?.elements ? 'elements' : entry.pack.pipeline)
+  // production 管线的成片任务走成片运行器（配音/分镜/生图/渲染/字幕/入轨全由它接管）。
+  // 这里曾漏掉这一支：executeProductionJob 写好了却没人调用，于是成片任务掉进 executeElementsJob，
+  // 而它的 req.prompt 对成片永远是 undefined → TypeError: Cannot read properties of undefined (reading 'slice')，
+  // 任务在 58ms 内失败、阶段停在「待生成」。判据用 request.productionId，避免误拦老任务。
+  if (pipeline === 'production' && job.params.request.productionId) {
+    // 动态 import：production/job.mjs 反过来 import 本模块的 SKILL_OUTPUT_SPEC，
+    // 静态 import 会形成初始化顺序依赖，这里按调用时机加载更稳。
     const { executeProductionJob } = await import('./production/job.mjs')
     return executeProductionJob(job, ctx)
   }
-  const entry = getSkillEntry(job.params.request.skillId)
-  // 黑板手绘 1.x 是 elements 管线、2.x 是 narrated 管线，按入队时的管线重试老任务
-  const pipeline = job.params.skill?.pipeline ?? (job.params.request.plan?.elements ? 'elements' : entry.pack.pipeline)
   const run = { tts: executeTtsJob, subtitle: executeSubtitleJob, narrated: executeNarratedJob }[pipeline] ?? executeElementsJob
   return run(job, entry, ctx)
 }
@@ -416,8 +406,8 @@ async function executeNarratedJob(job, entry, ctx) {
     if (!existsSync(f)) return null
     try {
       const r = JSON.parse(readFileSync(f, 'utf8'))
-      // 老格式（整幅、带黑板底、没有笔尖轨迹）、上色时手来回扫、以及还没有盖章/渐显进场的缓存不复用
-      if (!(r.rev >= 3) || !r.scene.elements.every((e) => Array.isArray(e.tip) && e.crop && e.enter)) return null
+      // 老格式（整幅、带黑板底、没有笔尖轨迹）和旧书写效果（上色时手来回扫）的缓存不复用
+      if (!(r.rev >= 2) || !r.scene.elements.every((e) => Array.isArray(e.tip) && e.crop)) return null
       const files = [r.hand?.file, ...r.scene.elements.flatMap((e) => [e.video, e.hold])].filter(Boolean)
       return files.every((name) => existsSync(path.join(outDir, name))) ? r : null
     } catch { return null }
@@ -553,7 +543,6 @@ async function executeSubtitleJob(job, entry, ctx) {
     audio,
     timing,
     outputs: { prefix: job.id, video: `${job.id}.webm`, still: `${job.id}_still.png`, subtitles: names.subtitles, ass: names.ass },
-    ...(req.chapters ? { chapters: req.chapters } : {}),
   }
   const requestFile = path.join(outDir, `${job.id}_request.json`)
   writeFileSync(requestFile, JSON.stringify(request, null, 2))
@@ -589,16 +578,6 @@ async function executeSubtitleJob(job, entry, ctx) {
       ass: url(result.ass),
       cues: cues.map(({ text, start, end }) => ({ text, start, end })),
     },
-    ...(result.chapterBar ? {
-      chapterBar: {
-        video: url(result.chapterBar.video),
-        width: result.chapterBar.width,
-        height: result.chapterBar.height,
-        barH: result.chapterBar.barH,
-        duration: result.chapterBar.duration,
-        placeAt: result.chapterBar.placeAt,
-      },
-    } : {}),
     manifest: url(`${job.id}.json`),
   }
   writeFileSync(path.join(outDir, `${job.id}.json`), JSON.stringify(output, null, 2))

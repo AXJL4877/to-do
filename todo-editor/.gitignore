@@ -10,15 +10,22 @@ lerna-debug.log*
 .native-tools/
 native/bin/
 native/test-output/
+runtime/python/
 node_modules
 dist
 dist-ssr
 *.local
 .data/**
 !.data/
-!.data/ai-config.json
+!.data/ai-config.example.json
+**/ai-config.json
 
-# 内嵌工具运行时产物（源码与 .env 要提交）
+# AI 控制实例（scripts/todo-ctl.mjs 生成；含技能包副本与 ai-config.json 密钥副本）
+.data-ctl/
+
+# 内嵌工具运行时产物（真 .env 永不提交，只留 .env.example）
+vendor/**/.env
+!vendor/**/.env.example
 vendor/**/outputs/
 vendor/**/jobs/
 vendor/**/__pycache__/

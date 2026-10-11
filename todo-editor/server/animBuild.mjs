@@ -20,6 +20,16 @@ export function resolveFfmpeg() {
   return candidates.find((c) => existsSync(c)) || 'ffmpeg'
 }
 
+export function resolveFfprobe() {
+  const candidates = [
+    process.env.FFPROBE,
+    process.env.TODO_NATIVE_BIN && path.join(process.env.TODO_NATIVE_BIN, 'ffprobe.exe'),
+    path.join(ROOT, 'native', 'bin', 'ffprobe.exe'),
+    path.join(process.env.LOCALAPPDATA || '', 'Microsoft/WinGet/Links/ffprobe.exe'),
+  ].filter(Boolean)
+  return candidates.find((c) => existsSync(c)) || 'ffprobe'
+}
+
 export function crop(img, x0, y0, w, h) {
   const out = Buffer.alloc(w * h * 4)
   for (let y = 0; y < h; y++) {

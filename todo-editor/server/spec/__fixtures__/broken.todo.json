@@ -1,0 +1,30 @@
+{
+  "version": 2,
+  "savedAt": "2026-10-11T00:00:00.000Z",
+  "projectName": "fixture-broken",
+  "settings": { "width": 1920, "height": 1080, "fps": 30 },
+  "media": [
+    { "id": "m_ok", "kind": "video", "name": "ok.mp4", "relPath": "media/ok.mp4", "duration": 8 },
+    { "id": "m_noref", "kind": "image", "name": "只有服务URL.png", "url": "/ai-generated/x.png", "duration": 0 },
+    { "id": "m_ok", "kind": "audio", "name": "重复id.mp3", "relPath": "media/dup.mp3", "duration": 5 }
+  ],
+  "sequences": [
+    {
+      "id": "seq_a",
+      "name": "序列 1",
+      "tracks": [{ "id": "tr1", "kind": "video" }],
+      "clips": [
+        { "id": "c_orphan_track", "trackId": "tr_不存在", "mediaId": "m_ok", "name": "孤儿轨", "start": 0, "duration": 3, "inPoint": 0, "outPoint": 3 },
+        { "id": "c_orphan_media", "trackId": "tr1", "mediaId": "m_不存在", "name": "孤儿媒体", "start": 0, "duration": 3, "inPoint": 0, "outPoint": 3 },
+        { "id": "c_badtime", "trackId": "tr1", "mediaId": "m_ok", "name": "时间非法", "start": -1, "duration": 0, "inPoint": 5, "outPoint": 2 },
+        { "id": "c_drift", "trackId": "tr1", "mediaId": "m_ok", "name": "派生漂移", "start": 4, "duration": 3, "inPoint": 0, "outPoint": 3,
+          "meta": { "absIn": 4, "absOut": 99, "start": 4, "duration": 3, "end": 7, "inPoint": 0, "outPoint": 3 } },
+        { "id": "c_past_end", "trackId": "tr1", "mediaId": "m_ok", "name": "超出素材时长", "start": 8, "duration": 4, "inPoint": 0, "outPoint": 12 }
+      ],
+      "markers": [],
+      "workIn": 0,
+      "workOut": 12
+    }
+  ],
+  "activeSeqId": "seq_悬空"
+}

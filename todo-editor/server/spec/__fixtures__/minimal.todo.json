@@ -1,0 +1,57 @@
+{
+  "version": 2,
+  "savedAt": "2026-10-11T00:00:00.000Z",
+  "projectName": "fixture-minimal",
+  "settings": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30,
+    "aspect": "16:9",
+    "pixelAspect": 1,
+    "canvasBg": "black",
+    "canvasColor": "#0a0a0a",
+    "stillDuration": 5,
+    "cachePath": "./cache",
+    "useProxy": false,
+    "hwAccel": true,
+    "nativePreview": false,
+    "safeFrame": false,
+    "magnetic": false,
+    "snap": false
+  },
+  "media": [
+    { "id": "m_v1", "kind": "video", "name": "clip.mp4", "relPath": "media/clip.mp4", "path": "D:\\proj\\media\\clip.mp4", "url": "file:///D:/proj/media/clip.mp4", "duration": 12, "width": 1920, "height": 1080, "fps": 30, "folderId": "f_all", "favorite": false, "offline": false, "hasAudio": true },
+    { "id": "m_i1", "kind": "image", "name": "bg.png", "relPath": "media/bg.png", "url": "file:///D:/proj/media/bg.png", "duration": 0, "width": 1920, "height": 1080, "folderId": "f_all", "favorite": false, "offline": false },
+    { "id": "m_a1", "kind": "audio", "name": "bgm.mp3", "relPath": "media/bgm.mp3", "url": "file:///D:/proj/media/bgm.mp3", "duration": 60, "folderId": "f_audio", "favorite": false, "offline": false }
+  ],
+  "folders": [],
+  "sequences": [
+    {
+      "id": "seq_demo",
+      "name": "序列 1",
+      "tracks": [
+        { "id": "tr_v1", "kind": "video", "name": "V1", "locked": false, "muted": false, "solo": false, "hidden": false, "height": 48 },
+        { "id": "tr_v2", "kind": "video", "name": "V2", "locked": false, "muted": false, "solo": false, "hidden": false, "height": 48 },
+        { "id": "tr_a1", "kind": "audio", "name": "A1", "locked": false, "muted": false, "solo": false, "hidden": false, "height": 48 },
+        { "id": "tr_bgm", "kind": "audio", "name": "A2", "role": "bgm", "locked": true, "muted": false, "solo": false, "hidden": false, "height": 48 },
+        { "id": "tr_sub", "kind": "subtitle", "name": "字幕", "locked": false, "muted": false, "solo": false, "hidden": false, "height": 48 }
+      ],
+      "clips": [
+        { "id": "cl_v1", "trackId": "tr_v1", "mediaId": "m_v1", "name": "clip.mp4", "start": 0, "duration": 6, "inPoint": 2, "outPoint": 8, "speed": 1, "reverse": false, "enabled": true, "blend": "normal", "effects": [], "keyframes": {}, "speedKeyframes": [], "transform": { "x": 0, "y": 0, "scale": 1, "rotation": 0, "opacity": 1 }, "color": {}, "audio": { "volume": 1 },
+          "meta": { "absIn": 0, "absOut": 6, "start": 0, "duration": 6, "end": 6, "inPoint": 2, "outPoint": 8, "trackId": "tr_v1", "enabled": true, "visible": true, "source": { "type": "import" } } },
+        { "id": "cl_img", "trackId": "tr_v2", "mediaId": "m_i1", "name": "bg.png", "start": 6, "duration": 4, "inPoint": 0, "outPoint": 4, "speed": 1, "reverse": false, "enabled": true, "blend": "normal", "effects": [], "keyframes": {}, "speedKeyframes": [], "meta": { "absIn": 6, "absOut": 10, "start": 6, "duration": 4, "end": 10, "inPoint": 0, "outPoint": 4, "trackId": "tr_v2", "enabled": true, "visible": true, "source": { "type": "ai", "jobId": "p_fixture_demo", "kind": "hold", "lane": 1, "key": "hold1", "rev": "r1" } } },
+        { "id": "cl_bgm", "trackId": "tr_bgm", "mediaId": "m_a1", "name": "bgm.mp3", "start": 0, "duration": 10, "inPoint": 0, "outPoint": 10, "speed": 1, "reverse": false, "enabled": true, "blend": "normal", "effects": [], "keyframes": {}, "speedKeyframes": [], "meta": { "absIn": 0, "absOut": 10, "start": 0, "duration": 10, "end": 10, "inPoint": 0, "outPoint": 10, "trackId": "tr_bgm", "enabled": true, "role": "bgm", "source": { "type": "ai", "jobId": "p_fixture_demo", "kind": "bgm", "key": "bgm/intro" } } },
+        { "id": "cl_solid", "trackId": "tr_v1", "name": "纯色底", "start": 0, "duration": 2, "inPoint": 0, "outPoint": 2, "speed": 1, "reverse": false, "enabled": false, "blend": "normal", "effects": [], "keyframes": {}, "speedKeyframes": [], "solid": { "color": "#101010" } }
+      ],
+      "markers": [{ "id": "mk1", "t": 6, "color": "#ffcc00", "label": "转场" }],
+      "workIn": 0,
+      "workOut": 10,
+      "scene3d": {}
+    }
+  ],
+  "activeSeqId": "seq_demo",
+  "playhead": 3.5,
+  "prefs": { "defaultDuration": 5, "cachePath": "./cache", "performance": "balanced", "previewCacheMaxEdge": 720 },
+  "presets": [],
+  "fonts": []
+}

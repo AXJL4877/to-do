@@ -335,12 +335,18 @@ assert(cleanScript('  第一段 {x}\r\n\r\n\r\n第二段\t 内容  ') === '第�
       if (onRender) await onRender(r)
       assert(r.mode === 'scene-clips' && r.scene.elements.every((e) => existsSync(e.image)), '渲染请求：逐镜头、元素图已落盘')
       writeFileSync(path.join(r.outDir, r.outputs.hand), 'PNG')
-      const elements = r.scene.elements.map((e) => {
+      const elements = r.scene.elements.map((e, i) => {
         const video = `${r.outputs.prefix}_${r.scene.id}_${e.id}.webm`
         const hold = `${r.outputs.prefix}_${r.scene.id}_${e.id}_hold.png`
         writeFileSync(path.join(r.outDir, video), 'WEBM')
         writeFileSync(path.join(r.outDir, hold), 'PNG')
-        return { id: e.id, label: e.label, role: e.role, box: [0, 0, 100, 100], crop: [0, 0, 100, 100], startMs: e.atMs, durationMs: 500, frames: 15, video, hold, tip: [] }
+        // 第 1 个元素挂元素级音效（泡泡转场那条路径），锁住「sfx 也要换成宿主 URL」
+        let sfx
+        if (i === 0) {
+          sfx = `${r.outputs.prefix}_${r.scene.id}_${e.id}_sfx.wav`
+          writeFileSync(path.join(r.outDir, sfx), 'WAV')
+        }
+        return { id: e.id, label: e.label, role: e.role, box: [0, 0, 100, 100], crop: [0, 0, 100, 100], startMs: e.atMs, durationMs: 500, frames: 15, video, hold, tip: [], ...(sfx ? { sfx } : {}) }
       })
       return { rev: 2, alpha: true, width: 1920, height: 1080, fps: 30, hand: { file: r.outputs.hand, width: 200, height: 300, tipX: 0.1, tipY: 0.1 }, scene: { id: r.scene.id, startMs: r.scene.startMs, endMs: r.scene.endMs, layout: 'auto', elements } }
     },
@@ -375,6 +381,9 @@ assert(cleanScript('  第一段 {x}\r\n\r\n\r\n第二段\t 内容  ') === '第�
   let view = JSON.parse((await roundtrip('GET', `/api/ai-productions/${pid}`)).body).production
   assert(view.segments.every((s) => !s.dirty.voice && !s.dirty.plan && s.boards.every((b) => !b.dirty && b.elements.every((e) => !e.dirty))), '视图：全部已生成')
   assert(view.segments[0].voice.audioUrl.startsWith('/ai-generated/') && view.segments[0].boards[0].render.result.elements[0].video.startsWith('/ai-generated/'), '视图：文件名换成 URL')
+  // 元素级 sfx 与 video/hold 同一语义，必须一起换成 /ai-generated/ URL。
+  // 漏掉时前端把它当相对路径取到站点根 → 404 → 时间轴上「音效缺失」且没有报错。
+  assert(view.segments[0].boards[0].render.result.elements[0].sfx?.startsWith('/ai-generated/'), '视图：元素级音效也要换成 URL（否则时间轴静默无声）')
   assert(view.status.running === false && view.queuedJobId === null, '视图：没有排队 / 在跑的任务')
 
   // 重跑：什么都不重做

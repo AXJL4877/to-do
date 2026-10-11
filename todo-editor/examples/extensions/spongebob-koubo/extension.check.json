@@ -39,6 +39,20 @@
       "artifacts": ["native/test-output/spongebob-koubo/export.mp4"]
     },
     {
+      "id": "preview-black-gate",
+      "cwd": "repo",
+      "argv": ["node", "scripts/test-spongebob-preview-black.mjs"],
+      "mode": "offline",
+      "covers": ["timeline", "host"],
+      "timeoutMs": 300000,
+      "artifacts": [
+        "native/test-output/spongebob-preview-black/preview-black.json",
+        "native/test-output/spongebob-preview-black/frame_entrance.png",
+        "native/test-output/spongebob-preview-black/frame_fresh.png",
+        "native/test-output/spongebob-preview-black/frame_broken.png"
+      ]
+    },
+    {
       "id": "render-benchmark",
       "cwd": "installed",
       "argv": ["node", "checks/performance.mjs"],
@@ -46,6 +60,24 @@
       "covers": ["performance"],
       "timeoutMs": 600000,
       "artifacts": ["check-output/PERFORMANCE.json"]
+    },
+    {
+      "id": "source-contract",
+      "cwd": "installed",
+      "argv": ["node", "checks/source-contract.mjs"],
+      "mode": "offline",
+      "covers": [],
+      "timeoutMs": 30000,
+      "artifacts": []
+    },
+    {
+      "id": "edit-workflow-contract",
+      "cwd": "installed",
+      "argv": ["node", "checks/edit-workflow-contract.mjs"],
+      "mode": "offline",
+      "covers": ["timeline", "editing"],
+      "timeoutMs": 30000,
+      "artifacts": []
     },
     {
       "id": "performance-budget",

@@ -5,9 +5,9 @@
 import { copyFileSync, existsSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
-import { resolveMishiRoot, resolveTtsTimelineRoot, ttsTimelineReady } from './toolRoots.mjs'
+import { resolveMishiRoot, resolvePython, resolveTtsTimelineRoot, ttsTimelineReady } from './toolRoots.mjs'
 
-const PYTHON = process.env.TODO_PYTHON || 'python'
+const PYTHON = resolvePython()
 const TIMEOUT_MS = 600_000
 
 /** @deprecated 用 resolveTtsTimelineRoot()；保留导出兼容旧引用 */

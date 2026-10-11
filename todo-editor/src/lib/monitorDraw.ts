@@ -14,6 +14,42 @@ import { indexClips, indexTracks, upcomingClips } from './sequenceIndex'
 export type ImageCache = Map<string, HTMLImageElement>
 export type { SnapGuide } from './monitorSnap'
 
+/** 满幅转场 H.264 黑底 → 近黑变透明（按帧缓存，避免每帧扫 1080p） */
+const nearBlackKeyed = new Map<string, HTMLCanvasElement>()
+
+function keyNearBlackFrame(
+  mediaId: string,
+  mediaT: number,
+  fps: number,
+  src: CanvasImageSource,
+  iw: number,
+  ih: number,
+  luma = 18,
+): HTMLCanvasElement {
+  const fi = Math.round(mediaT * Math.max(1, fps))
+  const key = `${mediaId}:${fi}:${iw}x${ih}`
+  const hit = nearBlackKeyed.get(key)
+  if (hit) return hit
+  const c = document.createElement('canvas')
+  c.width = Math.max(1, iw)
+  c.height = Math.max(1, ih)
+  const cctx = c.getContext('2d', { willReadFrequently: true })
+  if (!cctx) return c
+  cctx.drawImage(src, 0, 0, c.width, c.height)
+  const img = cctx.getImageData(0, 0, c.width, c.height)
+  const d = img.data
+  for (let i = 0; i < d.length; i += 4) {
+    if (Math.max(d[i], d[i + 1], d[i + 2]) <= luma) d[i + 3] = 0
+  }
+  cctx.putImageData(img, 0, 0)
+  if (nearBlackKeyed.size > 96) {
+    const first = nearBlackKeyed.keys().next().value
+    if (first) nearBlackKeyed.delete(first)
+  }
+  nearBlackKeyed.set(key, c)
+  return c
+}
+
 /**
  * 节目叠层顺序：时间轴列表越靠上（index 越小）越在上层。
  * 返回值越大越靠前（后画）。字幕 > 特效 > 视频。
@@ -530,7 +566,10 @@ function drawClip(
           || h
         mediaW = iw
         mediaH = ih
-        drawContainCenter(ctx, frame, w, h, iw, ih)
+        const painted = m.chromaKey === 'nearblack'
+          ? keyNearBlackFrame(m.id, mediaT, fps, frame, iw, ih)
+          : frame
+        drawContainCenter(ctx, painted, w, h, iw, ih)
       } else if (!mayHaveAlpha(m)) {
         // 透明叠层还没解出帧时留空：占位块会盖住下层，播放时就是一闪的坏帧
         drawMediaPlaceholder(ctx, clip.name, w, h, sy)

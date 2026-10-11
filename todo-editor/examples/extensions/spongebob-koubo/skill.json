@@ -2,15 +2,19 @@
   "spec": "todo-skill-pack/1",
   "id": "studio.spongebob-koubo",
   "name": "海绵宝宝口播",
-  "version": "1.0.1",
+  "version": "1.6.8",
   "author": "studio",
-  "description": "海绵宝宝手绘口播：宿主负责配音与生图，本包按镜头把透明贴纸做成可单独入轨的入场层。",
-  "tags": ["口播", "成片", "海绵宝宝"],
+  "description": "自包含口播成片：包内管线与原 trial/koubo 同序（TTS→设计→生图→渲染→转场音效→三段BGM→验收）。时间轴渐进入轨：先口播，再按 intro_red/scene/… 逐镜铺元素，泡泡转场自带音效落到独立音频轨，最后分轨铺三段 BGM。入场片与满幅转场一律 VP9 alpha WebM（真透明）。",
+  "tags": [
+    "口播",
+    "成片",
+    "海绵宝宝"
+  ],
   "pipeline": "production",
   "input": {
     "label": "口播文案",
     "maxLength": 12000,
-    "placeholder": "粘贴口播。空行或 --- 分段。画面为海滩贴纸，元素可单独移动。"
+    "placeholder": "粘贴口播。空行或 --- 分段。成片由包内管线生成。"
   },
   "output": {
     "mime": "video/webm",
@@ -25,8 +29,14 @@
       "label": "音色",
       "default": "clone",
       "options": [
-        {"value": "mizai", "label": "咪仔"},
-        {"value": "clone", "label": "克隆音"}
+        {
+          "value": "mizai",
+          "label": "咪仔"
+        },
+        {
+          "value": "clone",
+          "label": "克隆音"
+        }
       ]
     },
     {
@@ -34,7 +44,11 @@
       "type": "text",
       "group": "voice",
       "label": "克隆音 ID",
-      "when": {"voice": ["clone"]},
+      "when": {
+        "voice": [
+          "clone"
+        ]
+      },
       "default": "S_RksT6Z6g2",
       "maxLength": 64,
       "pattern": "^$|^S_[A-Za-z0-9_-]{2,60}$",
@@ -47,9 +61,18 @@
       "label": "分段",
       "default": "paragraph",
       "options": [
-        {"value": "semantic", "label": "按意思"},
-        {"value": "paragraph", "label": "按段落"},
-        {"value": "length", "label": "按字数"}
+        {
+          "value": "semantic",
+          "label": "按意思"
+        },
+        {
+          "value": "paragraph",
+          "label": "按段落"
+        },
+        {
+          "value": "length",
+          "label": "按字数"
+        }
       ]
     },
     {
@@ -59,10 +82,22 @@
       "label": "画幅",
       "default": "1920x1080",
       "options": [
-        {"value": "1280x720", "label": "720p"},
-        {"value": "1920x1080", "label": "1080p"},
-        {"value": "1080x1920", "label": "竖屏"},
-        {"value": "1080x1080", "label": "方形"}
+        {
+          "value": "1280x720",
+          "label": "720p"
+        },
+        {
+          "value": "1920x1080",
+          "label": "1080p"
+        },
+        {
+          "value": "1080x1920",
+          "label": "竖屏"
+        },
+        {
+          "value": "1080x1080",
+          "label": "方形"
+        }
       ]
     },
     {
@@ -72,9 +107,18 @@
       "label": "排版",
       "default": "auto",
       "options": [
-        {"value": "auto", "label": "自动"},
-        {"value": "hero_left", "label": "主角居左"},
-        {"value": "grid", "label": "网格"}
+        {
+          "value": "auto",
+          "label": "自动"
+        },
+        {
+          "value": "hero_left",
+          "label": "主角居左"
+        },
+        {
+          "value": "grid",
+          "label": "网格"
+        }
       ]
     },
     {
@@ -84,8 +128,16 @@
       "label": "色调",
       "default": "ink",
       "options": [
-        {"value": "ink", "label": "手绘", "prompt": "thick black outline, flat color, sticker"},
-        {"value": "chalk", "label": "粉笔", "prompt": "chalk texture, rough stroke"}
+        {
+          "value": "ink",
+          "label": "手绘",
+          "prompt": "thick black outline, flat color, sticker"
+        },
+        {
+          "value": "chalk",
+          "label": "粉笔",
+          "prompt": "chalk texture, rough stroke"
+        }
       ]
     },
     {
@@ -95,10 +147,22 @@
       "label": "入场",
       "default": "fade",
       "options": [
-        {"value": "mix", "label": "混合"},
-        {"value": "fade", "label": "淡入"},
-        {"value": "stamp", "label": "盖章"},
-        {"value": "draw", "label": "升起"}
+        {
+          "value": "mix",
+          "label": "混合"
+        },
+        {
+          "value": "fade",
+          "label": "淡入"
+        },
+        {
+          "value": "stamp",
+          "label": "盖章"
+        },
+        {
+          "value": "draw",
+          "label": "升起"
+        }
       ]
     },
     {
@@ -108,8 +172,14 @@
       "label": "帧率",
       "default": "30",
       "options": [
-        {"value": "24", "label": "24"},
-        {"value": "30", "label": "30"}
+        {
+          "value": "24",
+          "label": "24"
+        },
+        {
+          "value": "30",
+          "label": "30"
+        }
       ]
     },
     {
@@ -129,31 +199,60 @@
       "label": "质量",
       "default": "standard",
       "options": [
-        {"value": "high", "label": "高"},
-        {"value": "standard", "label": "标准"},
-        {"value": "draft", "label": "草稿"}
+        {
+          "value": "high",
+          "label": "高"
+        },
+        {
+          "value": "standard",
+          "label": "标准"
+        },
+        {
+          "value": "draft",
+          "label": "草稿"
+        }
       ]
     }
   ],
-  "quick": ["size", "enter", "drawSpeed"],
+  "quick": [
+    "size",
+    "enter",
+    "drawSpeed"
+  ],
   "planner": {
     "maxElements": 4,
-    "system": "你是海绵宝宝财经口播的分镜。每句最多四个贴纸元素：一个角色加道具。label 用中文短名。draw 写单件透明贴纸：厚黑描边、平涂、全身或完整道具、四周留白、不要场景、不要文字。角色用原创海绵厨师/海星形象，不要商标名。role：主角 hero，道具 support，强调 accent。"
+    "system": "【本段生成时不被使用】本扩展走 preserveSource，宿主看到该字段即直接调用包内 workflow/run_pipeline.py，不做分段、分镜与生图（server/production/runner.mjs）。分镜规则由包内 workflow/02_镜头设计/design.py 决定，那里才是权威。保留本段仅为通过技能包校验（production 管线要求 planner）。"
   },
   "assets": {
-    "models": ["gpt-image-2"],
+    "models": [
+      "gpt-image-2"
+    ],
     "resolution": "1K",
-    "template": "Isolated sticker, transparent background, thick black outline, flat colors, full object, large empty margin, no scenery, no text, no watermark. {{tone}} {{role}} Must depict: {{draw}}",
+    "template": "【本段生成时不被使用，仅通过校验】Isolated sticker, transparent background, thick black outline, flat colors, no scenery, no text, no watermark. {{tone}} {{role}} Must depict: {{draw}}",
     "roles": {
       "hero": "one original sponge-chef character, full body",
       "support": "one simple prop, no character",
       "accent": "one small icon prop"
     },
-    "avoid": ["logo", "watermark", "scenery", "caption"]
+    "avoid": [
+      "logo",
+      "watermark",
+      "scenery",
+      "caption"
+    ]
   },
   "runtime": {
     "type": "python",
     "entry": "render.py",
     "timeoutSec": 600
+  },
+  "preserveSource": {
+    "entry": "workflow/run_pipeline.py",
+    "args": [
+      "--all",
+      "--skip-clean",
+      "--no-shutdown"
+    ],
+    "timeoutSec": 10800
   }
 }

@@ -14,7 +14,7 @@
  *   - 段与段首尾相接：按各段配音片段现在的位置排，配音变长 / 变短、中间插了新段时，后面的段整体顺移（保留用户留的空隙）
  */
 import { appendGroupSlot, useApp } from '../store'
-import { defaultText, type ChalkStroke, type Clip, type MediaItem, type ProductionPlacement, type Transform2D } from '../types'
+import { defaultAudio, defaultText, type ChalkStroke, type Clip, type MediaItem, type ProductionPlacement, type Transform2D } from '../types'
 import { aiUrl } from './aiFetch'
 import { isSameAiMedia } from './aiJobImport'
 import { subtitleClipStyle, type TimelinePlacement } from './aiSkills'
@@ -24,8 +24,17 @@ import { isStoreAuthority } from './storeSync'
 import { isRemovedGenerated } from './mediaManagement'
 
 const VOICE_LANE = 0
+const BGM_LANE = 1
+/** 元素自带音效（泡泡转场原声等）：独立音轨，便于单独调音量/取舍 */
+const SFX_LANE = 2
+/** 成片整片轨：仅 params.filmOnly=true 时铺；默认走逐镜分层 */
+const FILM_LANE = 50
 const PLATE_LANE = 99
 const EPS = 1e-3
+const pathExt = (f: string) => {
+  const m = String(f || '').match(/\.[a-z0-9]+$/i)
+  return m ? m[0] : '.wav'
+}
 
 type AddItem = Parameters<ReturnType<typeof useApp.getState>['addAiLayerClips']>[0][number]
 
@@ -64,14 +73,63 @@ function folderFor(p: Production) {
   return id
 }
 
-function ensureMedia(item: { name: string; url: string; kind: MediaItem['kind']; duration: number; width?: number; height?: number; alpha?: boolean }, folderId: string) {
+function ensureMedia(item: {
+  name: string
+  url: string
+  kind: MediaItem['kind']
+  duration: number
+  width?: number
+  height?: number
+  alpha?: boolean
+  chromaKey?: MediaItem['chromaKey']
+}, folderId: string) {
   if(isRemovedGenerated(item.url,useApp.getState().settings.removedGeneratedMedia))return null
   const hit = useApp.getState().media.find((m) => isSameAiMedia(m, item.url))
-  if (hit) return hit.id
+  if (hit) {
+    const patch: Partial<MediaItem> = {}
+    if (item.alpha && !hit.alpha) patch.alpha = true
+    if (item.chromaKey && hit.chromaKey !== item.chromaKey) patch.chromaKey = item.chromaKey
+    if (Object.keys(patch).length) {
+      useApp.setState({
+        media: useApp.getState().media.map((m) => (m.id === hit.id ? { ...m, ...patch } : m)),
+      })
+    }
+    return hit.id
+  }
   return useApp.getState().importMedia([{ ...item, hasAudio: item.kind === 'audio', folderId }], { silent: true })[0] ?? null
 }
 
 const segOfKey = (key: string) => (key === 'plate' ? null : key.split('/')[0])
+
+/**
+ * 素材元数据修复：满幅近黑转场（chromaKey=nearblack）早先导入时被丢掉标记，
+ * 之后 `same` 短路又不会回头调 ensureMedia，于是它一直被当不透明黑层 → 预览黑屏。
+ * 这里按成片文档把标记补回已存在的素材（幂等，不动其它字段）。
+ */
+function reconcileLayerKeyMeta(p: Production): boolean {
+  const want = new Map<string, MediaItem['chromaKey']>()
+  for (const seg of p.segments) {
+    for (const b of seg.boards || []) {
+      for (const e of b.render?.result?.elements || []) {
+        const ck = (e as { chromaKey?: MediaItem['chromaKey'] }).chromaKey
+        if (ck && e.video) want.set(aiUrl(e.video), ck)
+      }
+    }
+  }
+  if (!want.size) return false
+  let changed = false
+  const media = useApp.getState().media.map((m) => {
+    if (m.chromaKey) return m
+    for (const [url, ck] of want) {
+      if (!isSameAiMedia(m, url)) continue
+      changed = true
+      return { ...m, chromaKey: ck }
+    }
+    return m
+  })
+  if (changed) useApp.setState({ media })
+  return changed
+}
 
 /** 本段的配音时间（秒）→ 时间线：按配音片段的速度换算 */
 type SegMap = { zero: number; speed: number }
@@ -104,6 +162,8 @@ export function syncProduction(p: Production): boolean {
   const snap = (t: number) => Math.round(t * projFps) / projFps
   const wantHand = p.params.hand !== 'none'
   let changed = false
+  // 老工程：把被丢过的 chromaKey 补回素材，否则满幅转场预览是黑屏
+  if (reconcileLayerKeyMeta(p)) changed = true
 
   // 1. 段落排布：配音片段现在的位置是准的；配音换了 / 新插的段让后面整体顺移
   const maps = new Map<string, SegMap>()
@@ -165,6 +225,80 @@ export function syncProduction(p: Production): boolean {
     maps.set(seg.id, { zero, speed })
     cursor = Math.max(cursor, end)
     if (seg === lastVoiced) cursor += Number(p.params.tail) || 0
+
+    // BGM：原管线 bgm_plan 三段（intro→mid→outro）；无计划时回退整段 bed
+    type BgmSeg = {
+      id: string; file: string; hash: string; start: number; end: number
+      duration: number; volume?: number; trim_start?: number; trim_dur?: number | null
+    }
+    const plan = (p as Production & {
+      sourceBgmPlan?: { hash: string; segments: BgmSeg[] }
+      sourceBgm?: { file: string; hash: string; duration: number }
+    }).sourceBgmPlan
+    const bgmSegs: BgmSeg[] = plan?.segments?.length
+      ? plan.segments
+      : (() => {
+          const bed = (p as Production & { sourceBgm?: { file: string; hash: string; duration: number } }).sourceBgm
+          return bed?.file && bed.hash
+            ? [{ id: 'bed', file: bed.file, hash: bed.hash, start: 0, end: bed.duration || v.duration, duration: bed.duration || v.duration }]
+            : []
+        })()
+    for (const bs of bgmSegs) {
+      const bkey = `${seg.id}/bgm/${bs.id}`
+      wanted.add(bkey)
+      const oldB = byKey.get(bkey)?.[0]
+      const span = Math.max(0.2, Number(bs.duration) || (Number(bs.end) - Number(bs.start)) || v.duration)
+      const bMedia = ensureMedia({
+        name: `${label}_${seg.title || seg.id}_BGM_${bs.id}${pathExt(bs.file)}`,
+        url: aiUrl(`/ai-generated/${bs.file}`),
+        kind: 'audio',
+        duration: span + (Number(bs.trim_start) || 0) + 1,
+      }, folderId)
+      if (!bMedia) continue
+      const clipStart = zero + (Number(bs.start) || 0) / speed
+      const clipDur = span / speed
+      const inPoint = Number(bs.trim_start) || 0
+      const outPoint = inPoint + span
+      const rev = bs.hash || plan?.hash || bs.file
+      const vol = typeof bs.volume === 'number' ? bs.volume : undefined
+      // 宿主音量模型是 gainDb（dB）；bgm_plan 给的是线性 volume，换算后才是真正生效的值
+      const volDb = vol == null ? undefined : Math.max(-60, Math.min(18, 20 * Math.log10(Math.max(vol, 1e-3))))
+      if (oldB) {
+        if (oldB.meta?.source?.rev !== rev) {
+          patches[oldB.id] = {
+            ...patches[oldB.id],
+            mediaId: bMedia,
+            start: clipStart,
+            duration: clipDur,
+            inPoint,
+            outPoint,
+            ...(volDb != null ? { audio: { ...defaultAudio(), gainDb: volDb } } : {}),
+            meta: { ...oldB.meta!, source: { ...oldB.meta!.source!, rev } },
+          }
+          placed[bkey] = rev
+          changed = true
+        }
+      } else if (placed[bkey] !== rev) {
+        const [cid] = useApp.getState().addAiLayerClips([{
+          mediaId: bMedia,
+          start: clipStart,
+          duration: clipDur,
+          inPoint,
+          outPoint,
+          lane: BGM_LANE,
+          name: `${seg.title || '口播'} · BGM·${bs.id}`,
+          source: { key: bkey, rev },
+        }], { ...opts, linkTo: voiceIds.get(seg.id) })
+        if (cid && volDb != null) {
+          useApp.getState().patchClipsQuiet({
+            [cid]: { audio: { ...defaultAudio(), gainDb: volDb } },
+          })
+        }
+        placed[bkey] = rev
+        changed = true
+      }
+    }
+    // 旧整段 `${seg}/bgm` 不进 wanted → 对账时删掉，改由 /bgm/intro|mid|outro
   }
 
   function shiftSegment(segId: string, by: number) {
@@ -180,15 +314,61 @@ export function syncProduction(p: Production): boolean {
   }
   const startOf = (c: Clip) => (patches[c.id]?.start as number | undefined) ?? c.start
 
-  // 2. 元素：先放定格（没有入场的样子），书写 / 盖章 / 显现稍后再叠上去，单独可撤销
+  // 2. 画面：原管线渐进——按镜头 boards 逐镜铺（intro_red → scene/card/…）；
+  //    仅 params.filmOnly=true 时整片盖轨（对照用，离开可编辑分层）
   const addLater: { items: AddItem[]; linkTo?: string }[] = []
   const handOn: string[] = []
   const entrances: { holdKey: string; t1: number; tail: number; draw: AddItem; linkTo?: string; hand: boolean }[] = []
+  const filmOnly = String((p.params as { filmOnly?: string } | undefined)?.filmOnly || '') === 'true'
+  const filmMeta = (p as Production & { sourceFilm?: { file: string; hash?: string; duration?: number; width?: number; height?: number; hold?: string } }).sourceFilm
+  const hasLayerBoards = p.segments.some((s) =>
+    s.boards?.some((b) => b.render?.result?.layout === 'source-layers' || (b.render?.result?.elements?.length || 0) > 0),
+  )
+
   for (const seg of p.segments) {
     const m = maps.get(seg.id)
     if (!m || !seg.voice) continue
     const isLast = seg === lastVoiced
     const items: AddItem[] = []
+
+    // filmOnly：整片静音成片；默认仍走下方逐镜分层
+    if (filmOnly && filmMeta?.file && !hasLayerBoards) {
+      const fkey = `${seg.id}/film`
+      wanted.add(fkey)
+      const rev = filmMeta.hash || filmMeta.file
+      const oldF = byKey.get(fkey)?.[0]
+      const dur = Number(filmMeta.duration || seg.voice.duration) || seg.voice.duration
+      if (oldF?.meta?.source?.rev !== rev && placed[fkey] !== rev) {
+        if (oldF) patches[oldF.id] = null
+        const media = ensureMedia({
+          name: `${label}_${seg.title || seg.id}_成片.mp4`,
+          url: aiUrl(`/ai-generated/${filmMeta.file}`),
+          kind: 'video',
+          duration: dur,
+          width: filmMeta.width || frame.width,
+          height: filmMeta.height || frame.height,
+        }, folderId)
+        if (media) {
+          const [cid] = useApp.getState().addAiLayerClips([{
+            mediaId: media,
+            start: m.zero,
+            duration: dur / m.speed,
+            lane: FILM_LANE,
+            name: `${seg.title || '口播'} · 成片`,
+            source: { key: fkey, rev },
+          }], { ...opts, linkTo: voiceIds.get(seg.id) })
+          if (cid) {
+            useApp.getState().patchClipsQuiet({
+              [cid]: { audio: { ...defaultAudio(), mute: true } },
+            })
+          }
+          placed[fkey] = rev
+          changed = true
+        }
+      }
+      continue
+    }
+
     for (const [k, b] of seg.boards.entries()) {
       const r = b.render?.result
       if (!r || !b.render) continue
@@ -224,12 +404,23 @@ export function syncProduction(p: Production): boolean {
         const present = !!(oldDraw || oldHold)
         if (!present && placed[dk] === rev) continue
         const t0 = snap(toTimeline(m, e.startMs / 1000))
-        const t2 = snap(toTimeline(m, isLast && k === seg.boards.length - 1 ? Math.max(boardEnd, seg.voice.duration + (Number(p.params.tail) || 0)) : boardEnd))
+        // boardEnd 已是秒；优先用元素 durationMs（开场分段/泡泡转场）
+        const elEndSec = Number(e.durationMs) > 0
+          ? (Number(e.startMs) + Number(e.durationMs)) / 1000
+          : boardEnd
+        const boardCap = isLast && k === seg.boards.length - 1
+          ? Math.max(boardEnd, seg.voice.duration + (Number(p.params.tail) || 0))
+          : boardEnd
+        const t2 = snap(toTimeline(m, Math.max(e.startMs / 1000 + 1 / projFps, Math.min(elEndSec, boardCap))))
         const t1 = Math.max(t0 + 1 / projFps, Math.min(t2, snap(t0 + Math.max(1, e.frames - 1) / fps / m.speed)))
         const size = e.crop ? { width: e.crop[2], height: e.crop[3] } : frame
         const motion = chalkEnterLabel(e.enter)
-        const video = ensureMedia({ name: `${seg.title || seg.id}_${k + 1}_${name}_${motion}.webm`, url: aiUrl(e.video), kind: 'video', duration: e.frames / fps, ...size, alpha: true }, folderId)
-        const still = ensureMedia({ name: `${seg.title || seg.id}_${k + 1}_${name}.png`, url: aiUrl(e.hold), kind: 'image', duration: Math.max(1, t2 - t0), ...size }, folderId)
+        // 只有显式 cut 才跳过入场片直接铺定格；缺字段是旧产物，按手写（与 narratedTimeline / production.ts 一致）
+        const cutEnter = e.enter === 'cut'
+        // play/wipe：整段播 webm（泡泡遮罩转场），不是定格 PNG
+        const playEnter = e.enter === 'play' || e.enter === 'wipe'
+        // hold PNG 必须带 alpha，否则红字/角色透明区变黑底，预览只剩沙滩
+        const still = ensureMedia({ name: `${seg.title || seg.id}_${k + 1}_${name}.png`, url: aiUrl(e.hold), kind: 'image', duration: Math.max(1, t2 - t0), ...size, alpha: true }, folderId)
         // 用户挪过 / 缩放过这个元素：新产物沿用用户的位置
         const auto = e.crop ? elementTransform(e.crop, frame, proj) : undefined
         const prev = oldDraw ?? oldHold
@@ -240,14 +431,74 @@ export function syncProduction(p: Production): boolean {
           ? { tip: e.tip, frame, hand: { url: aiUrl(p.hand.url), width: p.hand.width, height: p.hand.height, tipX: p.hand.tipX, tipY: p.hand.tipY } }
           : undefined
         const keepHand = oldDraw?.meta?.source?.chalk ? !!oldDraw.meta.source.chalk.on : wantHand
-        const lane = j + 1
+        // elements[0] 是底板（背景）→ 高 lane → 时间轴靠下 → 合成在下；末元素在最上
+        const lane = Math.max(1, r.elements.length - j)
         if (oldDraw) patches[oldDraw.id] = null
         if (oldHold) patches[oldHold.id] = null
+        const videoDur = Math.max(1 / projFps, (Number(e.frames) || 8) / fps / m.speed)
+        const chromaKey = (e as { chromaKey?: MediaItem['chromaKey'] }).chromaKey
+        const video = ensureMedia({
+          name: `${seg.title || seg.id}_${k + 1}_${name}_${motion}${pathExt(String(e.video))}`,
+          url: aiUrl(e.video),
+          kind: 'video',
+          duration: playEnter ? Math.max(videoDur, t2 - t0) : videoDur,
+          ...size,
+          // H.264 近黑抠像不当作文件内嵌 alpha；其余入场片仍标 alpha
+          alpha: chromaKey === 'nearblack' ? false : true,
+          ...(chromaKey ? { chromaKey } : {}),
+        }, folderId)
+        // 元素自带的音效（如泡泡转场片源自带的音轨）：落到独立音轨，跟元素同起同落
+        const sfxName = (e as { sfx?: string }).sfx
+        if (sfxName) {
+          const skey = `${seg.id}/${e.id}/sfx`
+          wanted.add(skey)
+          const oldSfx = byKey.get(skey)?.[0]
+          if (oldSfx?.meta?.source?.rev !== rev) {
+            if (oldSfx) patches[oldSfx.id] = null
+            const sfxDur = Math.max(0.2, t2 - t0)
+            const sfxMedia = ensureMedia({
+              name: `${seg.title || seg.id}_${k + 1}_${name}_音效.wav`,
+              url: aiUrl(sfxName), kind: 'audio', duration: sfxDur,
+            }, folderId)
+            if (sfxMedia) {
+              items.push({
+                mediaId: sfxMedia, start: t0, duration: sfxDur, lane: SFX_LANE,
+                name: `${name} · 音效`, source: { key: skey, rev },
+              })
+              placed[skey] = rev
+            }
+          }
+        }
+        // 转场：按元素窗整段播（durationMs），勿用 board.fps 误算短片长导致泡泡卡死半截
+        if (playEnter && video && t2 - t0 > 0.02) {
+          const playDur = Math.max(0.2, t2 - t0)
+          items.push({
+            mediaId: video,
+            start: t0,
+            duration: playDur,
+            inPoint: 0,
+            outPoint: playDur,
+            lane,
+            name: `${name} · ${motion}`,
+            transform,
+            source: { key: dk, rev, layout },
+          })
+          placed[dk] = rev
+          placed[hk] = rev
+          continue
+        }
+        // cut：直接铺 hold（底板/开场静帧）
+        if (cutEnter && still && t2 - t0 > 0.02) {
+          items.push({ mediaId: still, start: t0, duration: t2 - t0, lane, name, transform, source: { key: hk, rev, layout } })
+          placed[dk] = rev
+          placed[hk] = rev
+          continue
+        }
         const drawItem: AddItem | null = video
-          ? { mediaId: video, start: t0, duration: t1 - t0, lane, name: `${name} · ${motion}`, transform, source: { key: dk, rev, layout, chalk } }
+          ? { mediaId: video, start: t0, duration: Math.min(t1 - t0, videoDur), lane, name: `${name} · ${motion}`, transform, source: { key: dk, rev, layout, chalk } }
           : null
-        // 定格和入场视频都在：先铺满定格，入场作为后一步，Ctrl+Z 只撤掉入场
-        if (drawItem && still && t2 - t0 > 0.02 && t1 - t0 > 0.02) {
+        // fade/stamp/draw：先铺满定格，入场 webm 叠在开头；Ctrl+Z 可只撤入场
+        if (drawItem && still && t2 - t0 > 0.02 && (t1 - t0) > 0.02) {
           items.push({ mediaId: still, start: t0, duration: t2 - t0, lane, name, transform, source: { key: hk, rev, layout } })
           entrances.push({ holdKey: hk, t1, tail: t2 - t1, draw: drawItem, linkTo: voiceIds.get(seg.id), hand: !!(keepHand && chalk) })
         } else {

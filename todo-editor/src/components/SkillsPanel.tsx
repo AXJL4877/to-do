@@ -10,7 +10,7 @@ import {
   type SkillDraft, type SkillJob, type SkillPack, type SkillParams, type SkillPlan, type TimelinePlacement,
 } from '../lib/aiSkills'
 import { isNarratedJob, narratedStage, type NarratedJob } from '../lib/narratedTimeline'
-import { createProduction, listProductions, type ProductionSummary } from '../lib/production'
+import { createProduction, listProductions, runProduction, type ProductionSummary } from '../lib/production'
 import { forgetProduction, registerProduction } from '../lib/productionTimeline'
 import { DYNAMIC_TEXT_PACK } from '../lib/dynamicTextPack'
 import { ProductionStudio } from './ProductionStudio'
@@ -119,7 +119,7 @@ const SkillJobCard = memo(function SkillJobCard({ j, onRetry, onRemove }: { j: S
 })
 
 /** 本工程里的一条成片：进度、规模，点开进工作台 */
-const ProductionCard = memo(function ProductionCard({ p, onOpen, onRemove }: { p: ProductionSummary; onOpen: (id: string) => void; onRemove: (id: string) => void }) {
+const ProductionCard = memo(function ProductionCard({ p, onOpen, onRemove, onRetry }: { p: ProductionSummary; onOpen: (id: string) => void; onRemove: (id: string) => void; onRetry: (id: string) => void }) {
   const live = !!p.runningJobId || !!p.queuedJobId
   const failed = p.status?.failed?.length ?? 0
   const pct = p.status?.pct ?? 0
@@ -138,11 +138,23 @@ const ProductionCard = memo(function ProductionCard({ p, onOpen, onRemove }: { p
             label={p.queuedJobId && !p.runningJobId ? '排队中' : phaseText(p.status?.phase) || '成片生成中'}
           />
         ) : (
-          <span className="text-[10px] truncate" style={{ color: failed ? 'var(--error)' : 'var(--text-muted)' }} title={p.status?.error || p.status?.phase}>
-            {[p.segments ? `${p.segments} 段 · ${p.boards} ${p.skillId === DYNAMIC_TEXT_PACK.id ? '个文字镜头' : '块黑板'} · ${p.duration.toFixed(1)}s` : '', phaseText(p.status?.phase)].filter(Boolean).join(' · ')}
+          <span className="text-[10px] truncate" style={{ color: failed || p.status?.error ? 'var(--error)' : 'var(--text-muted)' }} title={p.status?.error || p.status?.phase}>
+            {p.status?.error || [p.segments ? `${p.segments} 段 · ${p.boards} ${p.skillId === DYNAMIC_TEXT_PACK.id ? '个文字镜头' : '块黑板'} · ${p.duration.toFixed(1)}s` : '', phaseText(p.status?.phase)].filter(Boolean).join(' · ')}
           </span>
         )}
       </button>
+      {!live && (
+        <button
+          type="button"
+          className="icon-btn shrink-0"
+          style={{ width: 22, height: 22 }}
+          title="重跑未完成的步骤（补图 / 重渲；已在成片工作台里可按单镜、单元素重做）"
+          data-testid={`production-retry-${p.id}`}
+          onClick={() => onRetry(p.id)}
+        >
+          <RotateCcw size={11} />
+        </button>
+      )}
       {!live && (
         <button type="button" className="icon-btn shrink-0" style={{ width: 22, height: 22 }} title="从本工程移除（时间轴上的片段保留）" onClick={() => onRemove(p.id)}>
           <Trash2 size={11} />
@@ -178,6 +190,15 @@ export function SkillsPanel() {
   const [openProduction, setOpenProduction] = useState<string | null>(null)
   // 拼成字符串再比：每次返回新数组会让订阅一直判定为变化
   const productionIds = useApp((s) => Object.keys(s.settings.aiProductions ?? {}).join(','))
+
+  useEffect(() => {
+    const onOpen = (ev: Event) => {
+      const id = (ev as CustomEvent<{ id?: string }>).detail?.id
+      if (id) setOpenProduction(id)
+    }
+    window.addEventListener('todo:open-production', onOpen)
+    return () => window.removeEventListener('todo:open-production', onOpen)
+  }, [])
 
   const availablePacks = [DYNAMIC_TEXT_PACK, ...(packs ?? []).filter(p => p.id !== DYNAMIC_TEXT_PACK.id)]
   const pack = availablePacks.find((p) => p.id === selectedId) ?? null
@@ -279,7 +300,7 @@ export function SkillsPanel() {
       registerProduction(production.id, { auto: autoTimeline, placement, placeAt, estimate: speechSeconds(prompt) })
       useApp.getState().setToast(stopAfter ? `${pack.name}：先分段、配音、安排镜头，好了在成片工作台里编辑` : `${pack.name}已开始${autoTimeline ? '，配音和画面边生成边入轨' : ''}`)
       patchDraft({ prompt: '' })
-      setOpenProduction(stopAfter ? production.id : null)
+      setOpenProduction(production.id)
       void refreshJobs()
       return true
     } catch (e) {
@@ -294,6 +315,25 @@ export function SkillsPanel() {
     if (!window.confirm('从本工程移除这条成片？时间轴上已有的片段保留，之后不再自动更新')) return
     forgetProduction(id)
     void refreshJobs()
+  }, [refreshJobs])
+
+  /**
+   * 重跑未完成的步骤（补图 / 重渲）。审核成片时最常用的动作：
+   * 之前只能进「成片工作台」才找得到重试，现在成片卡片上直接给一个。
+   * 更细的粒度（单镜 / 单元素）仍在工作台里：run({segments|boards|elements})。
+   */
+  const retryProduction = useCallback((id: string) => {
+    void (async () => {
+      try {
+        // force：必须真跑。不加的话，"文案没改 + 成片还在"会命中宿主的短路，
+        // 直接回一句「沿用已生成结果」什么都不做——点重试等于没点 ✗
+        await runProduction(id, { force: true })
+        useApp.getState().setToast('已重跑未完成的步骤')
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e))
+      }
+      void refreshJobs()
+    })()
   }, [refreshJobs])
 
   async function submit(): Promise<boolean> {
@@ -461,7 +501,7 @@ export function SkillsPanel() {
           <label>本工程的成片</label>
           <div className="flex flex-col gap-1.5">
             {packProductions.slice(0, 10).map((p) => (
-              <ProductionCard key={p.id} p={p} onOpen={setOpenProduction} onRemove={removeProduction} />
+              <ProductionCard key={p.id} p={p} onOpen={setOpenProduction} onRemove={removeProduction} onRetry={retryProduction} />
             ))}
           </div>
         </div>

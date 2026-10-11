@@ -4,18 +4,20 @@
 **/dist-ssr/
 *.local
 
-# AI local data & generated media（仅提交开箱用的 ai-config）
+# AI local data & generated media（勿提交密钥与生成物）
 **/.data/
 !**/.data/
-!**/.data/ai-config.json
+!**/.data/ai-config.example.json
 **/public/ai-generated/
 !**/public/ai-generated/.gitkeep
 
-# Secrets（内嵌密匙 .env 私密仓例外，供换机开箱）
+# Secrets — 永不提交真 Key
 .env
 .env.*
 !.env.example
-!todo-editor/vendor/mishi/.env
+**/.env
+!**/.env.example
+**/ai-config.json
 
 # Python
 __pycache__/
@@ -38,6 +40,9 @@ Thumbs.db
 *.sln
 *.sw?
 
+# Bundled Python runtime（体积巨大，本地生成/安装，不进公开仓）
+**/runtime/python/
+
 # Electron release / installers
 **/todo-editor-release/
 **/release/
@@ -47,6 +52,25 @@ Thumbs.db
 *.AppImage
 C:/todo-editor-release/
 
-# Local export media
+# Local export / probe / demo dumps（体积大，不进公开仓）
 exports/
+_dsh_probe/
+demo30/
+output/
+acl-recovery/
+frames-inflation/
+huazi-fix/
+spongebob-check-artifacts/
+todo-intro/
+*.mp4
+rf-real-*.png
+electron-run.log.err
+
+# 扩展工作流里的大体量字体 / 参考 BGM（本机放置；代码与小资源可提交）
+**/examples/extensions/spongebob-koubo/workflow/**/*.ttf
+**/examples/extensions/spongebob-koubo/workflow/**/*.otf
+**/examples/extensions/spongebob-koubo/workflow/ref_bgm/**
+**/examples/extensions/spongebob-koubo/workflow/**/__pycache__/
+
+todo-editor/true
 
